@@ -32,6 +32,30 @@ class TestLoggingMode:
         assert capsys.readouterr().out == ""
 
 
+class TestPhpConfigParsing:
+    def test_commented_storage_examples_are_not_configuration(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.local.php"
+        config.write_text(
+            "<?php\n"
+            "// define('UPLOADS_PATH', 'D:/filehost-uploads');\n"
+            "// define('UPLOADS_PATH', '/mnt/storage/uploads');\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+
+        assert us._php_constant("UPLOADS_PATH") == ""
+
+    def test_active_php_constant_is_read(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.local.php"
+        config.write_text(
+            "<?php\n  define('UPLOADS_PATH', '/srv/tryhackx-files/uploads');\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+
+        assert us._php_constant("UPLOADS_PATH") == "/srv/tryhackx-files/uploads"
+
+
 class TestStorageManifest:
     def test_legacy_repair_resolves_database_name_not_first_entry(self, monkeypatch, tmp_path):
         uploads = tmp_path / "uploads"

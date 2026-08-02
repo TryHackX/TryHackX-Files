@@ -56,4 +56,19 @@ final class InstallerSecurityTest extends TestCase
 			$this->assertContains($extension, $blocked);
 		}
 	}
+
+	public function testFreshInstallRunsAndVerifiesTheCurrentMigrationChain(): void
+	{
+		$page = file_get_contents(dirname(__DIR__, 2) . '/public/install.php');
+		$this->assertIsString($page);
+		$start = strpos($page, 'function handleCreateTables(): never');
+		$end = strpos($page, 'function handleDefaultSettings(): never');
+		$this->assertNotFalse($start);
+		$this->assertNotFalse($end);
+		$handler = substr($page, $start, $end - $start);
+
+		$this->assertStringContainsString('Database::migrate();', $handler);
+		$this->assertStringContainsString('Database::CURRENT_SCHEMA_VERSION', $handler);
+		$this->assertStringContainsString("Database::getSetting('schema_ready', '0')", $handler);
+	}
 }

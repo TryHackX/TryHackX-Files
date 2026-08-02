@@ -6,6 +6,31 @@
  */
 final class SettingsRepositoryTest extends RepoTestCase
 {
+	public function testFallbackCacheDirectoryIsThePrivateProjectDataDirectory(): void
+	{
+		$repository = PROJECT_ROOT . '/src/includes/repositories/SettingsRepository.php';
+		$code = 'require ' . var_export($repository, true) . ';'
+			. '$method = new ReflectionMethod(SettingsRepository::class, "dataDirectory");'
+			. '$method->setAccessible(true);'
+			. 'echo $method->invoke(null);';
+		$process = proc_open([PHP_BINARY, '-r', $code], [
+			1 => ['pipe', 'w'],
+			2 => ['pipe', 'w'],
+		], $pipes, PROJECT_ROOT);
+		$this->assertIsResource($process);
+		$output = stream_get_contents($pipes[1]);
+		$error = stream_get_contents($pipes[2]);
+		fclose($pipes[1]);
+		fclose($pipes[2]);
+		$status = proc_close($process);
+
+		$this->assertSame(0, $status, $error ?: 'Fallback-directory subprocess failed.');
+		$this->assertSame(
+			str_replace('\\', '/', PROJECT_ROOT . '/data'),
+			str_replace('\\', '/', $output)
+		);
+	}
+
 	private function cachePath(): string
 	{
 		return DATA_DIR . DIRECTORY_SEPARATOR . 'settings.cache.json';

@@ -15,7 +15,12 @@ final class SettingsRepository
 
 	private static function dataDirectory(): string
 	{
-		return defined('DATA_DIR') ? DATA_DIR : __DIR__ . '/../../data';
+		// The production config normally defines DATA_DIR before this repository is loaded.
+		// The installer is deliberately self-contained, though, and writes default settings
+		// before config.local.php exists. From repositories/ the project root is three levels
+		// up; using ../../data accidentally targeted src/data and failed on a correctly
+		// read-only source tree under Debian.
+		return defined('DATA_DIR') ? DATA_DIR : dirname(__DIR__, 3) . '/data';
 	}
 
 	private static function cachePath(): string

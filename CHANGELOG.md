@@ -7,6 +7,18 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.5] - 2026-08-02
+
+### Fixed
+
+- Fixed the pre-configuration settings-cache fallback so the Debian installer writes to the
+  private project-level `data/` directory instead of attempting to create `src/data/` inside
+  the read-only source tree.
+- Fresh web installations now run and verify the complete schema migration chain before creating
+  the administrator, so Python and mail workers never start against the legacy baseline schema.
+- The Python configuration reader now ignores commented storage-path examples instead of treating
+  the Windows example as an active relative path on Linux.
+
 ## [2.76.4] - 2026-08-02
 
 ### Changed

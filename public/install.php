@@ -591,7 +591,19 @@ function handleCreateTables(): never
 		apiOut(false, ['error' => $result['error'] ?? 'The database tables could not be created.'], 500);
 	}
 
-	apiOut(true, ['message' => 'Tabele utworzone']);
+	// createTables() establishes the compatible legacy baseline. Every fresh deployment must
+	// then traverse the same audited migration chain as an upgrade; otherwise modern workers
+	// see schema_version=0 and correctly refuse to start.
+	Database::invalidateSettingsCache();
+	Database::migrate();
+	Database::invalidateSettingsCache();
+	$schemaVersion = (int) Database::getSetting('schema_version', 0);
+	$schemaReady = (string) Database::getSetting('schema_ready', '0');
+	if ($schemaVersion !== Database::CURRENT_SCHEMA_VERSION || $schemaReady !== '1') {
+		apiOut(false, ['error' => 'The database schema could not be migrated to the current version.'], 500);
+	}
+
+	apiOut(true, ['message' => 'Database schema created and migrated']);
 }
 
 function handleDefaultSettings(): never

@@ -59,7 +59,7 @@ APP_DIR = Path(__file__).parent.absolute()
 # config.local.php moved out of the web root into config/ (St1). The server stays in the
 # project root, so the config is one dir over.
 CONFIG_FILE = APP_DIR / "config" / "config.local.php"
-SERVER_VERSION = "2.76.4"
+SERVER_VERSION = "2.76.5"
 
 
 def _decode_php_single_quoted(value: str) -> str:
@@ -82,7 +82,7 @@ def _php_constant(name: str) -> str:
     try:
         if CONFIG_FILE.exists():
             match = re.search(
-                r"define\s*\(\s*['\"]" + re.escape(name)
+                r"(?m)^[ \t]*define\s*\(\s*['\"]" + re.escape(name)
                 + r"['\"]\s*,\s*'((?:\\.|[^'\\])*)'\s*\)",
                 CONFIG_FILE.read_text(encoding="utf-8", errors="replace"),
             )
