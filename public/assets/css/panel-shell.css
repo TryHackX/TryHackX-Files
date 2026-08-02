@@ -1,0 +1,1216 @@
+/* Command palette (Faza 2.3). */
+.cmd-palette {
+    width: 100%;
+    max-width: 560px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: modalSlideIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cmd-input {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 1rem;
+    padding: 16px 18px;
+    outline: none;
+}
+
+.cmd-results {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.cmd-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.cmd-item .cmd-ico {
+    width: 22px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.cmd-item.active,
+.cmd-item:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.cmd-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.cmd-hint {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.cmd-hint kbd,
+.shortcuts-table kbd {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: inherit;
+    font-size: 0.72rem;
+}
+
+.shortcuts-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.shortcuts-table td {
+    padding: 8px 6px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.88rem;
+}
+
+.shortcuts-table td:first-child {
+    white-space: nowrap;
+    width: 46%;
+}
+
+/* Pulsing "live" indicator (active downloads header). */
+.live-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    margin-left: 6px;
+    vertical-align: middle;
+    animation: livePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes livePulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+    50% { opacity: 0.6; box-shadow: 0 0 0 5px rgba(34, 197, 94, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .live-dot { animation: none; }
+}
+
+@media (max-width: 768px) {
+
+    th,
+    td {
+        padding: 10px 8px;
+        font-size: 0.8rem;
+    }
+
+    .file-info strong {
+        max-width: 120px;
+    }
+
+    .tabs {
+        overflow-x: auto;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+/* User Dropdown */
+.user-dropdown {
+    position: relative;
+}
+
+.user-info {
+    cursor: pointer;
+    transition: 0.2s;
+    padding-right: 16px;
+    position: relative;
+}
+
+.user-info:hover {
+    background: var(--bg-card);
+    border-color: var(--accent);
+}
+
+.user-info::after {
+    content: '';
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 4px solid transparent;
+    border-top-color: var(--text-muted);
+}
+
+.dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 180px;
+    display: none;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+}
+
+.dropdown-menu.show {
+    display: block;
+    animation: fadeIn 0.15s ease;
+}
+
+.dropdown-menu a {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 8px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: 0.2s;
+}
+
+.dropdown-menu a:hover {
+    background: var(--bg-secondary);
+}
+
+.dropdown-menu a.danger {
+    color: var(--danger);
+}
+
+.dropdown-menu a.danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* === Header Fixes & Unification === */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: var(--text);
+}
+
+.logo-icon {
+    width: 42px;
+    height: 42px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.logo-icon svg {
+    width: 22px;
+    height: 22px;
+    color: white;
+}
+
+.logo-text {
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+
+/* Theme Toggle Consistency */
+.sun,
+.moon {
+    display: block;
+}
+
+.light .sun {
+    display: none;
+}
+
+.light .moon {
+    display: block;
+}
+
+.moon {
+    display: none;
+}
+
+/* === Auth Modal Styles (Unified) === */
+.auth-modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	backdrop-filter: blur(12px) saturate(120%);
+	-webkit-backdrop-filter: blur(12px) saturate(120%);
+	display: none;
+	/* Matches .modal-bg: raised toward the top on desktop, centred on mobile (below),
+	   and scrollable so a tall box never gets clipped. */
+	align-items: flex-start;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 6vh 16px 24px;
+	z-index: 1001;
+}
+
+.auth-modal.show {
+    display: flex;
+}
+
+.auth-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 100%;
+    max-width: 420px;
+    position: relative;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.auth-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.auth-close:hover {
+    background: var(--border);
+    color: var(--text);
+}
+
+.auth-box h3 {
+    margin-bottom: 8px;
+    font-size: 1.3rem;
+    text-align: center;
+}
+
+.auth-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-hover);
+    border-radius: 12px;
+    margin-bottom: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-user-icon {
+    width: 48px;
+    height: 48px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.auth-user-info {
+    flex: 1;
+}
+
+.auth-user-name {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 2px;
+}
+
+.auth-user-role {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.auth-links {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.auth-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.auth-link:hover {
+    border-color: var(--accent);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.auth-link svg {
+    width: 18px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+
+.auth-link.danger:hover {
+    border-color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+}
+
+.auth-link.danger:hover svg {
+    color: var(--danger);
+}
+
+#authGuest p {
+    margin-bottom: 1vh;
+}
+
+.session-info {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 8px;
+}
+
+.session-info span {
+    color: var(--accent);
+}
+
+/* Blocky User Stats */
+.user-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+    width: 100%;
+}
+
+.user-stat-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 8px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: all 0.2s;
+}
+
+.user-stat-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.user-stat-card strong {
+    font-size: 1.1rem;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 4px;
+}
+
+.user-stat-card span {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Fix for white icons */
+.btn-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary) !important;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    padding: 0;
+}
+
+.btn-icon:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-card) !important;
+}
+
+.btn-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* User Stats in Modal */
+.user-stats-grid {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+    margin-bottom: 24px;
+    justify-content: space-around;
+}
+
+.user-stat-card {
+    background: var(--bg-hover);
+    padding: 12px;
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid var(--border);
+    width: 100%;
+}
+
+.user-stat-card span {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.user-stat-card strong {
+    display: block;
+    font-size: 1.1rem;
+    color: var(--accent);
+}
+
+/* Auth Modal Fixes */
+.auth-box {
+    max-width: 480px;
+    width: 100%;
+}
+
+/* Report Details Modal Styling (pt 8).
+   Three bands: what was reported (subject card), what the claim is, and who/where from. The
+   grid is now a real two-column meta grid rather than one column of stacked pairs. */
+.report-details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px 24px;
+}
+
+.report-id {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 4px;
+}
+
+/* The reported file itself, styled like the file cells in the tables so it reads as the
+   same object the moderator saw in the list. */
+.report-subject {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 18px;
+}
+
+.report-subject-icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: rgba(139, 92, 246, 0.12);
+    color: var(--accent);
+    font-size: 1.1rem;
+}
+
+.report-subject.is-gone .report-subject-icon {
+    background: rgba(239, 68, 68, 0.12);
+    color: var(--danger);
+}
+
+.report-subject-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.report-subject-body strong {
+    display: block;
+    font-size: 0.98rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.report-subject-body code {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.report-subject-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 4px;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* The accusation — the one thing a moderator reads first, so it gets the accent rule. */
+.report-claim {
+    border-left: 3px solid var(--accent);
+    padding: 2px 0 2px 14px;
+    margin-bottom: 18px;
+}
+
+.report-claim p {
+    margin: 6px 0 0;
+    font-size: 1rem;
+    color: var(--text);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.report-claim .detail-link {
+    display: inline-block;
+    margin-top: 8px;
+    font-size: 0.85rem;
+}
+
+.report-block {
+    margin-bottom: 18px;
+}
+
+.report-block pre {
+    background: var(--bg-secondary);
+    padding: 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: inherit;
+    font-size: 0.9rem;
+    margin: 6px 0 0;
+    color: var(--text-secondary);
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.report-section {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    margin-top: 16px;
+}
+
+.report-section h4 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.report-section h4 i {
+    color: var(--text-muted);
+}
+
+.detail-group.detail-wide {
+    grid-column: 1 / -1;
+}
+
+/* Four actions need to be able to wrap on a narrow window rather than overflow. */
+.report-actions {
+    flex-wrap: wrap;
+}
+
+.detail-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.detail-value {
+    font-size: 0.95rem;
+    color: var(--text);
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.detail-value.highlight {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* D1: the reported-file link in Moderate is the only bare <a> in the panel, so it used to
+   fall back to the UA stylesheet (blue → purple once visited). It now carries .file-link and
+   simply reads as text, picking up the accent only on hover.
+   NB: do NOT reintroduce a global `a:visited` rule — its specificity (0,1,1) beats
+   single-class rules like .action-btn (0,1,0) and would recolour every icon button. */
+.file-link,
+.file-link:visited {
+    color: inherit;
+    text-decoration: none;
+}
+
+.file-link:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+/* Icon buttons are never "links" visually — pin their visited state to the normal colour. */
+.action-btn:visited {
+    color: var(--text-secondary);
+}
+
+.detail-link,
+.detail-link:visited {
+    color: var(--accent);
+    text-decoration: none;
+    word-break: break-all;
+}
+
+.detail-link:hover {
+    text-decoration: underline;
+}
+
+.detail-sub {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.pwd-meter {
+    height: 4px;
+    background: var(--border);
+    margin-top: 8px;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.pwd-meter-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--danger);
+    transition: width 0.3s ease, background 0.3s ease;
+}
+
+.pwd-reqs {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pwd-reqs li {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 0.3s;
+}
+
+.pwd-reqs li.valid {
+    color: var(--success);
+}
+
+.pwd-reqs li::before {
+    content: '\2022';
+}
+
+.pwd-reqs li.valid::before {
+    content: '\2713';
+}
+
+/* Field Status Messages */
+.field-status {
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-top: 6px;
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.field-status.show {
+    max-height: 30px;
+    opacity: 1;
+    margin-top: 8px;
+}
+
+.field-status.status-ok {
+    color: var(--success);
+}
+
+.field-status.status-bad {
+    color: var(--danger);
+}
+
+.field-status.status-load {
+    color: var(--accent);
+}
+/* Auth Modal & Styles */
+.auth-modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	backdrop-filter: blur(12px) saturate(120%);
+	-webkit-backdrop-filter: blur(12px) saturate(120%);
+	display: none;
+	/* Matches .modal-bg: raised toward the top on desktop, centred on mobile (below),
+	   and scrollable so a tall box never gets clipped. */
+	align-items: flex-start;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 6vh 16px 24px;
+	z-index: 1001;
+}
+
+.auth-modal.show {
+	display: flex;
+}
+
+.auth-box {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 32px;
+	width: 100%;
+	max-width: 480px;
+	position: relative;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+
+.auth-close {
+	position: absolute;
+	top: 16px;
+	right: 16px;
+	width: 32px;
+	height: 32px;
+	border: none;
+	background: var(--bg-secondary);
+	border-radius: 8px;
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.auth-close:hover {
+	background: var(--border);
+	color: var(--text);
+}
+
+.auth-box h3 {
+	margin-bottom: 8px;
+	font-size: 1.3rem;
+	text-align: center;
+}
+
+.auth-box>p {
+	color: var(--text-secondary);
+	margin-bottom: 24px;
+	font-size: 0.9rem;
+	text-align: center;
+}
+
+.auth-tabs {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 24px;
+}
+
+.auth-tab {
+	flex: 1;
+	padding: 12px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	border-radius: 10px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	font-size: 0.9rem;
+	font-weight: 500;
+	transition: all 0.2s;
+}
+
+.auth-tab.active {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: white;
+}
+
+.auth-tab:hover:not(.active) {
+	border-color: var(--text-muted);
+}
+
+.auth-form {
+	display: none;
+}
+
+.auth-form.active {
+	display: block;
+}
+
+.auth-input {
+	width: 100%;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	border-radius: 10px;
+	color: var(--text);
+	font-size: 0.95rem;
+	transition: border-color 0.2s, box-shadow 0.2s;
+	outline: none;
+}
+
+.auth-input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.auth-input::placeholder {
+	color: var(--text-muted);
+}
+
+.auth-submit {
+	width: 100%;
+	padding: 14px;
+	border: none;
+	background: var(--accent);
+	color: white;
+	border-radius: 10px;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	margin-top: 8px;
+}
+
+.auth-submit:hover:not(:disabled) {
+	background: var(--accent-hover);
+}
+
+.auth-submit:active:not(:disabled) {
+	transform: scale(0.98);
+}
+
+.auth-submit:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.auth-user {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px;
+	background: var(--bg-hover);
+	border-radius: 12px;
+	margin-bottom: 20px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-user-icon {
+	width: 48px;
+	height: 48px;
+	background: var(--accent);
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: white;
+	font-weight: 700;
+	font-size: 1.2rem;
+}
+
+.auth-user-info {
+	flex: 1;
+}
+
+.auth-user-name {
+	font-weight: 600;
+	font-size: 1rem;
+	margin-bottom: 2px;
+}
+
+.auth-user-role {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.auth-links {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.auth-link {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 16px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	color: var(--text);
+	text-decoration: none;
+	transition: all 0.2s;
+	cursor: pointer;
+}
+
+.auth-link:hover {
+	border-color: var(--accent);
+	background: rgba(99, 102, 241, 0.1);
+}
+
+.auth-link svg {
+	width: 18px;
+	height: 18px;
+	color: var(--text-secondary);
+}
+
+.auth-link.danger:hover {
+	border-color: var(--danger);
+	background: rgba(239, 68, 68, 0.1);
+}
+
+.auth-link.danger:hover svg {
+	color: var(--danger);
+}
+
+#authGuest p {
+	margin-bottom: 1vh
+}
+
+#authGuest,
+#authUser {
+	transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#authGuest.fade-out {
+	opacity: 0;
+	transform: translateY(-10px);
+	pointer-events: none;
+}
+
+#authUser.fade-in {
+	animation: slideUp 0.4s ease;
+}
+
+@keyframes slideUp {
+	from {
+		opacity: 0;
+		transform: translateY(15px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+/* User Stats */
+.user-stats-grid {
+	display: flex;
+	gap: 12px;
+	margin-top: 16px;
+	margin-bottom: 24px;
+	justify-content: space-around;
+}
+
+.user-stat-card {
+	background: var(--bg-hover);
+	padding: 12px;
+	border-radius: 12px;
+	text-align: center;
+	border: 1px solid var(--border);
+	width: 100%;
+}
+
+.user-stat-card span {
+	display: block;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.user-stat-card strong {
+	display: block;
+	font-size: 1.1rem;
+	color: var(--accent);
+}
+
+
+/* ---- Toast / notification ---- */
+.modern-notification {
+	position: fixed;
+	bottom: 30px;
+	left: 50%;
+	transform: translateX(-50%) translateY(20px);
+	background: rgba(20, 20, 25, 0.95);
+	color: #fff;
+	padding: 12px 24px;
+	border-radius: 12px;
+	backdrop-filter: blur(10px);
+	box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	font-weight: 500;
+	opacity: 0;
+	visibility: hidden;
+	transition: opacity 0.2s, transform 0.2s, visibility 0.2s;
+	z-index: 99999;
+	pointer-events: none;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	min-width: 300px;
+	justify-content: flex-start;
+}
+
+.modern-notification.show {
+	opacity: 1;
+	visibility: visible;
+	transform: translateX(-50%) translateY(0);
+}
+
+.modern-notification-icon {
+	font-size: 1.4em;
+}
+
+.modern-notification.floating-mode {
+	position: fixed;
+	top: 0;
+	left: 0;
+	transform: none;
+	min-width: auto;
+	bottom: auto;
+	margin: 0;
+	padding: 8px 16px;
+	font-size: 0.9rem;
+}
+
+/* Keep the anchored tooltip put — the centered-toast transform must not apply here.
+   The transition is narrowed to opacity on purpose: the base rule animates `transform`, and
+   an anchored tip switching from `translateX(-50%) translateY(20px)` to `none` left a
+   transition running that could sit unfinished, so the computed transform stayed at the
+   slide-in offset and the tip rendered ~12px low, overlapping the control it points at.
+   A tooltip appearing at a fixed anchor should not slide anyway. */
+.modern-notification.floating-mode,
+.modern-notification.floating-mode.show {
+	transform: none;
+	transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+/* pt 3: the close button is a `.btn-icon`, and that rule paints hover with `var(--bg-card)`
+   — which is the modal's own background, so hovering made the button disappear into the panel
+   instead of lighting up. Both declarations carry `!important` because the `.btn-icon`
+   background does; the hover tint is mixed from `--text` so one rule reads correctly in the
+   light theme and the dark one. */
+.modal-close {
+	width: 28px;
+	height: 28px;
+	border: none;
+	border-radius: 8px;
+	background: transparent !important;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.modal-close:hover,
+.modal-close:focus-visible {
+	background: color-mix(in srgb, var(--text) 10%, transparent) !important;
+	color: var(--text);
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+

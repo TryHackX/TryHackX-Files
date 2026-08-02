@@ -1,0 +1,110 @@
+# --- TryHackX Files .gitignore ---
+
+# Private local configuration (contains database credentials)
+/config/config.local.php
+/config.local.php
+/config/.config.local.*.staged
+
+# Local environment and Docker Compose secrets
+/.env
+/.env.*
+!/.env.example
+/scripts/filehost-env.bat
+/docker-compose.override.yml
+/docker-compose.override.yaml
+
+# Composer credentials and local executables
+/auth.json
+/composer.phar
+
+# Private runtime state, generated media, caches and encryption-key fallback
+/data/*
+!/data/.htaccess
+!/data/index.php
+# Obsolete pre-DATA_DIR cache location; never publish a resurrected runtime copy.
+/src/data/
+
+# User uploads
+/uploads/*
+!/uploads/.htaccess
+!/uploads/index.php
+
+# Python environments and bytecode
+/venv/
+/venv-*/
+__pycache__/
+*.py[cod]
+*.egg-info/
+/.mypy_cache/
+/.hypothesis/
+/.pytype/
+/.tox/
+/.nox/
+/build/
+/dist/
+
+# Dependencies and analysis cache
+/node_modules/
+/vendor/
+/data/phpstan-cache/
+
+# Reproducible test tools and artifacts
+/tools/phpunit.phar
+/tests/php/.tmp-data*/
+/tests/php/.tmp-uploads*/
+/tests/php/.tmp-data-http/
+/tests/php/.tmp-uploads-http/
+/tests/php/.phpunit.cache/
+/.pytest_cache/
+/.ruff_cache/
+/.phpunit.result.cache
+/.php-cs-fixer.cache
+
+# Coverage reports
+/.coverage
+/.coverage.*
+/coverage/
+/coverage.xml
+/clover.xml
+/htmlcov/
+
+# Database dumps and local backups
+/backups/
+*.sql
+*.sql.gz
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs
+*.log
+*.pid
+
+# Private keys and local certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.csr
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+.fleet/
+*.code-workspace
+*.swp
+*.swo
+*.bak
+*.bak-*
+*.tmp
+*.temp
+*.orig
+*.rej
+*~
+.#*

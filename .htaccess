@@ -1,0 +1,32 @@
+# The app is served from public/ (via the pon.localhost vhost — that vhost's DocumentRoot is
+# public/, so Apache does NOT apply this file to it). This project root also sits under the
+# default localhost docroot (www/), so here we block everything EXCEPT public/, keeping src/,
+# config/ (config.local.php), data/, uploads/ and the Python server unreachable at
+# http://localhost/pon/*. The app therefore stays reachable at http://localhost/pon/public/
+# during the transition, and at http://pon.localhost/ once the vhost + hosts entry are active.
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(src|config|data|uploads|scripts|venv|docs|__pycache__)/ - [F,L]
+</IfModule>
+
+<FilesMatch "\.(py|pyc|md|lock|service|bat)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<Files "config.local.php">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order Allow,Deny
+        Deny from all
+    </IfModule>
+</Files>

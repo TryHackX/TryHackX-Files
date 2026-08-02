@@ -1,0 +1,468 @@
+/* ------------------------------------------------------------------ *
+ * Advertising (Faza 8): manager tab, zone grid, queue, packages, my ads
+ * ------------------------------------------------------------------ */
+.tab-badge {
+	display: inline-block;
+	min-width: 18px;
+	padding: 1px 5px;
+	border-radius: 9px;
+	background: var(--danger);
+	color: #fff;
+	font-size: 0.7rem;
+	font-weight: 700;
+	text-align: center;
+	vertical-align: middle;
+}
+
+.radio-row { display: flex; gap: 18px; flex-wrap: wrap; }
+
+.ad-form-preview { margin-top: 8px; }
+.ad-form-preview img {
+	max-width: 100%;
+	max-height: 120px;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+}
+
+.admin-ad-title {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 150px;
+}
+
+.admin-ad-thumb {
+	display: inline-flex;
+	flex: 0 0 68px;
+	width: 68px;
+	height: 42px;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	border: 1px solid var(--border);
+	border-radius: 7px;
+	background: var(--bg-secondary);
+	color: var(--text-muted);
+}
+
+.admin-ad-thumb img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.admin-ad-thumb--empty {
+	opacity: .65;
+}
+
+/* Zone grid: one mock per public page, zones stacked the way the page stacks them. */
+.zones-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+	gap: 16px;
+}
+.zone-page {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 14px;
+}
+.zone-page h4 { margin: 0 0 12px; color: var(--text-secondary); font-size: 0.9rem; }
+.zone-page-mock { display: flex; flex-direction: column; gap: 10px; }
+.zone-card {
+	border: 1px dashed var(--border);
+	border-radius: 10px;
+	padding: 10px;
+	background: var(--bg-secondary);
+}
+.zone-card-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+}
+.zone-card-label {
+	font-size: 0.78rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+.zone-card-ads { display: flex; flex-wrap: wrap; gap: 6px; }
+.zone-empty { color: var(--text-muted); font-size: 0.82rem; }
+.zone-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: var(--bg-card);
+	color: var(--text);
+	font-size: 0.8rem;
+	cursor: pointer;
+}
+.zone-chip:hover { border-color: var(--accent); }
+.zone-chip--paused { opacity: 0.55; }
+.zone-chip--pending { border-style: dashed; }
+/* Queue preview switcher (runda 8): the chip whose creative the card is showing. */
+.zone-chip--active { border-color: var(--accent); color: var(--accent); }
+.zone-chip:disabled { cursor: default; }
+
+.zone-assign-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+.zone-assign-header { align-items: flex-start; }
+.zone-assign-heading { min-width: 0; display: grid; gap: 7px; }
+.zone-assign-heading h3 { margin: 0; }
+.zone-assign-label { display: inline-flex; align-items: center; align-self: start; width: fit-content; max-width: 100%;
+	padding: 5px 9px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 13%, transparent);
+	color: var(--accent); font-size: .82rem; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.zone-assign-row {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+}
+
+/* Approval queue cards (restyled runda 6: actions centred and equal-width, preview
+   fixed-size, meta on a consistent rhythm). */
+.ads-queue-card {
+	display: flex;
+	gap: 18px;
+	align-items: center;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 16px 18px;
+	margin-bottom: 12px;
+	flex-wrap: wrap;
+}
+.ads-queue-preview {
+	flex: 0 0 160px;
+	height: 96px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	overflow: hidden;
+}
+.ads-queue-preview img { width: 100%; height: 100%; object-fit: cover; }
+.ads-queue-meta { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 5px; font-size: 0.88rem; }
+.ads-queue-meta > strong { font-size: 1rem; }
+.ads-queue-meta a { color: var(--accent); word-break: break-all; }
+.ads-queue-meta small { margin-top: 3px; }
+.ads-queue-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-self: center;
+	min-width: 150px;
+}
+.ads-queue-actions .btn { width: 100%; justify-content: center; }
+
+/* Buyer: package cards + own ads */
+.myads-packages {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	gap: 14px;
+}
+.myads-package {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 14px;
+}
+.myads-package p { margin: 0; color: var(--text-secondary); font-size: 0.85rem; }
+.myads-package-zone { color: var(--text-muted); font-size: 0.82rem; }
+.myads-package-foot {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-top: auto;
+	padding-top: 6px;
+}
+
+.myad-row {
+	display: flex;
+	gap: 14px;
+	align-items: center;
+	flex-wrap: wrap;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-secondary);
+	padding: 12px 14px;
+	margin-bottom: 10px;
+}
+.myad-thumb {
+	flex: 0 0 90px;
+	height: 56px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	overflow: hidden;
+	color: var(--text-muted);
+}
+.myad-thumb img { max-width: 90px; max-height: 56px; object-fit: contain; }
+.myad-meta { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 3px; font-size: 0.88rem; }
+.myad-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.myad-metrics { flex-basis: 100%; }
+.myad-metrics-tiles {
+	display: flex;
+	gap: 18px;
+	flex-wrap: wrap;
+	margin: 8px 0;
+	color: var(--text-secondary);
+	font-size: 0.85rem;
+}
+
+/* Faza 8 runda 2: a zone the operator switched off, drawn but visibly inert. */
+.zone-card--off { opacity: 0.55; }
+.zone-card--off .zone-card-label { text-decoration: line-through; }
+.myads-contact .md-body { color: var(--text-secondary); }
+
+/* Faza 8 runda 4: banner dropzone + crop stage + add-on rows */
+.ad-dropzone {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	padding: 22px 16px;
+	border: 2px dashed var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-secondary);
+	color: var(--text-secondary);
+	cursor: pointer;
+	text-align: center;
+	transition: border-color 0.15s, background 0.15s;
+}
+.ad-dropzone i { font-size: 1.5rem; color: var(--accent); }
+.ad-dropzone:hover, .ad-dropzone.is-over { border-color: var(--accent); background: var(--bg-hover); }
+.ad-dropzone.has-file { padding: 10px 16px; }
+.ad-dropzone small { color: var(--text-muted); }
+
+.ad-cropper { margin-top: 10px; }
+.ad-cropper-frame {
+	position: relative;
+	overflow: hidden;
+	width: 100%;
+	max-width: 420px;
+	margin: 0;
+	padding: 0;
+	text-align: left;
+	touch-action: none;
+	user-select: none;
+}
+.ad-cropper-frame img {
+	position: absolute;
+	top: 0;
+	left: 0;
+	max-width: none;
+	cursor: grab;
+	will-change: transform;
+}
+.ad-cropper-frame img:active { cursor: grabbing; }
+.ad-cropper-controls {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 8px;
+	color: var(--text-muted);
+}
+.ad-cropper-controls input[type="range"] { flex: 1; max-width: 200px; }
+.ad-cropper-hint { display: block; margin-top: 4px; color: var(--text-muted); }
+
+.myad-addons { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.myad-addon-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+}
+.myad-addon-row .form-check { flex: 1; min-width: 200px; margin: 0; }
+.myad-addon-price { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+.myad-addon-file { display: flex; align-items: center; gap: 8px; flex-basis: 100%; }
+.myad-total {
+	margin-top: 10px;
+	font-weight: 700;
+	text-align: right;
+	color: var(--text);
+}
+
+.ads-zone-config { display: flex; flex-direction: column; gap: 6px; }
+.ads-zone-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+.ads-zone-dims { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 0.85rem; }
+.ads-zone-dims input { width: 74px; }
+
+/* Collection settings: the member list (runda 9) — reorder + take-out rows. */
+.cs-files-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 8px;
+	max-height: 260px;
+	overflow-y: auto;
+}
+.cs-file-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+	font-size: 0.88rem;
+}
+.cs-file-pos { color: var(--text-muted); min-width: 22px; text-align: right; }
+.cs-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cs-file-actions { display: flex; gap: 4px; }
+.cs-file-actions .action-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Faza 8 runda 5: crop modal (avatar-style), dropzone thumb state, zone settings polish */
+.ad-crop-modal { z-index: 1200; } /* above the ad form modals it is opened from */
+.ad-crop-stage { display: flex; justify-content: center; }
+.ad-crop-frame {
+	position: relative;
+	overflow: hidden;
+	width: 100%;
+	max-width: 520px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+	touch-action: none;
+	user-select: none;
+	cursor: grab;
+}
+.ad-crop-frame:active { cursor: grabbing; }
+.ad-crop-frame img {
+	position: absolute;
+	top: 0;
+	left: 0;
+	max-width: none;
+	pointer-events: none;
+	will-change: transform;
+}
+/* Rule-of-thirds overlay, like every avatar cropper. */
+.ad-crop-grid { position: absolute; inset: 0; pointer-events: none; }
+.ad-crop-grid i { position: absolute; background: rgba(255, 255, 255, 0.28); }
+.ad-crop-grid i:nth-child(1) { left: 33.33%; top: 0; bottom: 0; width: 1px; }
+.ad-crop-grid i:nth-child(2) { left: 66.66%; top: 0; bottom: 0; width: 1px; }
+.ad-crop-grid i:nth-child(3) { top: 33.33%; left: 0; right: 0; height: 1px; }
+.ad-crop-grid i:nth-child(4) { top: 66.66%; left: 0; right: 0; height: 1px; }
+.ad-crop-hintbar {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	padding: 6px 10px;
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	font-size: 0.8rem;
+	text-align: center;
+	pointer-events: none;
+}
+
+.ad-dropzone-idle { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+/* Wrap-safe: on a narrow modal the action buttons drop under the thumbnail instead of
+   escaping past the dashed border (runda 7). */
+.ad-dropzone-done { display: flex; align-items: center; gap: 10px 14px; width: 100%; flex-wrap: wrap; justify-content: center; }
+.ad-dropzone-done img {
+	max-height: 64px;
+	max-width: 100%;
+	border-radius: 6px;
+	border: 1px solid var(--border);
+}
+.ad-dropzone-done-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: center; }
+
+/* Aktywne strefy: card rows with the dims group pinned right, inputs that look editable. */
+.ads-zone-config { gap: 8px; }
+.ads-zone-row {
+	justify-content: space-between;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+}
+.ads-zone-row .perm-item { background: transparent; border: 0; padding: 0; margin: 0; }
+.ads-zone-dims input {
+	width: 70px;
+	padding: 6px 8px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	color: var(--text);
+	text-align: center;
+}
+.ads-zone-dims input::placeholder { color: var(--text-muted); opacity: 0.7; }
+.ads-zone-dims input:focus { border-color: var(--accent); outline: none; }
+
+/* A disabled surcharge input must LOOK disabled (runda 5, pt 1). */
+.myad-addon-row input:disabled { opacity: 0.45; cursor: not-allowed; }
+.resend-activation-container {
+	margin-top: 16px;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	text-align: center;
+	width: 100%;
+}
+
+.btn-resend {
+	background: transparent;
+	border: 1px solid #32323b;
+	color: var(--text);
+	padding: 8px 16px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: all 0.2s;
+	font-size: 0.9rem;
+	width: 75%;
+	justify-content: center;
+	margin: 0 auto;
+	display: inline-flex;
+}
+
+.btn-resend:hover {
+	background: rgba(255, 255, 255, 0.05);
+	border-color: var(--text-muted, #666);
+}
+
+.resend-confirm-prompt {
+	margin-bottom: 8px;
+	font-size: 0.9em;
+	color: var(--text-secondary);
+}
+
+.resend-confirm-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: center;
+}
+
+.resend-status {
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.resend-status.success {
+	color: var(--success);
+}

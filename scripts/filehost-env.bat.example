@@ -1,0 +1,4 @@
+@echo off
+rem Copy this file to scripts\filehost-env.bat. Both Windows launchers load it.
+rem 1 suppresses routine access/batch output while warnings and errors remain visible.
+set "FILEHOST_MINIMAL_LOGS=1"

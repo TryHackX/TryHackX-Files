@@ -1,0 +1,544 @@
+/* Premium plans admin (pt 9) */
+.prem-sample {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 14px;
+	font-size: 0.82rem;
+	line-height: 1.6;
+	overflow-x: auto;
+	margin: 0 0 10px;
+	color: var(--text-secondary);
+}
+
+.prem-token {
+	background: rgba(34, 197, 94, 0.08);
+	border: 1px solid rgba(34, 197, 94, 0.35);
+	border-radius: 10px;
+	padding: 12px 14px;
+	margin-bottom: 14px;
+}
+
+.prem-token strong {
+	display: block;
+	color: var(--success);
+	font-size: 0.88rem;
+	margin-bottom: 6px;
+}
+
+.prem-token-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.prem-token code {
+	flex: 1;
+	min-width: 0;
+	font-size: 0.85rem;
+	overflow-wrap: anywhere;
+	user-select: all;
+}
+
+/* The one thing an operator has to know before pasting a provider's snippet. */
+.prem-csp-note {
+	background: rgba(245, 158, 11, 0.08);
+	border: 1px solid rgba(245, 158, 11, 0.35);
+	border-radius: 10px;
+	padding: 12px 14px;
+	font-size: 0.86rem;
+	line-height: 1.6;
+	color: var(--text-secondary);
+	margin: 0 0 14px;
+}
+
+.prem-csp-note i {
+	color: var(--warning);
+	margin-right: 6px;
+}
+
+/* Payment plugin catalogue (pkt 5) */
+.plugin-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 12px;
+}
+
+.plugin-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	padding: 16px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	color: var(--text);
+	text-align: left;
+	cursor: pointer;
+	transition: border-color .15s, transform .15s;
+}
+
+.plugin-card:hover {
+	border-color: var(--accent);
+	transform: translateY(-1px);
+}
+
+.plugin-card-top {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+	width: 100%;
+	min-width: 0;
+	margin-bottom: 6px;
+}
+
+.plugin-card-top > i:first-child {
+	font-size: 1.4rem;
+	color: var(--accent);
+	flex: 0 0 auto;
+	margin-top: 2px;
+}
+
+.plugin-name {
+	font-weight: 600;
+	font-size: 0.95rem;
+}
+
+.plugin-methods {
+	font-size: 0.78rem;
+	color: var(--text-muted);
+	line-height: 1.5;
+}
+
+.plugin-state {
+	margin-top: 8px;
+	font-size: 0.76rem;
+	color: var(--text-muted);
+}
+
+.plugin-state.ok { color: var(--success); }
+.plugin-state.info { color: var(--accent); }
+
+.plugin-flags {
+	display: flex;
+	flex: 1 1 auto;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 4px;
+	min-width: 0;
+}
+
+/* Compact provider traits; the flex wrapper keeps multiple traits from occupying the same spot. */
+.plugin-flag {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	max-width: 100%;
+	font-size: 0.68rem;
+	font-weight: 600;
+	letter-spacing: .3px;
+	line-height: 1.25;
+	color: var(--warning);
+	background: rgba(245, 158, 11, 0.12);
+	border-radius: 999px;
+	padding: 3px 8px;
+	white-space: normal;
+	text-align: right;
+}
+
+.plugin-notes {
+	font-size: 0.88rem;
+	line-height: 1.65;
+	color: var(--text-secondary);
+}
+
+/* A button whose preconditions are not met yet. Not [disabled], because the counter in its
+   own label is what explains the state and a disabled control drops out of the tab order for
+   no gain. The cursor carries the message the removed tooltip used to (pt 9). */
+.btn.is-inactive {
+	opacity: .5;
+	cursor: not-allowed;
+}
+
+.btn.is-inactive:hover {
+	opacity: .55;
+	border-color: var(--border);
+}
+
+.premium-order-cell {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.premium-order-cell code {
+	min-width: 0;
+	font-size: .78rem;
+	overflow-wrap: anywhere;
+}
+
+.premium-order-actions {
+	display: inline-flex;
+	flex: 0 0 auto;
+	gap: 5px;
+}
+
+/* pt 7: "Utwórz kolekcję" slides out of the right edge of the toolbar once two files are
+   picked, instead of sitting there permanently taking width from the search box.
+   `.filters` is a flex row with `.search { flex: 1 }`, so collapsing this button to zero width
+   hands that space straight back to the search field — the two move as one gesture rather than
+   one appearing and the other jumping. Width, padding, border and margin all animate together;
+   animating only `max-width` leaves the padding popping in at frame one.
+   `overflow: hidden` is what makes a zero max-width actually clip the label. */
+.btn.collect-slide {
+	max-width: 0;
+	padding-left: 0;
+	padding-right: 0;
+	margin-left: 0;
+	border-left-width: 0;
+	border-right-width: 0;
+	opacity: 0;
+	transform: translateX(10px);
+	overflow: hidden;
+	white-space: nowrap;
+	pointer-events: none;
+	transition:
+		max-width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+		padding 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+		margin 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+		border-width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+		opacity 0.2s ease;
+}
+
+.btn.collect-slide.is-shown {
+	max-width: 340px;
+	padding-left: 20px;
+	padding-right: 20px;
+	border-left-width: 1px;
+	border-right-width: 1px;
+	opacity: 1;
+	transform: none;
+	pointer-events: auto;
+}
+
+/* The count rides in its own pill so the label does not reflow every time it changes. */
+.collect-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 22px;
+	height: 20px;
+	padding: 0 6px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.22);
+	font-size: 0.78rem;
+	font-weight: 600;
+}
+
+/* pt 5: the collection picker in the "add to collection" modal. A list of buttons rather than
+   a <select>: each row carries a member count and a padlock, which a native option cannot, and
+   the target of a one-click action should be one click away. */
+.atc-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	max-height: 260px;
+	overflow-y: auto;
+	margin-top: 4px;
+}
+
+.atc-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	width: 100%;
+	padding: 10px 14px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+	color: var(--text);
+	font-size: 0.9rem;
+	font-family: inherit;
+	text-align: left;
+	cursor: pointer;
+	transition: border-color 0.15s, background-color 0.15s;
+}
+
+.atc-item:hover { border-color: var(--accent); }
+
+.atc-item.is-picked {
+	border-color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
+}
+
+.atc-item-name {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.atc-item-name > i:first-child { color: var(--accent); }
+.atc-item-lock { color: var(--text-muted); font-size: 0.8rem; }
+
+.atc-item-meta {
+	flex-shrink: 0;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.atc-empty {
+	padding: 18px 4px;
+	color: var(--text-muted);
+	font-size: 0.9rem;
+	line-height: 1.6;
+}
+
+/* pt 1 (this round): the focus ring.
+   Closing a modal with Esc hands focus back to the control that opened it — which is right,
+   and the only way a keyboard user knows where they landed. What was wrong is what that
+   looked like: nothing here ever styled `:focus`, so the browser drew its own 3px ring in
+   near-white, which on a dark panel reads as a glitch rather than as "you are here".
+   `:focus-visible` (not `:focus`) so a mouse click never draws it — the ring is for people
+   navigating by keyboard, and after Esc that is exactly who is looking. */
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.action-btn:focus-visible,
+.tab:focus-visible,
+.sub-tab:focus-visible,
+.scope-btn:focus-visible,
+.chip:focus-visible,
+.lang-opt:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 8px;
+}
+
+/* Inputs already signal focus by recolouring their border, so a ring on top would be noise. */
+.form-group input:focus-visible,
+.form-group select:focus-visible,
+.form-group textarea:focus-visible,
+.search:focus-visible,
+.input:focus-visible,
+.chip-search:focus-visible {
+	outline: none;
+}
+
+/* pt 6: the Premium tab's own bits. The chart reuses the dashboard's card, and the "my plan"
+   card is a header (what you are on + the way to extend it) over the numbers behind it. */
+.prem-chart { width: 100%; }
+
+.prem-mine {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	padding: 20px 22px;
+}
+
+.prem-mine-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+	margin-bottom: 18px;
+}
+
+.prem-mine-head h3 {
+	margin: 0 0 6px;
+	font-size: 1.25rem;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.prem-mine-exp {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: 0.9rem;
+}
+
+.prem-mine .table-wrap { margin: 0; }
+
+.premium-subs-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.bulk-plan-warning, .bulk-plan-preview { padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-secondary); color: var(--text-secondary); }
+.bulk-plan-warning { margin-bottom: 16px; }
+.bulk-plan-warning i { color: var(--accent); margin-right: 6px; }
+.bulk-plan-preview { margin-top: 16px; color: var(--text); font-weight: 600; }
+.prem-mine table td { padding: 9px 12px; }
+
+/* pt 7: quota usage under the "My files" stat tiles. One wide bar rather than a fourth tile,
+   because the useful part is the *proportion* — a tile would just be another number next to
+   the one it is meant to give meaning to. Colour shifts from accent through warning to danger
+   as the account fills, so "nearly out of room" reads before the percentage does. */
+.quota-bar {
+	margin: -6px 0 20px;
+	padding: 14px 18px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+}
+
+.quota-bar-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+	margin-bottom: 10px;
+}
+
+.quota-bar-label {
+	font-size: 0.88rem;
+	color: var(--text-secondary);
+}
+
+.quota-bar-label i { color: var(--accent); margin-right: 6px; }
+
+.quota-bar-value { font-size: 0.9rem; color: var(--text-secondary); }
+.quota-bar-value strong { color: var(--text); font-size: 1rem; }
+.quota-bar-of { margin-left: 2px; }
+
+.quota-bar-pct {
+	margin-left: 10px;
+	padding: 2px 8px;
+	border-radius: 20px;
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	color: var(--accent);
+	font-weight: 600;
+	font-size: 0.82rem;
+}
+
+.quota-bar-track {
+	height: 10px;
+	border-radius: 6px;
+	background: var(--bg-secondary);
+	overflow: hidden;
+}
+
+.quota-bar-track > i {
+	display: block;
+	height: 100%;
+	border-radius: 6px;
+	background: linear-gradient(90deg, var(--accent), #8b5cf6);
+	transition: width 0.4s ease;
+	/* A used-but-tiny fraction should still show as a sliver rather than as nothing. */
+	min-width: 2px;
+}
+
+.quota-bar-foot {
+	display: block;
+	margin-top: 8px;
+	font-size: 0.78rem;
+	color: var(--text-muted);
+}
+
+.quota-bar.is-warm .quota-bar-track > i { background: linear-gradient(90deg, var(--accent), var(--warning)); }
+
+.quota-bar.is-high .quota-bar-track > i { background: linear-gradient(90deg, var(--warning), #f97316); }
+.quota-bar.is-high .quota-bar-pct {
+	background: color-mix(in srgb, var(--warning) 18%, transparent);
+	color: var(--warning);
+}
+
+.quota-bar.is-full { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.quota-bar.is-full .quota-bar-track > i { background: linear-gradient(90deg, #f97316, var(--danger)); }
+.quota-bar.is-full .quota-bar-pct {
+	background: color-mix(in srgb, var(--danger) 18%, transparent);
+	color: var(--danger);
+}
+
+/* Account over its storage limits after a group change (pkt B). Deliberately prominent —
+   it is a countdown to files being deleted, not a hint. */
+.limit-warning {
+	display: flex;
+	gap: 14px;
+	align-items: flex-start;
+	background: rgba(245, 158, 11, 0.08);
+	border: 1px solid rgba(245, 158, 11, 0.4);
+	border-radius: 12px;
+	padding: 16px 18px;
+	margin-bottom: 20px;
+}
+
+.limit-warning-icon {
+	font-size: 1.3rem;
+	color: var(--warning);
+	line-height: 1.2;
+}
+
+.limit-warning strong {
+	display: block;
+	margin-bottom: 8px;
+	color: var(--text);
+}
+
+.limit-warning ul {
+	margin: 0 0 8px;
+	padding-left: 20px;
+	color: var(--text-secondary);
+	font-size: 0.9rem;
+}
+
+.limit-warning li { margin-bottom: 4px; }
+
+.limit-warning p {
+	margin: 0;
+	font-size: 0.88rem;
+	color: var(--text-secondary);
+	line-height: 1.6;
+}
+
+/* Promo form: explicit two-column rows keep labels and controls aligned. The enabled switch
+   is a proper field card rather than a checkbox floating beside the expiry date. */
+.promo-form-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 16px;
+}
+
+.promo-form-grid .form-group {
+	margin-bottom: 16px;
+}
+
+.promo-enabled-card {
+	align-self: start;
+	min-height: 72px;
+	margin-bottom: 16px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+}
+
+.promo-enabled-card .form-check {
+	margin: 0;
+	color: var(--text);
+	font-weight: 600;
+}
+
+.promo-enabled-card small {
+	display: block;
+	margin-top: 7px;
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	line-height: 1.35;
+}
+
+@media (max-width: 560px) {
+	.promo-form-grid {
+		grid-template-columns: 1fr;
+		gap: 0;
+	}
+}
+

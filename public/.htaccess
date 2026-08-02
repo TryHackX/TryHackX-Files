@@ -1,0 +1,148 @@
+Options -Indexes -MultiViews
+
+<IfModule mod_rewrite.c>
+	RewriteEngine On
+
+	# Proxy uploads and downloads to the Python server (streaming, zero-copy sendfile).
+	RewriteRule ^api/upload(/.*)?$ http://127.0.0.1:8001/upload$1 [P,L]
+	RewriteRule ^api/download(/.*)?$ http://127.0.0.1:8001/download$1 [P,L]
+	RewriteRule ^api/collection(/.*)?$ http://127.0.0.1:8001/collection$1 [P,L]
+	RewriteRule ^api/sharex(/.*)?$ http://127.0.0.1:8001/sharex$1 [P,L]
+	RewriteRule ^api/thumb(/.*)?$ http://127.0.0.1:8001/thumb$1 [P,L]
+
+	# NOTE: /metrics is deliberately NOT proxied. The upload server binds to loopback, so
+	# Prometheus scrapes it directly at 127.0.0.1:8001/metrics on this host. Proxying it
+	# here would make it public: every proxied request reaches Python from 127.0.0.1, so
+	# the endpoint's loopback check could not tell a local scrape from a remote visitor.
+	# To scrape from another host, set the `metrics_token` setting first, then add a rule.
+
+	# REST API v1 — served by PHP (not proxied). Pass the Authorization header through to
+	# PHP (mod_php often drops it) so Bearer-key auth works.
+	RewriteRule ^api/v1/?(.*)$ apiv1.php?path=$1 [QSA,L,E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+	RewriteRule ^api/qr(/.*)?$ http://127.0.0.1:8001/qr$1 [P,L]
+
+	# Same treatment for api.php: the premium activation endpoint (pt 9) is called by a
+	# payment provider's webhook with `Authorization: Bearer <token>`, and mod_php drops that
+	# header unless it is put back here. Without this only the X-Premium-Token fallback works.
+	RewriteCond %{HTTP:Authorization} .
+	RewriteRule ^api\.php$ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+	# pt 1: clean addresses for the pages a visitor is handed a link to. `/premium` reads as
+	# part of the site; `/premium.php` reads as a file someone left lying around. The `.php`
+	# forms keep working — bookmarks, old links and the checkout's own `continueUrl` must not
+	# break — they simply stop being what gets handed out.
+	#
+	# Guarded by !-f / !-d so a real file or directory is never rewritten: assets, the API and
+	# the installer are untouched.
+	RewriteCond %{REQUEST_FILENAME} !-f
+	RewriteCond %{REQUEST_FILENAME} !-d
+	RewriteRule ^premium/?$ premium.php [L,QSA]
+
+	RewriteCond %{REQUEST_FILENAME} !-f
+	RewriteCond %{REQUEST_FILENAME} !-d
+	RewriteRule ^panel/?$ panel.php [L,QSA]
+
+	# Ad networks fetch /ads.txt at the domain root, but .txt is denied wholesale by the
+	# FilesMatch block below — so the file is emitted by PHP from the `ads_txt_content`
+	# setting instead of existing on disk (Faza 8).
+	RewriteRule ^ads\.txt$ adstxt.php [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+	Header always set X-Content-Type-Options "nosniff"
+	Header always set X-Frame-Options "SAMEORIGIN"
+	Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+	# Content-Security-Policy. 'unsafe-inline' for scripts is required by the app's
+	# inline onclick handlers; the rest (object-src none, base-uri/form-action self,
+	# frame-ancestors self, connect/img self) still blocks many injection vectors.
+	# google.com/gstatic are allowed only for optional reCAPTCHA.
+	#
+	# frame-src must include 'self': the download page renders a PDF preview in an
+	# <iframe src="api.php?action=preview&…">, and without 'self' the browser blocked it
+	# (the frame stayed blank with a CSP violation) — that was the "PDF preview doesn't
+	# work" report. Uploads are served with Content-Disposition and a stored MIME type, and
+	# framing our own origin is already limited by frame-ancestors 'self'.
+	#
+	# `setifempty`, NOT `always set` (Faza 8): PHP now emits this header itself so it can
+	# admit Google's ad domains only while AdSense is actually enabled (see config.php,
+	# emitContentSecurityPolicy). An `always set` here would land in Apache's separate
+	# "always" table and ship a SECOND CSP next to PHP's — and browsers enforce the
+	# intersection of both, so the PHP relaxation could never take effect. `setifempty`
+	# keeps this exact strict policy as the fallback for static assets and any response
+	# PHP did not stamp. Do not "fix" this back to `always set`.
+	Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+	Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+</IfModule>
+
+<FilesMatch "\.(htaccess|htpasswd|ini|log|sh|bash|py|txt|bat|service|lock)$">
+	<IfModule mod_authz_core.c>
+		Require all denied
+	</IfModule>
+	<IfModule !mod_authz_core.c>
+		Order Allow,Deny
+		Deny from all
+	</IfModule>
+</FilesMatch>
+
+<Files "requirements.txt">
+	<IfModule mod_authz_core.c>
+		Require all denied
+	</IfModule>
+</Files>
+
+# /ads.txt must get past the .txt deny above: the access check runs against the requested
+# filename BEFORE the rewrite to adstxt.php happens, so without this the request dies as
+# 403 and the emitter is never reached (Faza 8). No physical ads.txt exists — the rewrite
+# is unconditional, so this grants access to the PHP emitter only.
+<Files "ads.txt">
+	<IfModule mod_authz_core.c>
+		Require all granted
+	</IfModule>
+	<IfModule !mod_authz_core.c>
+		Order Deny,Allow
+		Allow from all
+	</IfModule>
+</Files>
+
+<FilesMatch "^(robots|security)\.txt$">
+	<IfModule mod_authz_core.c>
+		Require all granted
+	</IfModule>
+	<IfModule !mod_authz_core.c>
+		Order Deny,Allow
+		Allow from all
+	</IfModule>
+</FilesMatch>
+
+<Files "config.php">
+	<IfModule mod_authz_core.c>
+		Require all denied
+	</IfModule>
+	<IfModule !mod_authz_core.c>
+		Order Allow,Deny
+		Deny from all
+	</IfModule>
+</Files>
+
+<IfModule mod_rewrite.c>
+	RewriteRule ^includes/ - [F,L]
+	RewriteRule ^data/ - [F,L]
+	RewriteRule ^venv/ - [F,L]
+	RewriteRule ^scripts/ - [F,L]
+</IfModule>
+
+<IfModule mod_deflate.c>
+	AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+<IfModule mod_expires.c>
+	ExpiresActive On
+	ExpiresByType image/jpg "access plus 1 month"
+	ExpiresByType image/jpeg "access plus 1 month"
+	ExpiresByType image/gif "access plus 1 month"
+	ExpiresByType image/png "access plus 1 month"
+	ExpiresByType image/webp "access plus 1 month"
+	ExpiresByType text/css "access plus 1 week"
+	ExpiresByType application/javascript "access plus 1 week"
+</IfModule>

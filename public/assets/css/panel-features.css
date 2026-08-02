@@ -1,0 +1,717 @@
+/* ---- Selecting rows ----
+   The bulk-action bar is gone: every list now hangs its selection actions off the toolbar as
+   slide-out buttons (`.collect-slide`), so ticking a row no longer pushes the table down the
+   page to make room for a bar. */
+.file-check { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.col-check { width: 32px; text-align: center; }
+.myfile-check,
+.mycoll-check { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+/* A section head whose right side carries more than one control — a slide-out selection
+   action beside the ordinary buttons. */
+.section-head-actions { display: flex; align-items: center; gap: 12px; }
+
+/* Progress of an upload still arriving (dashboard). A bar rather than a number alone, because
+   the question being asked of this widget is "is it moving", which a bar answers at a glance. */
+.upload-progress {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	overflow: hidden;
+	margin-bottom: 4px;
+	min-width: 90px;
+}
+
+.upload-progress span {
+	display: block;
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.4s ease;
+}
+
+/* ---- Dashboard ---- */
+.dash-grid {
+	display: grid;
+	grid-template-columns: 2fr 1fr;
+	gap: 16px;
+}
+@media (max-width: 800px) { .dash-grid { grid-template-columns: 1fr; } }
+
+.chart-holder {
+	min-height: 200px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+}
+.chart-legend {
+	display: flex;
+	gap: 18px;
+	margin-top: 10px;
+	font-size: 0.82rem;
+	color: var(--text-secondary);
+}
+.chart-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
+
+.top-files { display: flex; flex-direction: column; gap: 12px; }
+.top-file-info { display: flex; justify-content: space-between; gap: 10px; font-size: 0.85rem; margin-bottom: 5px; }
+.top-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.top-file-meta { color: var(--text-muted); white-space: nowrap; }
+.top-file-bar { height: 7px; border-radius: 4px; background: var(--bg-secondary); overflow: hidden; }
+.top-file-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
+
+/* Language switcher (Faza 4.3) */
+.lang-switch { display: inline-flex; gap: 2px; align-items: center; margin-right: 6px; }
+.lang-switch .lang-opt {
+    padding: 4px 7px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-decoration: none;
+    color: var(--text-muted, #94a3b8);
+    transition: background .15s, color .15s;
+}
+.lang-switch .lang-opt:hover { background: var(--bg-hover, rgba(148, 163, 184, .12)); color: var(--text); }
+.lang-switch .lang-opt.active { background: var(--accent); color: #fff; }
+
+/* Group permissions (Faza 6 · #1) — the checkbox grid in the group form and the
+   "what will this user get" preview in the change-group modal. */
+.perm-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+	gap: 8px;
+}
+.perm-grid-sub { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.perm-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+	cursor: pointer;
+	font-size: 0.9rem;
+	transition: border-color .15s, opacity .15s;
+}
+.perm-item:hover { border-color: var(--accent); }
+.perm-item input { width: 17px; height: 17px; accent-color: var(--accent); flex-shrink: 0; }
+.perm-item.perm-sub { font-size: 0.86rem; padding: 8px 11px; }
+/* A permission whose parent is off: still listed (so the dependency is visible) but inert. */
+.perm-item.perm-disabled { opacity: .45; cursor: not-allowed; }
+.perm-item.perm-disabled:hover { border-color: var(--border); }
+
+.perm-preview {
+	margin-top: 16px;
+	padding: 14px 16px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+}
+.perm-preview h4 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text); }
+.perm-preview-limits { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 10px; }
+.perm-preview-note { font-size: 0.86rem; color: var(--text-muted); margin: 0; }
+.perm-preview-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.perm-preview-list li { font-size: 0.86rem; color: var(--text-secondary); }
+.perm-preview-list i { color: var(--success, #22c55e); margin-right: 7px; }
+
+/* A locked action slot — shown where a delete button would sit on rows that cannot be
+   deleted (system / default groups), so the row keeps its shape and explains itself. */
+.action-btn.locked {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+	cursor: not-allowed;
+	opacity: .6;
+}
+.action-btn.locked:hover { background: none; color: var(--text-muted); }
+
+/* Rendered project docs (Settings → Storage → docs/STORAGE.md). Scoped so the shared
+   table/code styles apply inside without leaking Markdown spacing to the rest of the panel. */
+.doc-view {
+	max-height: 68vh;
+	overflow-y: auto;
+	padding-right: 8px;
+	color: var(--text-secondary);
+	font-size: 0.92rem;
+	line-height: 1.65;
+}
+.doc-view h1, .doc-view h2, .doc-view h3, .doc-view h4, .doc-view h5, .doc-view h6 {
+	color: var(--text);
+	line-height: 1.3;
+	margin: 22px 0 10px;
+}
+.doc-view h1 { font-size: 1.35rem; }
+.doc-view h2 { font-size: 1.15rem; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.doc-view h3 { font-size: 1.02rem; }
+.doc-view h4, .doc-view h5, .doc-view h6 { font-size: 0.95rem; }
+.doc-view > *:first-child { margin-top: 0; }
+.doc-view p { margin: 0 0 12px; }
+.doc-view ul, .doc-view ol { margin: 0 0 12px; padding-left: 22px; }
+.doc-view li { margin-bottom: 5px; }
+.doc-view a { color: var(--accent); }
+.doc-view code {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	padding: 1px 5px;
+	font-size: 0.86em;
+	word-break: break-word;
+}
+.doc-view pre {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 12px 14px;
+	overflow-x: auto;
+	margin: 0 0 14px;
+}
+.doc-view pre code { background: none; border: 0; padding: 0; font-size: 0.85rem; }
+.doc-view blockquote {
+	margin: 0 0 12px;
+	padding: 8px 14px;
+	border-left: 3px solid var(--accent);
+	background: var(--bg-secondary);
+	border-radius: 0 8px 8px 0;
+}
+.doc-view hr { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.doc-view table { font-size: 0.88rem; }
+/* A relative link inside the doc points at a repo path, not a URL we can open here. */
+.doc-view .doc-ref { color: var(--text); font-weight: 600; }
+
+/* Dashboard widget header with a settings gear in its top-right corner (pt 5). */
+.widget-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+.widget-head h3 { margin: 0; }
+.widget-gear {
+	color: var(--text-muted);
+	flex-shrink: 0;
+	transition: color .15s, transform .2s;
+}
+.widget-gear:hover { color: var(--accent); transform: rotate(45deg); }
+.widget-period {
+	margin: 4px 0 14px;
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+/* Range switcher on the traffic chart (pt 5) — a segmented control, the shape this reads as
+   on any chart that offers spans. */
+.range-picker {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	flex-shrink: 0;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 2px;
+}
+
+.range-btn {
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.3px;
+	padding: 5px 9px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: background .15s, color .15s;
+}
+
+.range-btn:hover {
+	color: var(--text);
+	background: var(--bg-hover, rgba(148, 163, 184, .12));
+}
+
+.range-btn.active {
+	background: var(--accent);
+	color: #fff;
+}
+
+/* Advanced file filters (pt 9) — the Filters button, its badge, the red-glow clear-all
+   control, the chip row summarising what is active, and the pickers inside the modal. */
+.filter-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 19px;
+	height: 19px;
+	padding: 0 5px;
+	margin-left: 6px;
+	border-radius: 10px;
+	background: var(--accent);
+	color: #fff;
+	font-size: 0.72rem;
+	font-weight: 700;
+}
+/* Destructive and deliberately eye-catching: this wipes every active filter at once. */
+.btn-clear-filters {
+	color: #ef4444;
+	border-color: rgba(239, 68, 68, .45);
+	box-shadow: 0 0 0 0 rgba(239, 68, 68, .55);
+	animation: filterGlow 2.2s ease-in-out infinite;
+}
+.btn-clear-filters:hover {
+	background: rgba(239, 68, 68, .14);
+	border-color: #ef4444;
+	color: #ef4444;
+}
+@keyframes filterGlow {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .45); }
+	50%      { box-shadow: 0 0 12px 2px rgba(239, 68, 68, .38); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.btn-clear-filters { animation: none; box-shadow: 0 0 8px 1px rgba(239, 68, 68, .35); }
+}
+
+.active-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.filter-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 6px 5px 11px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-secondary);
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+}
+.filter-chip button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	border: 0;
+	border-radius: 50%;
+	background: var(--bg-card);
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: 0.68rem;
+}
+.filter-chip button:hover { background: #ef4444; color: #fff; }
+
+/* Search-scope picker at the top of the filter modal (pt 4). Choosing a scope is what makes
+   the rest of the modal appear, so it sits above the sections and reads as one control. */
+.flt-scope {
+	padding: 0 0 14px;
+	border-bottom: 1px solid var(--border);
+}
+
+.flt-scope .detail-label {
+	display: block;
+	margin-bottom: 8px;
+}
+
+.flt-scope small {
+	display: block;
+	margin-top: 8px;
+	color: var(--text-muted);
+	font-size: 0.82rem;
+}
+
+.scope-picker {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 3px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 3px;
+}
+
+.scope-btn {
+	flex: 1 1 auto;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	font-size: 0.85rem;
+	font-weight: 500;
+	padding: 9px 12px;
+	border-radius: 8px;
+	cursor: pointer;
+	transition: background .15s, color .15s;
+}
+
+.scope-btn:hover {
+	color: var(--text);
+	background: var(--bg-hover, rgba(148, 163, 184, .12));
+}
+
+.scope-btn.active {
+	background: var(--accent);
+	color: #fff;
+}
+
+.flt-section { padding: 14px 0; border-bottom: 1px solid var(--border); }
+
+/* pt 4: `:last-of-type` matched *nothing* here — the last `div` among these siblings is
+   `.modal-btns`, not a section — so every section kept its rule, including the bottom one.
+   That left a separator hanging in the air just above the buttons, which is what made the
+   dialog look glued together. `:last-of-type` could not be fixed in CSS either: sections are
+   shown and hidden by scope and permission, so the *visible* last one is rarely the DOM last
+   one. The panels already compute that visibility, so they mark it. */
+.flt-section.is-last { border-bottom: 0; padding-bottom: 2px; }
+.flt-section h4 { margin: 0 0 12px; font-size: 0.94rem; color: var(--text); }
+.flt-section h4 i { color: var(--accent); margin-right: 7px; }
+
+/* pt 2: two bounds, each with its own unit. `.form-row`'s auto-fit grid would have let the
+   pairs collapse at awkward widths, so the row is an explicit two-column grid that stacks
+   once there is no longer space for both. */
+.flt-size-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+	align-items: end;
+}
+
+.flt-size-row .form-group { margin-bottom: 0; }
+
+/* The number takes the room; the unit stays the width of "MiB". */
+.flt-size-pair {
+	display: flex;
+	gap: 8px;
+}
+
+.flt-size-pair input { flex: 1; min-width: 0; }
+.flt-size-pair select { width: 86px; flex-shrink: 0; }
+
+@media (max-width: 560px) {
+	.flt-size-row { grid-template-columns: 1fr; }
+}
+
+.chip-picker { display: flex; flex-wrap: wrap; gap: 7px; max-height: 168px; overflow-y: auto; }
+.chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--bg-secondary);
+	color: var(--text-secondary);
+	font-size: 0.82rem;
+	cursor: pointer;
+	transition: border-color .15s, background .15s, color .15s;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip-count { opacity: .65; font-size: 0.75rem; }
+.chip.active .chip-count { opacity: .85; }
+.chip-empty { color: var(--text-muted); font-size: 0.85rem; }
+
+/* Owner column in the all-files list (pt 10). */
+.owner-name { font-weight: 500; color: var(--text); }
+
+/* 2FA recovery codes — the callout on the Account tab and the code grid in the modal. */
+.recovery-box {
+	margin-top: 18px;
+	padding: 16px 18px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--bg-secondary);
+}
+.recovery-box h4 { margin: 0 0 8px; font-size: 0.95rem; color: var(--text); }
+.recovery-box h4 i { color: var(--accent); margin-right: 7px; }
+.recovery-box p { margin: 0 0 12px; color: var(--text-muted); font-size: 0.87rem; line-height: 1.55; }
+.recovery-count { font-weight: 600; color: var(--text-secondary) !important; }
+/* Nearly out of fallbacks: at zero a lost authenticator locks the account out for good. */
+.recovery-count.recovery-low { color: #f59e0b !important; }
+
+.recovery-codes {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+	gap: 8px;
+	margin-bottom: 16px;
+}
+.recovery-codes code {
+	padding: 9px 10px;
+	border: 1px solid var(--border);
+	border-radius: 7px;
+	background: var(--bg-secondary);
+	color: var(--text);
+	font-size: 0.95rem;
+	letter-spacing: .06em;
+	text-align: center;
+	user-select: all;
+}
+
+/* Language management (Settings → Languages) — the enable switch and coverage bar. */
+.lang-toggle { position: relative; display: inline-block; width: 40px; height: 22px; cursor: pointer; }
+.lang-toggle input { opacity: 0; width: 0; height: 0; }
+.lang-toggle span {
+	position: absolute;
+	inset: 0;
+	border-radius: 22px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	transition: background .18s, border-color .18s;
+}
+.lang-toggle span::before {
+	content: "";
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 14px;
+	height: 14px;
+	border-radius: 50%;
+	background: var(--text-muted);
+	transition: transform .18s, background .18s;
+}
+.lang-toggle input:checked + span { background: var(--accent); border-color: var(--accent); }
+.lang-toggle input:checked + span::before { transform: translateX(18px); background: #fff; }
+
+/* Visibility columns are meaningless for a language that is switched off entirely (pt 6). */
+.lang-na {
+	color: var(--text-muted);
+}
+
+.lang-coverage {
+	width: 96px;
+	height: 6px;
+	border-radius: 4px;
+	background: var(--bg-secondary);
+	overflow: hidden;
+	margin-bottom: 4px;
+}
+.lang-coverage i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
+
+/* Browser autofill. Chrome paints a hard-coded near-white background on autofilled inputs
+   that no `background` declaration can override — the documented way out is to cover it with
+   an inset box-shadow and repaint the text via -webkit-text-fill-color. The long transition
+   delay keeps the browser's own fade from flashing white before ours lands. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+    background-clip: padding-box !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
+    box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
+    -webkit-text-fill-color: var(--text) !important;
+    caret-color: var(--text);
+    border-color: var(--border) !important;
+    transition: background-color 100000s ease-in-out 0s;
+}
+
+/* Focused *and* autofilled: the fill, then the ordinary focus ring on top of it. Without
+   this the !important fill wins outright and a just-autofilled field loses its glow, leaving a
+   bare bright border — the "white edge" that only ever appears with autofill. */
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:focus {
+    background-clip: padding-box !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+    box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+    -webkit-text-fill-color: var(--text) !important;
+    border-color: var(--accent) !important;
+    caret-color: var(--text);
+}
+/* Firefox marks autofilled fields with its own highlight; this is the equivalent hook. */
+input:autofill,
+textarea:autofill {
+    background-color: var(--bg-secondary) !important;
+    color: var(--text) !important;
+}
+
+/* Inline links inside body copy (settings hints, doc references). Without this they fall back
+   to the UA's pure blue, which reads as "unstyled page" against the panel's palette. Anchors
+   that are really controls (.btn, .tab, .action-btn, .auth-link) set their own colour and win
+   on specificity, so this only catches genuine text links. */
+.settings-section small a,
+.settings-section p a,
+.form-group small a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(99, 102, 241, 0.35);
+    transition: border-color .15s, color .15s;
+}
+.settings-section small a:hover,
+.settings-section p a:hover,
+.form-group small a:hover {
+    border-bottom-color: var(--accent);
+}
+
+/* Per-section search above a chip list (owner / IP / extension). Kept visually lighter than a
+   form field so it reads as a filter on the chips below, not another criterion. */
+.chip-search {
+	width: 100%;
+	margin-bottom: 9px;
+	padding: 7px 11px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg);
+	color: var(--text);
+	font-size: 0.83rem;
+}
+.chip-search:focus { outline: none; border-color: var(--accent); }
+.chip-search::placeholder { color: var(--text-muted); }
+/* "+N more" hint when the list is capped — a chip-shaped label, not a clickable chip. */
+.chip-more {
+	display: inline-flex;
+	align-items: center;
+	padding: 6px 10px;
+	color: var(--text-muted);
+	font-size: 0.78rem;
+	font-style: italic;
+}
+
+/* Permission preview in the change-group modal (pt 11). Limits render as a definition grid
+   and capabilities as grouped lists, so the whole thing is scannable instead of one long
+   sentence followed by an undifferentiated bullet list. */
+.perm-preview h5 {
+	margin: 14px 0 7px;
+	font-size: 0.78rem;
+	font-weight: 600;
+	letter-spacing: .04em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+.perm-preview h5:first-child { margin-top: 0; }
+.perm-preview-grid {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 4px 14px;
+	margin: 0;
+	font-size: 0.85rem;
+}
+.perm-preview-grid dt { color: var(--text-muted); }
+.perm-preview-grid dd { margin: 0; color: var(--text); font-weight: 500; }
+
+/* Add-language modal: three numbered steps, because "download a template, name it, upload it"
+   is a sequence and the old flat form gave no hint of that order. */
+.lang-step { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+.lang-step:last-of-type { border-bottom: 0; }
+.lang-step-num {
+	flex-shrink: 0;
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	background: var(--accent);
+	color: #fff;
+	font-size: 0.8rem;
+	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.lang-step-body { flex: 1; min-width: 0; }
+.lang-step-body h4 { margin: 3px 0 6px; font-size: 0.92rem; color: var(--text); }
+.lang-step-body > p { margin: 0 0 10px; font-size: 0.85rem; color: var(--text-muted); line-height: 1.5; }
+.lang-step-body .form-group { margin-bottom: 0; }
+
+/* pt 7: the duplicate-language dialog. Its one question is "which code does the copy get",
+   and it used to be a 150px input stranded at the left of a full-width row with a hint running
+   past it — a sparse, accidental-looking layout. Now the field is a "source → new" pair that
+   spans the row and states the operation, and the entry is styled like the codes in the table
+   it will join (uppercase, spaced) so what is typed matches what appears afterwards. */
+.lang-code-row {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.lang-code-from {
+	flex-shrink: 0;
+	min-width: 62px;
+	padding: 12px 14px;
+	border: 1px dashed var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+	color: var(--text-secondary);
+	font-size: 0.95rem;
+	font-weight: 700;
+	letter-spacing: 2px;
+	text-align: center;
+}
+
+.lang-code-row > .fa-arrow-right {
+	flex-shrink: 0;
+	color: var(--text-muted);
+	font-size: 0.8rem;
+}
+
+.form-group input.lang-code-input {
+	flex: 1;
+	min-width: 0;
+	text-align: center;
+	text-transform: uppercase;
+	letter-spacing: 3px;
+	font-weight: 700;
+}
+
+/* The placeholder is a hint, not a value — it should not shout in the same weight. */
+.form-group input.lang-code-input::placeholder {
+	letter-spacing: normal;
+	font-weight: 400;
+	text-transform: none;
+}
+
+/* Live "de → Deutsch" feedback under the code field. */
+.lang-code-name { margin-top: 6px; font-size: 0.85rem; min-height: 1.2em; color: var(--text-muted); }
+.lang-code-name.ok { color: var(--success, #22c55e); font-weight: 500; }
+.lang-code-name.warn { color: var(--warning, #f59e0b); }
+
+.lang-suggestions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 12px; }
+.lang-suggest-label { font-size: 0.8rem; color: var(--text-muted); margin-right: 2px; }
+.lang-suggestions .chip strong { font-family: monospace; margin-right: 5px; opacity: .85; }
+
+/* A labelled sub-field inside a filter section. Deliberately not .form-group — that class
+   restyles any input it contains as a full-height form field, which is what made the
+   extensions search look different from the identical Owner / IP ones. */
+.flt-field { margin-bottom: 14px; }
+.flt-field > label {
+	display: block;
+	margin-bottom: 6px;
+	font-size: 0.82rem;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+/* Stacked toasts (FHUi.toast). Each entry is a clone of the page's own toast element, so it
+   arrives carrying `position: fixed; bottom; left; transform` — all of which have to be
+   neutralised here, because inside the stack the container does the positioning and the
+   items simply flow. Newest sits at the bottom, nearest the corner it grew from. */
+.toast-stack {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	z-index: 10001;
+	pointer-events: none;
+}
+.toast-stack .toast-item {
+	position: static;
+	left: auto;
+	right: auto;
+	bottom: auto;
+	top: auto;
+	margin: 0;
+	transform: translateY(8px);
+	opacity: 0;
+	transition: opacity 0.25s ease, transform 0.25s ease;
+	pointer-events: auto;
+}
+.toast-stack .toast-item.show {
+	transform: translateY(0);
+	opacity: 1;
+}
+

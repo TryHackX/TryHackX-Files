@@ -1,0 +1,108 @@
+/* Advertising slots (Faza 8). Loaded only while the ads feature is enabled — the page
+   carries no ad markup at all when it is off, so nothing here may be load-bearing for
+   anything else. Colours ride the shared theme variables, so slots follow dark/light
+   automatically. */
+
+.ad-slot {
+	position: relative;
+	margin: 18px 0;
+	padding: 14px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius, 12px);
+	text-align: center;
+}
+
+/* Transparency label: every slot says what it is. A filled pill, not bare muted text —
+   it has to stay readable on top of whatever creative sits underneath. */
+.ad-slot-label {
+	position: absolute;
+	top: 8px;
+	left: 10px;
+	padding: 2px 8px;
+	border-radius: 999px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	font-size: 0.66rem;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-secondary);
+	pointer-events: none;
+	z-index: 1;
+}
+
+.ad-slot--image a {
+	display: inline-block;
+	line-height: 0;
+}
+
+.ad-slot--image img {
+	max-width: 100%;
+	height: auto;
+	/* Static creatives are cover-cropped server-side to the zone box; this cap is for the
+	   one format that is not (animated GIF), so an oversized upload cannot stretch the page. */
+	max-height: 240px;
+	object-fit: cover;
+	border-radius: 8px;
+}
+
+.ad-slot--html {
+	text-align: left;
+}
+
+.ad-slot--adsense .adsbygoogle {
+	min-height: 50px;
+}
+
+/* Admin-only zone preview shown to exempt admins instead of a live ad. */
+.ad-slot--placeholder {
+	border: 1px dashed var(--border);
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 0.85rem;
+	padding: 20px 14px;
+}
+
+/* Consent bar (runda 8): asks once before the AdSense loader may fetch. Fixed to the
+   bottom, theme-coloured, and out of the way — declining leaves the page ad-cookie-free. */
+.ads-consent {
+	position: fixed;
+	left: 12px;
+	right: 12px;
+	bottom: 12px;
+	z-index: 900;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 12px 18px;
+	flex-wrap: wrap;
+	padding: 12px 18px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: var(--radius, 12px);
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+	font-size: 0.88rem;
+	color: var(--text-secondary);
+}
+.ads-consent[hidden] { display: none; }
+.ads-consent-text { max-width: 720px; }
+.ads-consent-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Self-contained button styling — public pages do not all ship the panel's .btn classes. */
+.ads-consent-actions button {
+	padding: 8px 16px;
+	border-radius: 8px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	color: var(--text);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+	transition: filter 0.15s, background 0.15s;
+}
+.ads-consent-actions button:hover { filter: brightness(1.12); }
+.ads-consent-actions #fhAdsConsentAccept {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #fff;
+}

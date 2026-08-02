@@ -1,0 +1,24 @@
+# TryHackX Files upload service template; install-debian.sh replaces the placeholders.
+[Unit]
+Description=TryHackX Files Python Upload Server
+After=network.target mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-/etc/default/filehost
+ExecStart=__APP_DIR__/venv/bin/python __APP_DIR__/upload_server.py
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=__APP_DIR__/uploads __APP_DIR__/data
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

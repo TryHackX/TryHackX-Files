@@ -1,0 +1,45 @@
+{
+    "format": 1,
+    "milestones": {
+        "2": {
+            "artifact_count": 9,
+            "sha256": "2c1888fb3b4ac437d0e64f1214ef0852ea128a648fdad7771a7fc66d96232d3d"
+        },
+        "10": {
+            "artifact_count": 77,
+            "sha256": "6144677d9b6fa0f998c999b05067c761dc5d1b4144872f44e5801107d781bb3f"
+        },
+        "20": {
+            "artifact_count": 121,
+            "sha256": "b42a15ea210ec7ffd5dc5d04ccad0a8a84fdfb6d88df3707172c03be760e37e1"
+        },
+        "30": {
+            "artifact_count": 198,
+            "sha256": "bcb47c36a15fccc5652b1dc903e14968388696c9e6e0017791d62e01d9727e10"
+        },
+        "40": {
+            "artifact_count": 239,
+            "sha256": "3891f133ba040ad9d3ee882670f4b34989148d6276612d5120eff0082f6d8939"
+        },
+        "50": {
+            "artifact_count": 303,
+            "sha256": "a5aa63895d45a6b085cede364bda09bac0e8f6cb974da9f53f4709fc25b9cbc9"
+        },
+        "57": {
+            "artifact_count": 398,
+            "sha256": "c0b45e55a8b64f721bcde9082602a0e82e957a91cb29ae918a7a3f1449716db6"
+        },
+        "58": {
+            "artifact_count": 414,
+            "sha256": "8423f27ff5b2153d58fdfca1591022f47c724195fdc44a97e89bd61741d128e3"
+        },
+        "59": {
+            "artifact_count": 419,
+            "sha256": "a62dbcb3ddde21108d759ba7d8a7732d1defc196954d94beb2c5b21a0cd64515"
+        },
+        "60": {
+            "artifact_count": 419,
+            "sha256": "a62dbcb3ddde21108d759ba7d8a7732d1defc196954d94beb2c5b21a0cd64515"
+        }
+    }
+}

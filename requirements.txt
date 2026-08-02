@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+aiofiles>=23.2
+aiomysql>=0.2
+bcrypt>=4.1
+cryptography>=42.0
+segno>=1.6
+Pillow>=10
+imageio-ffmpeg>=0.5
+

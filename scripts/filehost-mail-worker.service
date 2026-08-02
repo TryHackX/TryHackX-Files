@@ -1,0 +1,23 @@
+# TryHackX Files - durable e-mail outbox worker (template for install-debian.sh)
+[Unit]
+Description=TryHackX Files E-mail Outbox Worker
+After=network.target mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=__USER__
+Group=__GROUP__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-/etc/default/filehost
+ExecStart=/usr/bin/php __APP_DIR__/scripts/mail-worker.php --loop --limit=25 --sleep=5
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=__APP_DIR__/data
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

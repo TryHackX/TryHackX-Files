@@ -1,0 +1,288 @@
+/**
+ * The notification bell, its popover, and the panel's history page.
+ *
+ * Its own file because it is the one piece of UI that appears on *both* sides of the project —
+ * the public pages (index.css) and the panel (panel.css) — and duplicating it into two
+ * stylesheets is how the two copies start to differ. Everything here is written against the
+ * variables both stylesheets define (--bg-card, --border, --accent, --text*), so it inherits
+ * whichever theme it lands in, light or dark, without knowing which.
+ */
+
+.notif-wrap {
+	position: relative;
+	display: inline-flex;
+}
+
+.notif-btn {
+	position: relative;
+}
+
+.notif-btn.has-unread {
+	color: var(--text);
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* The count rides on the bell's top-right corner. `min-width` + pill radius so "3" is a circle
+   and "99+" grows sideways instead of stretching into an oval. */
+.notif-badge {
+	position: absolute;
+	top: -5px;
+	right: -5px;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--danger, #ef4444);
+	color: #fff;
+	font-size: 0.68rem;
+	font-weight: 700;
+	line-height: 18px;
+	text-align: center;
+	box-shadow: 0 0 0 2px var(--bg, #09090b);
+	pointer-events: none;
+}
+
+.notif-pop {
+	position: absolute;
+	top: calc(100% + 10px);
+	right: 0;
+	width: 380px;
+	max-width: calc(100vw - 32px);
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+	z-index: 1200;
+	overflow: hidden;
+	animation: notif-pop-in 0.16s ease-out;
+}
+
+@keyframes notif-pop-in {
+	from { opacity: 0; transform: translateY(-6px); }
+	to   { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.notif-pop { animation: none; }
+}
+
+.notif-pop-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 13px 16px;
+	border-bottom: 1px solid var(--border);
+}
+
+.notif-readall {
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--accent);
+	font-size: 0.82rem;
+	cursor: pointer;
+}
+
+.notif-readall:hover {
+	text-decoration: underline;
+}
+
+.notif-list {
+	max-height: min(60vh, 420px);
+	overflow-y: auto;
+}
+
+.notif-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 11px;
+	padding: 12px 16px;
+	border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+	color: inherit;
+	text-decoration: none;
+	transition: background 0.15s;
+}
+
+.notif-item:last-child {
+	border-bottom: none;
+}
+
+.notif-item:hover {
+	background: var(--bg-secondary);
+}
+
+/* Unread is carried by a left rule and weight, not by a different background: the list is
+   mostly unread when it matters, and a wall of highlighted rows highlights nothing. */
+.notif-item.is-unread {
+	box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.notif-item.is-unread .notif-msg {
+	font-weight: 600;
+}
+
+.notif-icon {
+	flex-shrink: 0;
+	width: 30px;
+	height: 30px;
+	border-radius: 9px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	color: var(--text-secondary);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.82rem;
+}
+
+.notif-text {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	min-width: 0;
+}
+
+.notif-msg {
+	font-size: 0.88rem;
+	line-height: 1.4;
+	overflow-wrap: anywhere;
+}
+
+.notif-meta {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+}
+
+/* "×30" — the stack count. A badge rather than part of the sentence, so a long file name and a
+   big number do not fight over the same line. */
+.notif-count {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 1px 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+	color: var(--accent);
+	font-size: 0.72rem;
+	font-weight: 700;
+	vertical-align: 1px;
+}
+
+.notif-empty {
+	padding: 28px 16px;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: 0.88rem;
+}
+
+.notif-pop-foot {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 11px;
+	border-top: 1px solid var(--border);
+	background: var(--bg-secondary);
+	color: var(--text-secondary);
+	font-size: 0.85rem;
+	text-decoration: none;
+}
+
+.notif-pop-foot:hover {
+	color: var(--text);
+}
+
+/* On a phone the popover stops being a dropdown and becomes a sheet pinned under the header —
+   380px anchored to the right edge would hang off the screen. */
+@media (max-width: 480px) {
+	.notif-wrap {
+		position: static;
+	}
+
+	.notif-pop {
+		left: 16px;
+		right: 16px;
+		width: auto;
+	}
+}
+
+/* ---- The full history, in the panel ---- */
+
+.notif-page-list .notif-item {
+	border-bottom: 1px solid var(--border);
+	padding: 14px 16px;
+	align-items: center;
+}
+
+.notif-page-list {
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	overflow: hidden;
+	background: var(--bg-card);
+}
+
+/* The per-row delete only appears on hover (or focus, for anyone not using a mouse): a row of
+   trash icons down the side reads as the point of the list, which it is not. */
+.notif-row-del {
+	margin-left: auto;
+	flex-shrink: 0;
+	background: none;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 6px;
+	border-radius: 8px;
+	opacity: 0;
+	transition: opacity 0.15s, color 0.15s;
+}
+
+.notif-item:hover .notif-row-del,
+.notif-row-del:focus-visible {
+	opacity: 1;
+}
+
+.notif-row-del:hover {
+	color: var(--danger, #ef4444);
+	background: var(--bg-secondary);
+}
+
+/* ---- Preference matrix (account + admin defaults) ---- */
+
+.notif-prefs {
+	width: 100%;
+	border-collapse: collapse;
+}
+
+.notif-prefs th,
+.notif-prefs td {
+	padding: 11px 12px;
+	border-bottom: 1px solid var(--border);
+	text-align: left;
+	vertical-align: middle;
+}
+
+.notif-prefs th:not(:first-child),
+.notif-prefs td:not(:first-child) {
+	text-align: center;
+	width: 96px;
+}
+
+.notif-prefs tbody tr:last-child td {
+	border-bottom: none;
+}
+
+.notif-prefs .notif-type {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.notif-prefs .notif-type small {
+	display: block;
+	color: var(--text-muted);
+	font-weight: 400;
+}
+
+.notif-prefs td.is-na {
+	color: var(--text-muted);
+}

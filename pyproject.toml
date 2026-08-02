@@ -1,0 +1,16 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    "data",
+    "uploads",
+    "venv",
+]
+
+[tool.ruff.lint]
+# Begin with semantic correctness checks: parser/runtime errors and Pyflakes.
+# Formatting can be introduced independently without obscuring real defects.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/python/*.py" = ["E402"]

@@ -1,0 +1,19 @@
+parameters:
+    level: 1
+    paths:
+        - public
+        - scripts
+        - src
+    scanFiles:
+        - tests/phpstan/constants.php
+    excludePaths:
+        analyse:
+            # Include-scope templates receive these variables from their callers.
+            - src/includes/api/bootstrap.php
+            - src/includes/auth_modal.php
+            - src/includes/delete_link_page.php
+            - src/includes/error_page.php
+            - src/includes/header_ui.php
+            - src/includes/panel/*
+    tmpDir: data/phpstan-cache
+    treatPhpDocTypesAsCertain: false

@@ -1,0 +1,2435 @@
+:root {
+	--bg: #09090b;
+	--bg-card: #111113;
+	--bg-secondary: #18181b;
+	--bg-hover: rgba(255, 255, 255, 0.05);
+	--text: #fafafa;
+	--text-secondary: #a1a1aa;
+	--text-muted: #71717a;
+	--accent: #6366f1;
+	--accent-hover: #5558e3;
+	--border: #27272a;
+	--success: #22c55e;
+	--danger: #ef4444;
+	--warning: #f59e0b;
+	--radius: 12px;
+}
+
+/* Checkboxes/radios: brand accent + dark rendering (A1) — light theme restores native look. */
+input[type="checkbox"],
+input[type="radio"],
+/* Number/date/time spinners and the date-picker button are native widgets: without
+   color-scheme they render as bright white squares on the dark theme. */
+input[type="number"],
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"],
+input[type="file"],
+/* Text-ish controls join the list for the autofill case: the background the browser paints
+   on a filled field follows the declared colour scheme, so saying "dark" here is what stops it
+   arriving as a pale rectangle in the first place. */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+textarea,
+select {
+	accent-color: var(--accent);
+	color-scheme: dark;
+}
+.light input[type="checkbox"],
+.light input[type="radio"],
+.light input[type="number"],
+.light input[type="date"],
+.light input[type="time"],
+.light input[type="datetime-local"],
+.light input[type="month"],
+.light input[type="week"],
+.light input[type="file"],
+.light input[type="text"],
+.light input[type="password"],
+.light input[type="email"],
+.light input[type="search"],
+.light input[type="url"],
+.light input[type="tel"],
+.light textarea,
+.light select {
+	color-scheme: light;
+}
+
+.light {
+	--bg: #fafafa;
+	--bg-card: #ffffff;
+	--bg-secondary: #f4f4f5;
+	--bg-hover: rgba(0, 0, 0, 0.03);
+	--text: #09090b;
+	--text-secondary: #52525b;
+	--text-muted: #a1a1aa;
+	--border: #e4e4e7;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+body {
+	font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+	min-height: 100vh;
+	overflow-x: hidden;
+}
+
+.bg-wrap {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	overflow: hidden;
+	z-index: -1;
+}
+
+.bg-grid {
+	position: absolute;
+	inset: 0;
+	background-image: linear-gradient(rgba(255, 255, 255, .02) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, .02) 1px, transparent 1px);
+	background-size: 50px 50px;
+	mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, black, transparent);
+}
+
+.orb {
+	position: absolute;
+	border-radius: 50%;
+	opacity: 0.4;
+	will-change: transform;
+}
+
+.orb-1 {
+	width: 600px;
+	height: 600px;
+	background: radial-gradient(circle, rgba(99, 102, 241, 0.4) 0%, transparent 70%);
+	top: -200px;
+	left: -150px;
+	animation: drift1 20s ease-in-out infinite;
+}
+
+.orb-2 {
+	width: 500px;
+	height: 500px;
+	background: radial-gradient(circle, rgba(139, 92, 246, 0.35) 0%, transparent 70%);
+	bottom: -150px;
+	right: -100px;
+	animation: drift2 25s ease-in-out infinite;
+}
+
+.orb-3 {
+	width: 400px;
+	height: 400px;
+	background: radial-gradient(circle, rgba(59, 130, 246, 0.25) 0%, transparent 70%);
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	animation: drift3 30s ease-in-out infinite;
+}
+
+.light .bg-grid {
+	background-image: linear-gradient(rgba(0, 0, 0, .03) 1px, transparent 1px), linear-gradient(90deg, rgba(0, 0, 0, .03) 1px, transparent 1px);
+}
+
+.light .orb {
+	opacity: 0.25;
+}
+
+@keyframes drift1 {
+
+	0%,
+	100% {
+		transform: translate(0, 0) scale(1);
+	}
+
+	50% {
+		transform: translate(40px, 30px) scale(1.05);
+	}
+}
+
+@keyframes drift2 {
+
+	0%,
+	100% {
+		transform: translate(0, 0) scale(1);
+	}
+
+	50% {
+		transform: translate(-40px, -30px) scale(1.08);
+	}
+}
+
+@keyframes drift3 {
+
+	0%,
+	100% {
+		transform: translate(-50%, -50%) scale(1);
+	}
+
+	50% {
+		transform: translate(-45%, -55%) scale(1.03);
+	}
+}
+
+.container {
+	max-width: 700px;
+	margin: 0 auto;
+	padding: 40px 20px;
+	position: relative;
+	z-index: 1;
+}
+
+/* The upload page is a single column and reads best narrow; a pricing table is a row of cards
+   and needs the width. One extra class rather than a second stylesheet, since everything else
+   about the two pages — header, background, footer — is identical. */
+.container.is-wide {
+	max-width: 1320px;
+}
+
+header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 40px;
+}
+
+.logo {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	text-decoration: none;
+	color: var(--text);
+}
+
+.logo-icon {
+	width: 42px;
+	height: 42px;
+	background: linear-gradient(135deg, var(--accent), #8b5cf6);
+	border-radius: 12px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.logo-icon svg {
+	width: 22px;
+	height: 22px;
+	color: white;
+}
+
+.logo-text {
+	font-size: 1.3rem;
+	font-weight: 700;
+}
+
+.header-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 12px 20px;
+	border-radius: 10px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	color: var(--text);
+	font-size: 0.9rem;
+	font-weight: 500;
+	text-decoration: none;
+	cursor: pointer;
+	transition: border-color 0.2s;
+}
+
+.btn-sm {
+	padding: 6px 10px;
+	font-size: 0.8rem;
+}
+
+.btn:hover {
+	border-color: var(--accent);
+	background-color: #6366f1b3;
+}
+
+.btn-icon {
+	width: 40px;
+	height: 40px;
+	border-radius: 10px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	color: var(--text-secondary);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.btn-icon:hover {
+	background: var(--bg-card);
+	color: var(--text);
+	border-color: var(--text-muted);
+}
+
+.btn-icon svg {
+	width: 18px;
+	height: 18px;
+}
+
+.btn-icon.logged-in {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.sun,
+.moon {
+	display: block;
+}
+
+.light .sun {
+	display: none;
+}
+
+.light .moon {
+	display: block;
+}
+
+.moon {
+	display: none;
+}
+
+.hero {
+	text-align: center;
+	margin-bottom: 32px;
+}
+
+.hero h1 {
+	font-size: 2.2rem;
+	font-weight: 700;
+	margin-bottom: 12px;
+	line-height: 1.2;
+}
+
+.hero h1 span {
+	background: linear-gradient(135deg, var(--accent), #8b5cf6);
+	-webkit-background-clip: text;
+	-webkit-text-fill-color: transparent;
+	background-clip: text;
+}
+
+.hero p {
+	color: var(--text-secondary);
+	font-size: 1.05rem;
+}
+
+.upload-card {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	overflow: hidden;
+	margin-bottom: 24px;
+}
+
+.upload-header {
+	padding: 16px 20px;
+	border-bottom: 1px solid var(--border);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.upload-header h2 {
+	font-size: 1rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.upload-header h2 svg {
+	width: 18px;
+	height: 18px;
+	color: var(--accent);
+}
+
+.upload-header span {
+	font-size: 0.85rem;
+	color: var(--text-muted);
+}
+
+.upload-body {
+	padding: 16px;
+}
+
+.drop-zone {
+	border: 2px dashed var(--border);
+	border-radius: var(--radius);
+	background: var(--bg-secondary);
+	padding: 40px 20px;
+	text-align: center;
+	cursor: pointer;
+	transition: all 0.3s ease;
+	position: relative;
+}
+
+.drop-zone:hover,
+.drop-zone.dragover {
+	border-color: var(--accent);
+	background: rgba(99, 102, 241, 0.05);
+}
+
+.drop-zone.dragover {
+	transform: scale(1.01);
+}
+
+.drop-zone-icon {
+	width: 48px;
+	height: 48px;
+	margin: 0 auto 16px;
+	color: var(--text-muted);
+	transition: all 0.3s;
+}
+
+.drop-zone:hover .drop-zone-icon,
+.drop-zone.dragover .drop-zone-icon {
+	color: var(--accent);
+	transform: translateY(-4px);
+}
+
+.drop-zone-text {
+	color: var(--text-secondary);
+	font-size: 0.95rem;
+}
+
+.drop-zone-text span {
+	color: var(--accent);
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.drop-zone-text span:hover {
+	text-decoration: underline;
+}
+
+.drop-zone input[type="file"] {
+	display: none;
+}
+
+.login-prompt {
+	text-align: center;
+	margin-top: 16px;
+	padding: 16px;
+	background: var(--bg-hover);
+	border-radius: 10px;
+	border: 1px dashed var(--border);
+}
+
+.login-prompt p {
+	color: var(--text-secondary);
+	font-size: 0.9rem;
+}
+
+.login-prompt-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 8px;
+	padding: 8px 16px;
+	background: var(--accent);
+	color: white;
+	border: none;
+	border-radius: 8px;
+	font-size: 0.85rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.login-prompt-btn:hover {
+	background: var(--accent-hover);
+}
+
+.file-list {
+	margin-top: 16px;
+}
+
+.file-item {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 12px 14px;
+	margin-bottom: 10px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	position: relative;
+	overflow: hidden;
+	transition: all 0.3s ease;
+	animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+	from {
+		opacity: 0;
+		transform: translateY(-10px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.file-item.removing {
+	animation: slideOut 0.3s ease forwards;
+}
+
+@keyframes slideOut {
+	to {
+		opacity: 0;
+		transform: translateX(20px) scale(0.95);
+	}
+}
+
+.file-item.error {
+	background: rgba(239, 68, 68, 0.1);
+	border-color: rgba(239, 68, 68, 0.3);
+}
+
+.file-item.error-network {
+	background: rgba(245, 158, 11, 0.1);
+	border-color: rgba(245, 158, 11, 0.3);
+}
+
+.file-item.success {
+	background: rgba(34, 197, 94, 0.1);
+	border-color: rgba(34, 197, 94, 0.3);
+}
+
+.file-item.uploading {
+	background: rgba(99, 102, 241, 0.05);
+	border-color: rgba(99, 102, 241, 0.3);
+}
+
+.file-progress {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	height: 3px;
+	background: var(--accent);
+	transition: width 0.2s ease;
+	border-radius: 0 0 10px 10px;
+}
+
+.file-item.success .file-progress {
+	background: var(--success);
+}
+
+.file-item.error .file-progress,
+.file-item.error-network .file-progress {
+	display: none;
+}
+
+.file-icon {
+	width: 36px;
+	height: 36px;
+	min-width: 36px;
+	background: var(--bg-card);
+	border-radius: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 1.2rem;
+}
+
+.file-icon i,
+.result-icon i {
+	color: var(--accent);
+}
+
+.file-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.file-name {
+	font-weight: 500;
+	font-size: 0.9rem;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	margin-bottom: 2px;
+}
+
+.file-meta {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+	display: flex;
+	gap: 8px;
+}
+
+.file-status {
+	font-size: 0.8rem;
+	color: var(--text-secondary);
+	text-align: right;
+	min-width: 80px;
+}
+
+.file-status-main {
+	display: block;
+	font-weight: 500;
+}
+
+.file-status-sub {
+	display: block;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+}
+
+.file-item.error .file-status-main {
+	color: var(--danger);
+}
+
+.file-item.error-network .file-status-main {
+	color: var(--warning);
+}
+
+.file-item.success .file-status-main {
+	color: var(--success);
+}
+
+.file-actions {
+	display: flex;
+	gap: 6px;
+}
+
+.file-btn {
+	width: 32px;
+	height: 32px;
+	border-radius: 8px;
+	border: none;
+	background: var(--bg-card);
+	color: var(--text-secondary);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.file-btn:hover {
+	background: var(--border);
+	color: var(--text);
+}
+
+.file-btn.retry:hover {
+	color: var(--warning);
+}
+
+.file-btn.remove:hover {
+	color: var(--danger);
+}
+
+.file-btn svg {
+	width: 16px;
+	height: 16px;
+}
+
+.results {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 20px;
+	display: none;
+	animation: fadeIn 0.3s;
+}
+
+.results.show {
+	display: block;
+}
+
+@keyframes fadeIn {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.results-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 16px;
+}
+
+.results-header h3 {
+	font-size: 1rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.results-header h3 svg {
+	width: 18px;
+	height: 18px;
+	color: var(--success);
+}
+
+.copy-all {
+	background: var(--accent);
+	color: white;
+	border: none;
+	padding: 8px 14px;
+	border-radius: 8px;
+	font-size: 0.85rem;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.2s;
+	display: none;
+}
+
+.copy-all:hover {
+	filter: brightness(1.1);
+}
+
+/* C1: "Create collection" sits next to "Copy all"; styled as a secondary action. */
+.results-actions {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+
+#createCollectionHome {
+	background: var(--bg-secondary);
+	color: var(--text);
+	border: 1px solid var(--border);
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+}
+
+#createCollectionHome:hover {
+	filter: none;
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.result-item {
+	background: var(--bg-secondary);
+	border-radius: 10px;
+	padding: 14px;
+	margin-bottom: 12px;
+}
+
+.result-item:last-child {
+	margin-bottom: 0;
+}
+
+.result-main {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.result-icon {
+	font-size: 1.5rem;
+	position: relative;
+	width: 44px;
+	height: 44px;
+	flex-shrink: 0;
+	border-radius: 10px;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--surface-2, rgba(255, 255, 255, 0.04));
+}
+
+/* Server thumbnail over the emoji; removed on error (JS), revealing the emoji beneath. */
+.result-thumb {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.result-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.result-name {
+	font-weight: 600;
+	font-size: 0.95rem;
+	margin-bottom: 4px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.result-url {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.result-actions {
+	display: flex;
+	gap: 8px;
+}
+
+.result-btn {
+	width: 36px;
+	height: 36px;
+	border-radius: 8px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	color: var(--text-secondary);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+	text-decoration: none;
+}
+
+.result-btn:hover {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: white;
+}
+
+.result-btn svg {
+	width: 16px;
+	height: 16px;
+}
+
+.result-token {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px solid var(--border);
+}
+
+.token-label {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+	margin-bottom: 8px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.token-label svg {
+	width: 14px;
+	height: 14px;
+}
+
+.token-row {
+	display: flex;
+	gap: 8px;
+}
+
+.token-input {
+	flex: 1;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px 10px;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	font-family: monospace;
+}
+
+.token-copy {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 8px 12px;
+	font-size: 0.75rem;
+	color: var(--text-secondary);
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.token-copy:hover {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: white;
+}
+
+.toast {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%) translateY(100px);
+	background: var(--bg-card);
+	border: 1px solid var(--success);
+	color: var(--text);
+	padding: 12px 20px;
+	border-radius: 10px;
+	font-size: 0.9rem;
+	z-index: 1000;
+	transition: transform 0.3s;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.toast.show {
+	transform: translateX(-50%) translateY(0);
+}
+
+.toast svg {
+	color: var(--success);
+}
+
+.captcha-overlay {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	backdrop-filter: blur(12px) saturate(120%);
+	-webkit-backdrop-filter: blur(12px) saturate(120%);
+	display: none;
+	/* Raised toward the top on desktop (LinkedIn pattern); centered on mobile below. */
+	align-items: flex-start;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 6vh 16px 24px;
+	z-index: 1000;
+}
+
+.captcha-overlay.show {
+	display: flex;
+}
+
+.captcha-box {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 32px;
+	text-align: center;
+	max-width: 400px;
+}
+
+/* The password overlay carries the four-item requirement checklist, which does not fit on one
+   line at the 400px default — "Special character" / "Znak specjalny" dropped to a second row.
+   Widen just this box rather than every .captcha-box (the captcha widget itself is narrow). */
+.pw-box {
+	max-width: 480px;
+	width: 100%;
+}
+
+.captcha-box h3 {
+	margin-bottom: 8px;
+	font-size: 1.2rem;
+}
+
+.captcha-box p {
+	color: var(--text-secondary);
+	margin-bottom: 24px;
+	font-size: 0.9rem;
+	/* Long file names (underscores aren't break points) must wrap inside the modal. */
+	overflow-wrap: anywhere;
+}
+
+.captcha-widget {
+	display: flex;
+	justify-content: center;
+	margin-bottom: 16px;
+}
+
+.captcha-error {
+	color: var(--danger);
+	font-size: 0.85rem;
+	margin-top: 12px;
+	display: none;
+}
+
+.captcha-loading {
+	color: var(--text-secondary);
+	font-size: 0.85rem;
+}
+
+.session-info {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	text-align: center;
+	margin-top: 8px;
+}
+
+.session-info span {
+	color: var(--accent);
+}
+
+.auth-modal {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	backdrop-filter: blur(12px) saturate(120%);
+	-webkit-backdrop-filter: blur(12px) saturate(120%);
+	display: none;
+	/* Raised toward the top on desktop (LinkedIn pattern); centered on mobile below. */
+	align-items: flex-start;
+	justify-content: center;
+	overflow-y: auto;
+	padding: 6vh 16px 24px;
+	z-index: 1001;
+}
+
+.auth-modal.show {
+	display: flex;
+}
+
+.auth-box {
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	padding: 32px;
+	width: 100%;
+	max-width: 480px;
+	position: relative;
+	max-height: 90vh;
+	overflow-y: auto;
+}
+
+.auth-close {
+	position: absolute;
+	top: 16px;
+	right: 16px;
+	width: 32px;
+	height: 32px;
+	border: none;
+	background: var(--bg-secondary);
+	border-radius: 8px;
+	color: var(--text-muted);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all 0.2s;
+}
+
+.auth-close:hover {
+	background: var(--border);
+	color: var(--text);
+}
+
+.auth-box h3 {
+	margin-bottom: 8px;
+	font-size: 1.3rem;
+	text-align: center;
+}
+
+.auth-box>p {
+	color: var(--text-secondary);
+	margin-bottom: 24px;
+	font-size: 0.9rem;
+	text-align: center;
+}
+
+.auth-tabs {
+	display: flex;
+	gap: 8px;
+	margin-bottom: 24px;
+}
+
+.auth-tab {
+	flex: 1;
+	padding: 12px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	border-radius: 10px;
+	color: var(--text-secondary);
+	cursor: pointer;
+	font-size: 0.9rem;
+	font-weight: 500;
+	transition: all 0.2s;
+}
+
+.auth-tab.active {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: white;
+}
+
+.auth-tab:hover:not(.active) {
+	border-color: var(--text-muted);
+}
+
+.auth-form {
+	display: none;
+}
+
+.auth-form.active {
+	display: block;
+}
+
+.form-group {
+	margin-bottom: 16px;
+}
+
+.form-group label {
+	display: block;
+	margin-bottom: 8px;
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.auth-input {
+	width: 100%;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	background: var(--bg-secondary);
+	border-radius: 10px;
+	color: var(--text);
+	font-size: 0.95rem;
+	transition: border-color 0.2s, box-shadow 0.2s;
+	outline: none;
+}
+
+.auth-input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.auth-input::placeholder {
+	color: var(--text-muted);
+}
+
+.auth-input.error {
+	border-color: var(--danger);
+}
+
+.auth-input.success {
+	border-color: var(--success);
+}
+
+.pwd-meter {
+	height: 4px;
+	background: var(--border);
+	margin-top: 8px;
+	border-radius: 2px;
+	overflow: hidden;
+}
+
+.pwd-meter-fill {
+	height: 100%;
+	width: 0%;
+	background: var(--danger);
+	transition: width 0.3s ease, background 0.3s ease;
+}
+
+.pwd-reqs {
+	list-style: none;
+	padding: 0;
+	margin: 10px 0 0;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.pwd-reqs li {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	transition: color 0.3s;
+}
+
+.pwd-reqs li.valid {
+	color: var(--success);
+}
+
+.pwd-reqs li::before {
+	content: '\2022';
+}
+
+.pwd-reqs li.valid::before {
+	content: '\2713';
+}
+
+.field-status {
+	font-size: 0.8rem;
+	font-weight: 500;
+	margin-top: 6px;
+	max-height: 0;
+	opacity: 0;
+	overflow: hidden;
+	transition: all 0.3s ease;
+}
+
+.field-status.show {
+	max-height: 30px;
+	opacity: 1;
+	margin-top: 8px;
+}
+
+.field-status.status-ok {
+	color: var(--success);
+}
+
+.field-status.status-bad {
+	color: var(--danger);
+}
+
+.field-status.status-load {
+	color: var(--accent);
+}
+
+.auth-submit {
+	width: 100%;
+	padding: 14px;
+	border: none;
+	background: var(--accent);
+	color: white;
+	border-radius: 10px;
+	font-size: 0.95rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s;
+	margin-top: 8px;
+}
+
+.auth-submit:hover:not(:disabled) {
+	background: var(--accent-hover);
+}
+
+.auth-submit:active:not(:disabled) {
+	transform: scale(0.98);
+}
+
+.auth-submit:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.auth-message {
+	padding: 12px;
+	border-radius: 8px;
+	margin-bottom: 16px;
+	text-align: center;
+	font-size: 0.85rem;
+	display: none;
+}
+
+.auth-message.show {
+	display: block;
+	animation: fadeIn 0.3s;
+}
+
+.auth-message.error {
+	background: rgba(239, 68, 68, 0.1);
+	color: var(--danger);
+	border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.auth-message.success {
+	background: rgba(34, 197, 94, 0.1);
+	color: var(--success);
+	border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.auth-user {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 16px;
+	background: var(--bg-hover);
+	border-radius: 12px;
+	margin-bottom: 20px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-user-icon {
+	width: 48px;
+	height: 48px;
+	background: var(--accent);
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: white;
+	font-weight: 700;
+	font-size: 1.2rem;
+}
+
+.auth-user-info {
+	flex: 1;
+}
+
+.auth-user-name {
+	font-weight: 600;
+	font-size: 1rem;
+	margin-bottom: 2px;
+}
+
+.auth-user-role {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+}
+
+.auth-links {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.auth-link {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 14px 16px;
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	color: var(--text);
+	text-decoration: none;
+	transition: all 0.2s;
+	cursor: pointer;
+}
+
+.auth-link:hover {
+	border-color: var(--accent);
+	background: rgba(99, 102, 241, 0.1);
+}
+
+.auth-link svg {
+	width: 18px;
+	height: 18px;
+	color: var(--text-secondary);
+}
+
+.auth-link.danger:hover {
+	border-color: var(--danger);
+	background: rgba(239, 68, 68, 0.1);
+}
+
+.auth-link.danger:hover svg {
+	color: var(--danger);
+}
+
+#authGuest p {
+	margin-bottom: 1vh
+}
+
+#authGuest,
+#authUser {
+	transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#authGuest.fade-out {
+	opacity: 0;
+	transform: translateY(-10px);
+	pointer-events: none;
+}
+
+#authUser.fade-in {
+	animation: slideUp 0.4s ease;
+}
+
+@keyframes slideUp {
+	from {
+		opacity: 0;
+		transform: translateY(15px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (max-width: 600px) {
+	.container {
+		padding: 20px 16px;
+	}
+
+	.hero h1 {
+		font-size: 1.8rem;
+	}
+
+	.result-main {
+		flex-wrap: wrap;
+	}
+
+	.result-info {
+		flex-basis: calc(100% - 52px);
+	}
+
+	.result-actions {
+		flex-basis: 100%;
+		justify-content: flex-end;
+		margin-top: 8px;
+	}
+
+	.auth-box {
+		padding: 24px;
+	}
+
+	/* Keep overlays vertically centered on phones (raised only on desktop). */
+	.captcha-overlay,
+	.auth-modal {
+		align-items: center;
+		padding: 16px;
+	}
+}
+
+@keyframes fadeOut {
+	from {
+		opacity: 1;
+		transform: translateY(0);
+		max-height: 100px;
+		margin-bottom: 16px;
+		padding: 12px;
+		border-width: 1px;
+	}
+
+	to {
+		opacity: 0;
+		transform: translateY(10px);
+		max-height: 0;
+		margin-bottom: 0;
+		padding: 0;
+		border-width: 0;
+	}
+}
+
+.auth-message.fade-out {
+	animation: fadeOut 0.5s forwards;
+	overflow: hidden;
+	/* Ensure content doesn't spill during height collapse */
+}
+
+/* User Stats in Modal */
+.user-stats-grid {
+	display: flex;
+	gap: 12px;
+	margin-top: 16px;
+	margin-bottom: 24px;
+	justify-content: space-around;
+}
+
+.user-stat-card {
+	background: var(--bg-hover);
+	padding: 12px;
+	border-radius: 12px;
+	text-align: center;
+	border: 1px solid var(--border);
+	width: 100%;
+}
+
+.user-stat-card span {
+	display: block;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+}
+
+.user-stat-card strong {
+	display: block;
+	font-size: 1.1rem;
+	color: var(--accent);
+}
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
+
+/* ============================================================
+   Lifting v2 — glassmorphism, gradienty, dopracowane interakcje
+   (warstwa nadpisująca; spójna z instalatorem)
+   ============================================================ */
+
+.hero h1 {
+	font-size: 2.5rem;
+	letter-spacing: -0.02em;
+}
+
+.hero p {
+	font-size: 1.1rem;
+	opacity: 0.9;
+}
+
+.upload-card {
+	/* Solid "glass" look WITHOUT backdrop-filter — a large always-on blur over the
+	   animated orbs would force constant GPU compositing. Kept cheap on purpose. */
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 120px),
+		var(--bg-card);
+	border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+	border-radius: 20px;
+	box-shadow: 0 20px 50px -20px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.upload-header {
+	background: linear-gradient(180deg, rgba(99, 102, 241, 0.06), transparent);
+}
+
+.drop-zone {
+	border-width: 2px;
+	border-radius: 16px;
+	padding: 48px 20px;
+	background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+	transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+}
+
+.drop-zone:hover {
+	transform: translateY(-2px);
+}
+
+.drop-zone.dragover {
+	border-color: var(--accent);
+	background: rgba(99, 102, 241, 0.10);
+	box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+	transform: scale(1.005);
+}
+
+.drop-zone-icon {
+	transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.drop-zone:hover .drop-zone-icon,
+.drop-zone.dragover .drop-zone-icon {
+	transform: translateY(-4px) scale(1.06);
+}
+
+.results.show {
+	animation: fadeIn 0.4s ease both;
+}
+
+.result-item {
+	transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.result-item:hover {
+	border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+	box-shadow: 0 8px 24px -12px rgba(99, 102, 241, 0.4);
+}
+
+.result-btn {
+	transition: transform 0.15s ease, background 0.2s ease, color 0.2s ease;
+}
+
+/* Only the lift belongs here. This block used to also set `color: var(--accent)`, which —
+   being later than the earlier `.result-btn:hover { background: var(--accent); color: white }`
+   at the same specificity — won, leaving an accent-coloured icon on an accent-coloured
+   background: the button looked like an empty purple square while hovered. */
+.result-btn:hover {
+	transform: translateY(-1px);
+}
+
+/* QR modal. The collection-created view shows four actions (Open / Copy / Edit / Close); at the
+   400px default the last one wrapped onto its own line, so give this box more room too. */
+.qr-box {
+	text-align: center;
+	max-width: 480px;
+	width: 100%;
+}
+
+.qr-holder {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #fff;
+	border-radius: 16px;
+	padding: 16px;
+	margin: 16px auto 12px;
+	width: fit-content;
+	box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+
+.qr-holder img {
+	display: block;
+	border-radius: 4px;
+}
+
+.qr-link {
+	font-size: 0.8rem;
+	color: var(--text-muted);
+	word-break: break-all;
+	max-width: 360px;
+	margin: 0 auto;
+}
+
+/* Per-file password modal (opened from the upload result) */
+.pw-set-input {
+	width: 100%;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+	color: var(--text);
+	font-size: 0.95rem;
+	margin-bottom: 12px;
+}
+
+.pw-set-input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+.pw-set-input.success {
+	border-color: var(--success);
+}
+
+.pw-set-input.error {
+	border-color: var(--danger);
+}
+
+/* Password-strength UI inside the per-file password modal (matches account/panel) */
+.captcha-box .pwd-meter {
+	margin-top: 0;
+}
+
+.pw-set-reqs {
+	justify-content: center;
+	margin: 10px 0 14px;
+}
+
+.captcha-box .field-status {
+	text-align: center;
+}
+
+/* The input above already carries a 12px bottom margin, so drop the extra top gap
+   and instead separate the match message from the action buttons below it. */
+.captcha-box .field-status.show {
+	margin-top: 0;
+	margin-bottom: 14px;
+	max-height: 3em;
+}
+
+.pw-set-error {
+	color: var(--danger);
+	font-size: 0.88rem;
+	margin-bottom: 12px;
+}
+
+.pw-set-actions {
+	display: flex;
+	gap: 10px;
+	justify-content: center;
+	flex-wrap: wrap;
+}
+
+.btn.btn-primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #fff;
+}
+
+.btn.btn-primary:hover {
+	background: var(--accent-hover);
+	border-color: var(--accent-hover);
+}
+
+.btn.btn-clear {
+	color: var(--danger);
+}
+
+.btn.btn-clear:hover {
+	border-color: var(--danger);
+	background: transparent;
+}
+
+/* Padlock button highlighted when the file already has a password */
+.result-btn.has-pw {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+.result-btn.has-pw:hover {
+	color: #fff;
+}
+
+/* Anchored "Skopiowano" tooltip (positioned above the clicked button in JS) */
+.copy-tip {
+	position: fixed;
+	z-index: 3000;
+	pointer-events: none;
+	background: var(--bg-card, rgba(17, 17, 19, 0.97));
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 6px 12px;
+	font-size: 0.82rem;
+	font-weight: 500;
+	white-space: nowrap;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+	opacity: 0;
+	transform: translateY(4px);
+	transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.copy-tip.show {
+	opacity: 1;
+	transform: translateY(0);
+}
+
+.copy-tip::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	top: 100%;
+	transform: translateX(-50%);
+	border: 5px solid transparent;
+	border-top-color: var(--border);
+}
+
+/* Language switcher (Faza 4.3) */
+.lang-switch { display: inline-flex; gap: 2px; align-items: center; margin-right: 6px; }
+.lang-switch .lang-opt {
+    padding: 4px 7px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-decoration: none;
+    color: var(--text-muted, #94a3b8);
+    transition: background .15s, color .15s;
+}
+.lang-switch .lang-opt:hover { background: var(--bg-hover, rgba(148, 163, 184, .12)); color: var(--text); }
+.lang-switch .lang-opt.active { background: var(--accent); color: #fff; }
+
+/* Collection form on the upload page. Wider than the other overlays (.captcha-box caps at
+   400px, which squeezed the two-up row until the number fields were unreadable) and
+   left-aligned with real labels, so it reads like the panel's collection modal rather than a
+   column of bare placeholders. */
+.coll-box {
+	max-width: 520px;
+	width: 100%;
+	text-align: left;
+}
+.coll-box h3, .coll-box > p { text-align: center; }
+.coll-field { margin-bottom: 12px; }
+.coll-field label {
+	display: block;
+	margin-bottom: 5px;
+	font-size: 0.82rem;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+.coll-field .pw-set-input { margin-bottom: 0; }
+.coll-row { display: flex; gap: 12px; }
+.coll-row .coll-field { flex: 1; min-width: 0; }
+.coll-check {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 4px 0 14px;
+	font-size: 0.9rem;
+	color: var(--text-secondary);
+	cursor: pointer;
+}
+.coll-check input { width: 17px; height: 17px; accent-color: var(--accent); flex-shrink: 0; }
+/* The select needs the same treatment as the text inputs, plus room for the arrow. */
+/* pt 1: per-file password prompts inside the collection form, for installs that do not exempt
+   files uploaded in the current session. */
+.coll-locked {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	padding: 12px 14px;
+	margin-bottom: 14px;
+}
+.coll-locked > strong {
+	display: block;
+	font-size: 0.9rem;
+	margin-bottom: 4px;
+}
+.coll-locked > p {
+	color: var(--text-muted);
+	font-size: 0.82rem;
+	margin: 0 0 10px;
+	text-align: left;
+}
+.coll-locked .coll-field:last-child { margin-bottom: 0; }
+
+/* Collection-created dialog: the subtitle turns into a warning when files were left out. */
+.qr-warn {
+	color: var(--danger) !important;
+	overflow-wrap: anywhere;
+}
+
+.coll-box select.pw-set-input {
+	appearance: none;
+	background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 12px center;
+	background-size: 16px;
+	padding-right: 38px;
+	cursor: pointer;
+}
+
+/* Scrollbars + autofill, matching the panel. Without these the browser paints its default
+   light scrollbar and a near-white autofill background, both of which stand out badly
+   against the dark theme. See the equivalent block in panel.css. */
+html {
+	scrollbar-color: var(--border) transparent;
+}
+
+* {
+	scrollbar-width: thin;
+}
+*::-webkit-scrollbar { height: 10px; width: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 8px;
+	border: 2px solid transparent;
+	background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: content-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/**
+ * Autofilled fields.
+ *
+ * The browser paints its own background on an autofilled input and will not be talked out of it
+ * with `background-color`; the standard answer is a huge inset shadow, which is what these rules
+ * do. The catch is that the shadow has to be `!important` to win — and that also wipes out the
+ * *focus* ring, which is a box-shadow too. So a field the password manager had just filled and
+ * focused lost its soft glow and was left with nothing but a bare bright border: the "white
+ * edges" that appear only when autofill is involved.
+ *
+ * The fix is to state both shadows together for the focused case, rather than to give up either.
+ * Autofill itself stays exactly as it was — turning it off would be a far worse trade.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+	background-clip: padding-box !important;
+	-webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
+	box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
+	-webkit-text-fill-color: var(--text) !important;
+	/* The UA background also paints under the border, so restate the border the theme wants
+	   instead of letting a light ring show through at the rounded corners. */
+	border-color: var(--border) !important;
+	caret-color: var(--text);
+	transition: background-color 100000s ease-in-out 0s;
+}
+
+/* Focused *and* autofilled: the fill, then the ordinary focus ring on top of it. */
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:focus {
+	background-clip: padding-box !important;
+	-webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+	box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
+	-webkit-text-fill-color: var(--text) !important;
+	border-color: var(--accent) !important;
+	caret-color: var(--text);
+}
+
+input:autofill, textarea:autofill {
+	background-color: var(--bg-secondary) !important;
+	color: var(--text) !important;
+	border-color: var(--border) !important;
+}
+
+input:autofill:focus, textarea:autofill:focus {
+	border-color: var(--accent) !important;
+}
+
+/* "Apply to all" line inside the password overlay.
+   Spacing was lopsided: the collapsed .field-status above still contributes its 6px
+   margin-top, which stacked with the repeat field's 12px and this row's own 10px into a
+   ~28px gap, while only 4px separated it from the buttons — so it read as part of the button
+   group rather than of the form. Zero the collapsed status margin and even the two sides out. */
+.captcha-box .field-status:not(.show) {
+	margin-top: 0;
+}
+.pw-apply-all {
+	justify-content: center;
+	margin: 6px 0 18px;
+	font-size: 0.86rem;
+}
+
+/* Stacked toasts (FHUi.toast). Each entry is a clone of the page's own toast element, so it
+   arrives carrying `position: fixed; bottom; left; transform` — all of which have to be
+   neutralised here, because inside the stack the container does the positioning and the
+   items simply flow. Newest sits at the bottom, nearest the corner it grew from. */
+.toast-stack {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 8px;
+	z-index: 10001;
+	pointer-events: none;
+}
+.toast-stack .toast-item {
+	position: static;
+	left: auto;
+	right: auto;
+	bottom: auto;
+	top: auto;
+	margin: 0;
+	transform: translateY(8px);
+	opacity: 0;
+	transition: opacity 0.25s ease, transform 0.25s ease;
+	pointer-events: auto;
+}
+.toast-stack .toast-item.show {
+	transform: translateY(0);
+	opacity: 1;
+}
+
+/* Actions under the QR overlay. The collection-created view offers the same set as a
+   collection row in My Files (open / copy / edit); the per-file view hides Edit. */
+.qr-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: center;
+	margin-top: 18px;
+}
+.qr-actions .btn {
+	padding: 9px 16px;
+	font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ *
+ * Premium plans (pt 9) — the public plans page and the upload-page teaser.
+ * ------------------------------------------------------------------ */
+.btn-premium {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 8px 14px;
+	font-size: 0.85rem;
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+.btn-premium:hover {
+	background: var(--accent);
+	color: #fff;
+}
+
+.premium-intro,
+.premium-footer {
+	max-width: 780px;
+	margin: 0 auto 28px;
+	color: var(--text-secondary);
+	line-height: 1.7;
+}
+
+.premium-footer {
+	margin-top: 32px;
+	font-size: 0.9rem;
+}
+
+.premium-empty {
+	text-align: center;
+	color: var(--text-muted);
+	padding: 40px 0;
+}
+
+/* Promo code box (runda 9): one field under the plan grid, rewrites the checkout links. */
+.plan-checkout-form {
+	display: block;
+	width: 100%;
+	margin: 0;
+}
+
+.plan-checkout-form .btn {
+	font: inherit;
+	cursor: pointer;
+}
+
+.promo-box {
+	max-width: 420px;
+	margin: 26px auto 0;
+	padding: 16px 18px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	text-align: center;
+}
+.promo-box label { display: block; margin-bottom: 10px; color: var(--text-secondary); font-weight: 600; }
+.promo-box label i { color: var(--accent); margin-right: 6px; }
+.promo-row { display: flex; gap: 8px; }
+.promo-row input {
+	flex: 1;
+	min-width: 0;
+	padding: 10px 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--bg-secondary);
+	color: var(--text);
+	font: inherit;
+	text-transform: uppercase;
+}
+.promo-box small { display: block; margin-top: 8px; min-height: 1em; }
+
+/* pt 10: the built-in checkout's one line back to the buyer — a refusal on the way out, or
+   "we have your order, the confirmation is on its way" on the way back. Tinted from the
+   semantic colour so the three states read at a glance in either theme. */
+.premium-notice {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	max-width: 780px;
+	margin: 0 auto 24px;
+	padding: 14px 16px;
+	border-radius: 12px;
+	line-height: 1.6;
+	font-size: 0.93rem;
+	border: 1px solid;
+}
+
+.premium-notice.is-error {
+	background: color-mix(in srgb, var(--danger) 12%, transparent);
+	border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+	color: var(--text);
+}
+
+.premium-notice.is-success {
+	background: color-mix(in srgb, var(--success) 12%, transparent);
+	border-color: color-mix(in srgb, var(--success) 40%, transparent);
+	color: var(--text);
+}
+
+.premium-notice.is-info {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+	color: var(--text);
+}
+
+.premium-notice.is-error i { color: var(--danger); }
+.premium-notice.is-success i { color: var(--success); }
+.premium-notice.is-info i { color: var(--accent); }
+
+/**
+ * Cards keep a fixed comfortable width and wrap, rather than being placed by a grid.
+ *
+ * A grid with `auto-fit` gives every row the same number of columns, so a fifth plan leaves
+ * three cards on one line and two stretched oddly on the next. Wrapping flex items centre
+ * whatever is left over, which is what a pricing page wants: four across, then two centred
+ * underneath. `align-items: stretch` keeps every card in a row the same height, so the prices
+ * and buttons line up.
+ */
+.plan-grid {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-items: stretch;
+	gap: 22px;
+	margin-bottom: 20px;
+	margin-left: auto;
+	margin-right: auto;
+}
+
+/**
+ * Don't leave a single card stranded on its own line.
+ *
+ * With a 1320px container four cards fit per row, which is right up to the moment the count is
+ * five: 4 + 1 puts one card alone under a full row and reads like a mistake. Capping the row at
+ * three turns that into 3 + 2, which looks deliberate. The same arithmetic makes nine wrap
+ * 3 + 3 + 3 instead of 4 + 4 + 1.
+ *
+ * Only the counts that would actually strand a card are touched — six is 3 + 3 either way,
+ * seven is 4 + 3, eight is 4 + 4, and all of those are fine as they are.
+ */
+.plan-grid:has(.plan-card:nth-child(5)):not(:has(.plan-card:nth-child(6))),
+.plan-grid:has(.plan-card:nth-child(9)):not(:has(.plan-card:nth-child(10))) {
+	max-width: 1000px;
+}
+
+.plan-card {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	flex: 0 1 300px;
+	max-width: 310px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 20px;
+	padding: 28px 22px 24px;
+	transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.plan-card:hover {
+	transform: translateY(-4px);
+	border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+	box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.plan-card,
+	.plan-card:hover {
+		transition: none;
+		transform: none;
+	}
+}
+
+@media (max-width: 640px) {
+	.plan-card {
+		max-width: 100%;
+	}
+}
+
+/* The featured plan is lifted rather than recoloured, so it still reads in both themes. */
+.plan-card.is-featured {
+	border-color: var(--accent);
+	box-shadow: 0 16px 40px -22px var(--accent);
+}
+
+/* pt 6: the plan you are actually on. A green border alone was easy to miss on a page whose
+   whole job is to draw the eye to the *other* cards, so the owned one gets a tint and a label
+   as well — and keeps its button, because the thing you do with your own plan is renew it. */
+.plan-card.is-owned {
+	border-color: var(--success);
+	background: linear-gradient(180deg, color-mix(in srgb, var(--success) 9%, transparent), transparent 55%), var(--bg-card);
+	box-shadow: 0 16px 40px -24px var(--success);
+}
+
+/**
+ * The badges sit in one row straddling the top border, rather than as two independent absolute
+ * boxes.
+ *
+ * As separate elements they collided the moment a card had both — the operator's own badge on
+ * the left and "Twój plan" on the right — because neither knew about the other. A flex row with
+ * `justify-content: space-between` gives each an end of the card and lets a long badge push
+ * instead of overlap.
+ */
+.plan-badges {
+	position: absolute;
+	top: -11px;
+	left: 16px;
+	right: 16px;
+	display: flex;
+	justify-content: space-between;
+	gap: 6px;
+	pointer-events: none;
+	z-index: 2;
+}
+
+.plan-badge-item {
+	font-size: 0.72rem;
+	font-weight: 600;
+	letter-spacing: 0.3px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	white-space: nowrap;
+	box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.plan-badge-item.accent { background: var(--accent); color: #fff; }
+/* `margin-left: auto` so it stays at the right edge even when it is the only badge there. */
+.plan-badge-item.success { background: var(--success); color: #fff; margin-left: auto; }
+
+/**
+ * The renew button and the "active until …" line stack rather than fight for one row.
+ *
+ * `min-height` is what makes the footers line up across cards: one card ends in a button, its
+ * neighbour in a single line of text, and without a floor the text-only card was ~20px shorter,
+ * so the bottom edges of the ledgers above them did not agree. 46px is a `.btn` — 0.9rem line
+ * plus its 12px padding — so the floor is exactly "one button tall".
+ */
+.plan-cta {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	justify-content: center;
+	gap: 10px;
+	margin-top: 14px;
+	min-height: 46px;
+}
+
+/**
+ * A card with no limits ledger has nothing else to push the button down, so the button takes
+ * the job — which is why this deliberately overrides the 14px above with `auto`: the two are
+ * doing different jobs. `auto` puts the button on the floor of the card so the CTAs of a short
+ * and a tall card line up; the padding then guarantees the gap, because an auto margin
+ * collapses to nothing the moment a card is full and on the tallest card in a row the button
+ * ended up jammed against the last feature.
+ */
+.plan-card:not(:has(.plan-limits)) .plan-cta {
+	margin-top: auto;
+	padding-top: 14px;
+}
+
+.plan-card h3 {
+	font-size: 1.15rem;
+	margin: 0 0 10px;
+}
+
+.plan-price {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin-bottom: 16px;
+}
+
+.plan-price strong {
+	font-size: 1.7rem;
+	line-height: 1.1;
+}
+
+.plan-price span {
+	color: var(--text-muted);
+	font-size: 0.85rem;
+}
+
+.plan-desc {
+	color: var(--text-secondary);
+	font-size: 0.9rem;
+	line-height: 1.6;
+	margin-bottom: 14px;
+}
+
+/* The bottom margin is the *minimum* gap before whatever follows: the limits ledger is pinned
+   to the bottom of the card, so on the tallest card in a row its auto margin collapses to
+   nothing and this is the only thing keeping the separator off the last feature. */
+.plan-features {
+	list-style: none;
+	padding: 0;
+	margin: 0 0 26px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: 0.9rem;
+	color: var(--text-secondary);
+}
+
+.plan-features li {
+	display: flex;
+	align-items: flex-start;
+	gap: 9px;
+}
+
+.plan-features i {
+	color: var(--success);
+	margin-top: 3px;
+	flex-shrink: 0;
+}
+
+/* The group's actual limits, as a label/value ledger rather than more ticked bullets: these
+   are numbers to compare across cards, and a column of them lines up between cards where a
+   sentence would not. */
+/* Pinned to the bottom of the card (`margin-top: auto`), so the ledgers of three cards sit on
+   one line however much prose each of them carries above. The padding is above the rule rather
+   than below it, so a full card cannot end up with its separator touching the last feature. */
+.plan-limits {
+	margin: 0;
+	margin-top: auto;
+	padding: 18px 0 0;
+	border-top: 1px solid var(--border);
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	font-size: 0.88rem;
+}
+
+.plan-limit {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.plan-limit dt {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	color: var(--text-secondary);
+	min-width: 0;
+}
+
+.plan-limit dt i {
+	color: var(--text-muted);
+	width: 14px;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+.plan-limit dd {
+	margin: 0;
+	font-weight: 600;
+	text-align: right;
+	white-space: nowrap;
+}
+
+/* The two showcase kinds are not offers, so they do not compete for attention with the cards
+   that are: no accent border, and a quieter surface. */
+.plan-card.is-free,
+.plan-card.is-guest {
+	background: color-mix(in srgb, var(--bg-card) 92%, transparent);
+}
+
+.plan-card.is-guest .plan-price strong {
+	color: var(--text-secondary);
+}
+
+/* The bottom-pinning that used to live here has moved up to the main `.plan-cta` block, where
+   it now applies only to cards without a limits ledger. Left here it overrode that block
+   wholesale — later in the file, same specificity — so every card got `auto` and the 14px gap
+   above the button never happened. */
+.plan-cta .btn {
+	width: 100%;
+	justify-content: center;
+}
+
+/* Same box as a `.btn`, so a card whose footer is a sentence is exactly as tall as one whose
+   footer is a button. */
+.plan-owned {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	color: var(--success);
+	font-size: 0.9rem;
+	font-weight: 500;
+	padding: 12px 20px;
+	box-sizing: border-box;
+}
+
+/* "This tier exists, it just isn't yours right now" — a statement of fact, not a tick. */
+.plan-owned-muted {
+	color: var(--text-muted);
+	font-weight: 400;
+}
+
+/* Rendered Markdown, shared by the intro/footer copy and the per-plan descriptions. */
+.md-body h2, .md-body h3, .md-body h4 { margin: 18px 0 8px; }
+.md-body p { margin: 0 0 10px; }
+.md-body ul, .md-body ol { margin: 0 0 10px; padding-left: 22px; }
+.md-body li { margin-bottom: 4px; }
+.md-body code {
+	background: var(--bg-secondary);
+	border-radius: 4px;
+	padding: 1px 5px;
+	font-size: 0.88em;
+}
+.md-body a { color: var(--accent); }
+.md-body hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* Upload-page teaser: one line linking to the full page, not a second pricing table. */
+/* The teaser sits under whatever the page last showed. `.upload-card` carries a bottom margin
+   so it looked fine there, but the results panel does not — and once an upload finished, the
+   teaser was glued to it. Its own top margin covers both cases: between two block siblings it
+   collapses with the card's 24px instead of adding to it, so the gap is the same either way. */
+.premium-teaser {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	max-width: 720px;
+	margin: 24px auto 28px;
+	padding: 14px 18px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	text-decoration: none;
+	color: inherit;
+	transition: border-color .15s, transform .15s;
+}
+
+.premium-teaser:hover {
+	border-color: var(--accent);
+	transform: translateY(-1px);
+}
+
+.premium-teaser > i:first-child { color: var(--accent); font-size: 1.2rem; }
+.premium-teaser > i:last-child { color: var(--text-muted); margin-left: auto; }
+.premium-teaser span { display: flex; flex-direction: column; gap: 2px; }
+.premium-teaser strong { font-size: 0.95rem; }
+.premium-teaser small { color: var(--text-muted); font-size: 0.83rem; }
+
+/* Focus ring (see panel.css for the reasoning): a designed accent ring instead of the
+   browser's near-white default, and only for keyboard navigation. */
+.btn:focus-visible,
+.btn-icon:focus-visible,
+.lang-opt:focus-visible,
+.action-btn:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 8px;
+}
+.resend-activation-container {
+	margin-top: 16px;
+	padding-top: 16px;
+	border-top: 1px solid rgba(255, 255, 255, 0.1);
+	text-align: center;
+	width: 100%;
+}
+
+.btn-resend {
+	background: transparent;
+	border: 1px solid #32323b;
+	color: var(--text);
+	padding: 8px 16px;
+	border-radius: 6px;
+	cursor: pointer;
+	transition: all 0.2s;
+	font-size: 0.9rem;
+	width: 75%;
+	justify-content: center;
+	margin: 0 auto;
+	display: inline-flex;
+}
+
+.btn-resend:hover {
+	background: rgba(255, 255, 255, 0.05);
+	border-color: var(--text-muted, #666);
+}
+
+.resend-confirm-prompt {
+	margin-bottom: 8px;
+	font-size: 0.9em;
+	color: var(--text-secondary);
+}
+
+.resend-confirm-actions {
+	display: flex;
+	gap: 8px;
+	justify-content: center;
+}
+
+.resend-status {
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.resend-status.success {
+	color: var(--success);
+}

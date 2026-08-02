@@ -1,0 +1,251 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  repository-policy:
+    name: Syntax, secrets and pinned inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@ccf2c627fe61b1b4d924adfcbd19d661a18133a0 # 2.35.2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: none
+        env:
+          fail-fast: true
+
+      - name: Enforce repository policy
+        run: php scripts/check-repository-policy.php
+
+      - name: Lint PHP
+        run: find public scripts src tests/php -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Install locked PHP analysis dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist --no-scripts
+
+      - name: Run PHPStan
+        run: composer analyse
+
+      - name: Compile Python
+        run: python3 -m compileall -q upload_server.py tests/python
+
+      - name: Test shared browser UI helpers
+        run: node --test tests/js/*.test.js
+
+      - name: Validate shell scripts
+        run: find . -type f -name '*.sh' -not -path './venv/*' -print0 | xargs -0 -r -n1 bash -n
+
+      - name: Validate Compose model
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_PASSWORD: ci-app-password
+          FILEHOST_CANONICAL_URL: http://localhost:8080
+        run: docker compose config --quiet
+
+  php-repositories:
+    name: PHPUnit (${{ matrix.database }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.4']
+        database:
+          - mysql-8.4
+          - mariadb-11.4
+        include:
+          - php: '8.1'
+            phpunit_version: '10.5.64'
+            phpunit_sha256: a823d916151f628dd9943ccc81a98bcfbba9c5babf53f27be6c7dccc89f8ee23
+          - php: '8.4'
+            phpunit_version: '11.5.56'
+            phpunit_sha256: 915fa161f496dc04a45cd6032855879bca0bab644048cd0516982dffe678e9f1
+          - database: mysql-8.4
+            database_image: mysql:8.4
+          - database: mariadb-11.4
+            database_image: mariadb:11.4
+
+    services:
+      database:
+        image: ${{ matrix.database_image }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@ccf2c627fe61b1b4d924adfcbd19d661a18133a0 # 2.35.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_mysql, openssl
+          coverage: none
+          tools: none
+        env:
+          fail-fast: true
+
+      - name: Wait for SQL server
+        run: |
+          for attempt in {1..60}; do
+            if php -r 'new PDO("mysql:host=127.0.0.1;port=3306;charset=utf8mb4", "root", "root", [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);' 2>/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "SQL service did not become ready" >&2
+          exit 1
+
+      - name: Download verified PHPUnit
+        env:
+          PHPUNIT_VERSION: ${{ matrix.phpunit_version }}
+          PHPUNIT_SHA256: ${{ matrix.phpunit_sha256 }}
+        run: |
+          curl --fail --location --silent --show-error \
+            --output tools/phpunit.phar \
+            "https://phar.phpunit.de/phpunit-${PHPUNIT_VERSION}.phar"
+          echo "${PHPUNIT_SHA256}  tools/phpunit.phar" | sha256sum --check --strict
+
+      - name: Run repository tests
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_USER: root
+          TEST_DB_PASS: root
+          ALLOW_DESTRUCTIVE_TEST_DB: "YES"
+        run: |
+          TEST_DB_NONCE="$(php -r 'echo bin2hex(random_bytes(12));')"
+          export TEST_DB_NONCE
+          export TEST_DB_NAME="filehost_ci_test_${TEST_DB_NONCE}"
+          php tools/phpunit.phar -c tests/php/phpunit.xml
+
+  python-upload-server:
+    name: pytest (Python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.14']
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install dependencies
+        run: python -m pip install --require-hashes -r requirements-dev-lock.txt
+
+      - name: Verify dependency environment
+        run: python -m pip check
+
+      - name: Run Ruff
+        if: matrix.python == '3.14'
+        run: python -m ruff check upload_server.py tests/python
+
+      - name: Run pytest
+        run: python -m pytest tests/python -q
+
+  docker-smoke:
+    name: Docker fresh install and transfer smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs:
+      - repository-policy
+      - php-repositories
+      - python-upload-server
+    env:
+      MYSQL_ROOT_PASSWORD: ci-root-password
+      MYSQL_DATABASE: filehost_ci
+      MYSQL_USER: filehost_ci
+      MYSQL_PASSWORD: ci-app-password
+      HTTP_PORT: '8080'
+      FILEHOST_CANONICAL_URL: http://localhost:8080
+      FILEHOST_INSTALL_TOKEN: ci-bootstrap-token-not-used-by-cli-smoke
+      FILEHOST_INSTALL_ALLOW_IPS: 172.16.0.0/12
+      FILEHOST_DOWNLOAD_LEASE_SECONDS: '5'
+      FILEHOST_CI_SMOKE: '1'
+      FILEHOST_CI_PREBODY_DELAY_MS: '5000'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker compose build --pull app
+
+      - name: Start isolated stack
+        run: docker compose up --detach db app
+
+      - name: Bootstrap fresh schema
+        run: |
+          docker compose exec --no-TTY --user www-data \
+            -e FILEHOST_CI_BOOTSTRAP=1 \
+            -e FILEHOST_DB_HOST=db \
+            -e FILEHOST_DB_USER="${MYSQL_USER}" \
+            -e FILEHOST_DB_PASS="${MYSQL_PASSWORD}" \
+            -e FILEHOST_DB_NAME="${MYSQL_DATABASE}" \
+            -e FILEHOST_DB_PREFIX=fh_ \
+            -e FILEHOST_CANONICAL_URL="${FILEHOST_CANONICAL_URL}" \
+            app php scripts/ci-bootstrap-install.php
+          docker compose restart app
+
+      - name: Wait for page and readiness
+        run: |
+          for attempt in {1..90}; do
+            page_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+              "${FILEHOST_CANONICAL_URL}/" || true)"
+            ready_status="$(docker compose exec --no-TTY app /app/venv/bin/python -c \
+              'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8001/ready", timeout=2).status)' \
+              2>/dev/null || true)"
+            if [ "${page_status}" = "200" ] && [ "${ready_status}" = "200" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs --no-color app
+          exit 1
+
+      - name: Exercise upload and interrupted-download lifecycle
+        run: bash tests/smoke/docker-transfer.sh
+
+      - name: Verify relational integrity
+        run: docker compose exec --no-TTY --user www-data app php scripts/check-db-integrity.php --json
+
+      - name: Verify storage manifests and checksums
+        run: docker compose exec --no-TTY --user www-data app php scripts/check-storage-integrity.php --json
+
+      - name: Show container logs after failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Remove isolated stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans

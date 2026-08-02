@@ -1,0 +1,479 @@
+/* Settings */
+.settings-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+}
+
+.settings-section h3 {
+    font-size: 1rem;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Overview cards on Settings → System reuse .stat inside a .settings-section. The section's
+   own `h3` rule has the same specificity but comes later, so it was winning and rendering the
+   figures small, underlined and left-aligned. Restore the stat look inside sections. */
+.settings-section .stat h3 {
+    font-size: 1.8rem;
+    color: var(--accent);
+    display: block;
+    text-align: center;
+    border-bottom: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+.settings-section .stat p {
+    text-align: center;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+/* `.form-check` wraps a checkbox + its text. It is `display:flex` so the two align on one
+   row — but when the label also sits inside a `.form-group`, the lower-specificity `.form-check`
+   (0,1,0) lost to `.form-group label { display:block }` (0,1,1), stacking the checkbox above
+   the text. The second selector below (0,2,1) wins so the row aligns everywhere. */
+.form-check,
+.form-group label.form-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.form-check input[type="checkbox"] {
+    /* Theme the native control instead of the browser's white default (A1.3 / #8). */
+    accent-color: var(--accent);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+/* Number inputs: theme the native up/down spinners (dark by default, light in light theme)
+   instead of the browser's white default. */
+input[type="number"] {
+    color-scheme: dark;
+}
+
+.light input[type="number"] {
+    color-scheme: light;
+}
+
+/* Filters */
+.filters {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.search {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.search:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* Utility field class used by selects outside .form-group (e.g. the filter bars in
+   Tracking). Without it they fell back to the browser's default white control.
+   Selects inside .form-group keep their own rule, which is more specific. */
+.input {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* Modal */
+.modal-bg {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(12px) saturate(120%);
+    -webkit-backdrop-filter: blur(12px) saturate(120%);
+    display: none;
+    /* Raised toward the top on desktop (LinkedIn pattern); centered on mobile below. */
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 6vh 16px 24px;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+}
+
+.modal-bg.show {
+    display: flex;
+    opacity: 1;
+}
+
+/* Keep panel modals vertically centered on phones (raised only on desktop). */
+@media (max-width: 600px) {
+    .modal-bg,
+    .auth-modal {
+        align-items: center;
+        padding: 16px;
+    }
+}
+
+.modal-bg.show .modal {
+    animation: modalPop 0.28s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes modalPop {
+    from { opacity: 0; transform: translateY(14px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+
+.modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 0;
+    max-width: 480px;
+    width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Wider modal for tables/forms with several fields (e.g. group management). */
+.modal.modal-lg {
+    max-width: 720px;
+}
+
+/* Compact modal for a single-question prompt (a password before a download). */
+.modal.modal-sm {
+    max-width: 420px;
+}
+
+/* Medium modal for forms with a dropzone or wide option rows (the ad forms): at 480px the
+   uploaded-banner thumbnail plus its "recrop"/"remove" buttons overflowed the dashed border. */
+.modal.modal-md {
+    max-width: 620px;
+}
+
+/* Documentation viewer: prose needs more room than a form — at 720px the shipped tables and
+   code blocks in STORAGE.md wrapped awkwardly. Capped by the viewport so it still fits. */
+.modal.modal-doc {
+    max-width: min(1000px, 92vw);
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.modal h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+.modal p {
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.modal-btns {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 24px;
+    flex-wrap: wrap;
+}
+
+/* The filter dialogs are a long scroll of sections, so their buttons get a little more air
+   and a rule of their own — the row is a different kind of thing from the criteria above it,
+   and at 24px it read as one more section (pt 4). */
+.modal-body > .flt-section + .modal-btns,
+#filtersModal .modal-btns,
+#myFiltersModal .modal-btns {
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+
+/* Created-collection result (pkt 1). Class names, spacing and order are deliberately the same
+   as the upload page's dialog (index.css `.qr-*`) — it is the same screen for the same event,
+   and it used to look like two unrelated designs. */
+.qr-result {
+    text-align: center;
+    padding: 8px 0 4px;
+}
+
+.qr-result h3 {
+    justify-content: center;
+    font-size: 1.2rem;
+    margin-bottom: 8px;
+}
+
+.qr-result > p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 20px;
+}
+
+.qr-holder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    margin: 0 auto 12px;
+    width: fit-content;
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+
+.qr-holder img {
+    display: block;
+    border-radius: 4px;
+}
+
+.qr-link {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    word-break: break-all;
+    max-width: 360px;
+    margin: 0 auto;
+}
+
+.qr-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 18px;
+}
+
+.qr-actions .btn {
+    padding: 9px 16px;
+    font-size: 0.85rem;
+}
+
+.cc-rejected {
+    background: rgba(239, 68, 68, 0.08);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+.cc-rejected strong {
+    display: block;
+    color: var(--danger);
+    font-size: 0.9rem;
+    margin-bottom: 6px;
+}
+
+.cc-rejected p {
+    margin: 0 0 6px;
+    font-size: 0.88rem;
+    overflow-wrap: anywhere;
+}
+
+.cc-rejected small {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+/* Status badges */
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.user-group-badges {
+    display: inline-flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+}
+
+.group-name-cell {
+	display: grid;
+	justify-items: start;
+	gap: 6px;
+	min-width: 150px;
+}
+
+.group-name-badges {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.group-name-badges .badge {
+	padding: 3px 7px;
+	border-radius: 999px;
+	font-size: .64rem;
+	letter-spacing: .02em;
+}
+
+.badge-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--success);
+}
+
+.badge-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
+.badge-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.badge-info {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+}
+
+.badge-muted {
+    background: var(--bg-hover, rgba(148, 163, 184, 0.15));
+    color: var(--text-muted);
+}
+
+/* Inline per-file share badges next to the filename (one-time / password / expiry). */
+.file-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    white-space: nowrap;
+    vertical-align: middle;
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.file-badge.used {
+    background: var(--bg-hover, rgba(148, 163, 184, 0.15));
+    color: var(--text-muted);
+}
+
+/* Stable first-load skeleton. One compact shimmer masks auto-layout until real rows settle;
+   simulating every column made small result sets shrink from a large fake table. */
+.table-wrap.table-loading {
+    position: relative;
+    min-height: var(--table-loader-height, 104px);
+    overflow: hidden;
+}
+
+.table-loading-target {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.table-loading-overlay {
+    position: absolute;
+    z-index: 4;
+    inset: 0 0 auto;
+    display: grid;
+    width: 100%;
+    min-height: 104px;
+    place-items: center;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--bg-card);
+    border-radius: inherit;
+    opacity: 1;
+    transition: opacity 160ms ease;
+}
+
+.table-loading-overlay.is-leaving {
+    opacity: 0;
+}
+
+.skel {
+    display: inline-block;
+    width: var(--skel-width, 64%);
+    max-width: 100%;
+    height: 12px;
+    min-width: 24px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--border) 37%, var(--bg-secondary) 63%);
+    background-size: 400% 100%;
+    animation: skelShimmer 1.4s ease infinite;
+}
+
+.table-loading-indicator {
+    width: min(280px, 55%);
+    min-width: 96px;
+}
+
+@keyframes skelShimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skel { animation: none; }
+    .table-loading-overlay { transition: none; }
+}
+

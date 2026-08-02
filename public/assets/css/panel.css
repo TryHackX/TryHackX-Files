@@ -1,0 +1,1052 @@
+:root {
+    --bg: #09090b;
+    --bg-card: #111113;
+    --bg-secondary: #18181b;
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --text: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+    --accent: #6366f1;
+    --border: #27272a;
+    --success: #22c55e;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+}
+
+.light {
+    --bg: #fafafa;
+    --bg-card: #ffffff;
+    --bg-secondary: #f4f4f5;
+    --text: #09090b;
+    --bg-hover: rgba(0, 0, 0, 0.03);
+    --text-secondary: #52525b;
+    --text-muted: #a1a1aa;
+    --border: #e4e4e7;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+.container {
+    /* Data-heavy administration screens need enough room for meaningful columns.
+       Narrow viewports still use the full available width and scroll tables locally. */
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Scrollbars styled to match the panel instead of the OS default light bar. Applied to the
+   whole document (and every element) rather than just .table-wrap: any new scrollable area —
+   the docs viewer, the filter chip lists, a tall modal — otherwise shows up as a bright
+   white bar against the dark UI. Firefox uses the standard properties, WebKit/Blink the
+   ::-webkit- ones. */
+html {
+    scrollbar-color: var(--border) transparent;
+}
+
+/* scrollbar-color inherits, scrollbar-width does not — so the width needs the wildcard or
+   nested scrollers (the docs viewer, chip lists) keep the OS default bar. */
+* {
+    scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+    background-clip: content-box;
+}
+
+/* WebKit needs the corner painted too, or it stays the default light square where a
+   horizontal and a vertical bar meet. */
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Login */
+.login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(ellipse at top, rgba(99, 102, 241, 0.1), transparent 50%);
+}
+
+.login-box {
+    width: 100%;
+    max-width: 380px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+}
+
+.login-box h1 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.login-box>p {
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+    font-size: 0.9rem;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-size: 0.95rem;
+    font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.form-group small {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* Checkboxes/radios: brand accent + dark rendering so unchecked boxes aren't stark white
+   in dark mode (A1). Light theme restores the native light control. */
+input[type="checkbox"],
+input[type="radio"],
+/* Number/date/time spinners and the date-picker button are native widgets: without
+   color-scheme they render as bright white squares on the dark theme. */
+input[type="number"],
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"],
+input[type="file"],
+/* Text-ish controls join the list for the autofill case: the background the browser paints
+   on a filled field follows the declared colour scheme, so saying "dark" here is what stops it
+   arriving as a pale rectangle in the first place. */
+input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+textarea,
+select {
+	accent-color: var(--accent);
+	color-scheme: dark;
+}
+.light input[type="checkbox"],
+.light input[type="radio"],
+.light input[type="number"],
+.light input[type="date"],
+.light input[type="time"],
+.light input[type="datetime-local"],
+.light input[type="month"],
+.light input[type="week"],
+.light input[type="file"],
+.light input[type="text"],
+.light input[type="password"],
+.light input[type="email"],
+.light input[type="search"],
+.light input[type="url"],
+.light input[type="tel"],
+.light textarea,
+.light select {
+	color-scheme: light;
+}
+
+/* Bare (non-.form-group) inputs inside modals — e.g. the read-only key/secret/collection-URL
+   fields — must match the themed input look, not the browser default white box (A3/A4). */
+.modal input[type="text"],
+.modal input[type="url"],
+.modal input[type="number"],
+.modal input[type="password"],
+.modal input[type="email"],
+.modal select,
+.modal textarea {
+    background: var(--bg-secondary);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit;
+}
+.modal input[type="text"]:not(.form-group input),
+.modal input[type="url"]:not(.form-group input) {
+    padding: 12px 14px;
+}
+.modal input[readonly] {
+    color: var(--text-secondary);
+    cursor: text;
+}
+
+/* 2FA enrolment QR: segno emits a 205×205 SVG with NO viewBox, so forcing a smaller CSS
+   width (the old A6 clamp to the 188px tile) *clipped* the QR — without a viewBox CSS can
+   only crop, not scale — which is why it was cut off. Fix: the white tile shrink-wraps the
+   QR (width:fit-content, no fixed height in the markup) and the SVG renders at its natural
+   size, capped to the tile on narrow screens. A viewBox is injected in JS (start2faSetup)
+   so that cap scales the QR down instead of clipping it. */
+#twofaQr {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#twofaQr svg,
+#twofaQr img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+}
+
+.alert {
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+}
+
+/* C3: search-match highlight + matched-file chips under a collection row. */
+.search-hl {
+    background: var(--accent);
+    color: #fff;
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+.coll-matches {
+    margin-top: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+.coll-match {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    padding: 1px 8px;
+    border-radius: 20px;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.coll-match i {
+    color: var(--accent);
+    margin-right: 3px;
+}
+
+.coll-match-more {
+    font-size: 0.76rem;
+    color: var(--text-muted);
+}
+
+.alert-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+}
+
+.alert-success {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.btn:hover {
+    border-color: var(--accent);
+    background-color: #6366f1b3;
+}
+
+.btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #5558e3;
+}
+
+.btn-danger {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.btn-success {
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.btn-success:hover {
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.btn-full {
+    width: 100%;
+    justify-content: center;
+}
+
+.btn-sm {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+}
+
+.btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.header h1 {
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header h1 span {
+    font-size: 0.7rem;
+    background: var(--accent);
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: white;
+}
+
+.header-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+/* User info */
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+}
+
+.user-avatar {
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.user-name {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.user-role {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+/* Theme toggle */
+.theme-toggle {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.theme-toggle svg {
+    width: 18px;
+    height: 18px;
+}
+
+.sun-icon,
+.moon-icon {
+    display: block;
+}
+
+.light .sun-icon {
+    display: none;
+}
+
+.light .moon-icon {
+    display: block;
+}
+
+.moon-icon {
+    display: none;
+}
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.tab {
+    padding: 10px 20px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.tab:hover {
+    color: var(--text);
+    border-color: var(--border);
+}
+
+.tab.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* Sub tabs */
+.sub-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.sub-tab {
+    padding: 8px 14px;
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+}
+
+.sub-tab:hover {
+    color: var(--text);
+}
+
+.sub-tab.active {
+    background: var(--bg-card);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Stats */
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+}
+
+.stat h3 {
+    font-size: 1.8rem;
+    color: var(--accent);
+}
+
+.stat p {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+
+/* Auth Message Style (consistency with login modal) */
+.auth-message {
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+    display: none;
+    text-align: center;
+}
+
+.auth-message.show {
+    display: block;
+    animation: fadeIn 0.3s;
+}
+
+.auth-message.error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.auth-message.success {
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 100px;
+        margin-bottom: 16px;
+        padding: 12px;
+        border-width: 1px;
+    }
+
+    to {
+        opacity: 0;
+        transform: translateY(10px);
+        max-height: 0;
+        margin-bottom: 0;
+        padding: 0;
+        border-width: 0;
+    }
+}
+
+.auth-message.fade-out {
+    animation: fadeOut 0.5s forwards;
+    overflow: hidden;
+}
+
+/* Modern Notification (Toast) */
+.modern-notification {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(17, 17, 19, 0.95);
+    /* var(--bg-card) */
+    border: 1px solid var(--border);
+    padding: 8px 16px;
+    border-radius: 8px;
+    /* Tooltip style */
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+    color: var(--text);
+    font-weight: 500;
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    backdrop-filter: blur(10px);
+    white-space: nowrap;
+}
+
+.unknown-this {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    color: var(--text);
+    font-weight: 500;
+    opacity: 0;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none;
+    backdrop-filter: blur(10px);
+}
+
+.light .modern-notification {
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.modern-notification.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.modern-notification-icon {
+    font-size: 1.2rem;
+}
+
+/* Table */
+.table-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    /* Scroll instead of clip: with 9 columns the users table can be wider than its
+       container — worse with longer labels (e.g. Polish) — and `overflow:hidden` cut off
+       the right-most "Actions" column entirely (B1). overflow-x:auto keeps the Actions
+       reachable; overflow-y:hidden preserves the rounded corners and adds no stray
+       vertical scrollbar. No scrollbar shows when the table already fits. */
+	overflow: auto;
+	width: 100%;
+	max-width: 100%;
+	min-width: 0;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table.table-stable {
+	table-layout: auto;
+	min-width: max(100%, var(--table-min-width, 680px));
+}
+
+table.table-stable th.table-sortable,
+table.table-stable th[data-sort] {
+	white-space: nowrap;
+}
+
+thead {
+    background: var(--bg-secondary);
+}
+
+th,
+td {
+    padding: 14px 16px;
+    text-align: center;
+	vertical-align: middle;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Names and prose stay left-aligned; compact values, badges and empty-state labels are
+   centred. Explicit classes also cover tables whose first column is only a checkbox. */
+th:first-child,
+td:first-child,
+.table-wrap .col-primary,
+.table-wrap .col-text {
+	text-align: left;
+}
+
+.table-wrap .col-select,
+.table-wrap .col-actions {
+	text-align: center;
+}
+
+.table-wrap .col-select {
+	width: 48px;
+	min-width: 48px;
+	padding-left: 12px;
+	padding-right: 12px;
+}
+
+.table-wrap .col-primary {
+	min-width: 270px;
+}
+
+.table-wrap .col-email {
+	min-width: 210px;
+}
+
+.table-wrap .col-date {
+	min-width: 145px;
+}
+
+.table-wrap .col-downloads {
+	width: 92px;
+	min-width: 92px;
+}
+
+.table-wrap .col-actions {
+	width: 1%;
+	white-space: nowrap;
+}
+
+.users-table {
+	min-width: 1280px !important;
+}
+
+.files-table {
+	min-width: 1160px !important;
+}
+
+.my-files-table {
+	min-width: 980px !important;
+}
+
+.collections-table {
+	min-width: 900px !important;
+}
+
+.groups-table {
+	min-width: 920px !important;
+}
+
+.users-table .col-actions {
+	min-width: 284px;
+}
+
+.users-table .col-primary {
+	min-width: 130px;
+}
+
+.users-table td.col-email {
+	max-width: 260px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.groups-table .col-primary {
+	min-width: 180px;
+}
+
+.files-table .col-actions,
+.my-files-table .col-actions {
+	min-width: 222px;
+}
+
+.collections-table .col-actions {
+	min-width: 184px;
+}
+
+th {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-weight: 600;
+    cursor: pointer;
+}
+
+th:hover {
+    color: var(--accent);
+}
+
+th.sorted {
+    color: var(--accent);
+}
+
+th .sort-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0;
+	min-width: 0;
+	height: 1rem;
+	margin-left: 2px;
+	font-size: 0.66rem;
+	line-height: 1;
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
+th .sort-icon sup {
+	display: inline;
+	min-width: 0;
+	height: auto;
+	margin-left: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--accent);
+	font-size: 0.58rem;
+	font-weight: 800;
+	line-height: 1;
+	position: static;
+}
+
+th.table-sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+tr:hover {
+    background: rgba(99, 102, 241, 0.03);
+}
+
+.file-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+	text-align: left;
+}
+
+.file-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+/* File-type icon (FontAwesome) sits under any media thumbnail. */
+.file-icon i {
+    color: var(--accent);
+}
+
+/* Media thumbnail overlaid on the emoji icon; if it 404s it's removed (JS onerror),
+   revealing the emoji underneath. Opaque JPEG covers the emoji when it loads. */
+.file-thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    background: var(--bg-secondary);
+}
+
+.file-info strong {
+    display: block;
+    font-size: 0.9rem;
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-info small {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.actions {
+    display: flex;
+    gap: 6px;
+	flex-wrap: nowrap;
+	align-items: center;
+	justify-content: center;
+}
+
+.collection-password-list {
+	display: grid;
+	gap: 12px;
+	max-height: 42vh;
+	overflow-y: auto;
+}
+
+.collection-password-row {
+	display: grid;
+	gap: 7px;
+}
+
+.collection-password-row span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	font-size: .86rem;
+}
+
+.collection-password-row input {
+	width: 100%;
+	min-height: 42px;
+	padding: 10px 12px;
+	box-sizing: border-box;
+	font-size: .95rem;
+}
+
+.action-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+}
+
+.action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.action-btn.del:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.action-btn svg {
+    width: 14px;
+    height: 14px;
+}
+
+.empty {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px !important;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 20px;
+    border-top: 1px solid var(--border);
+}
+
+.pagination button {
+    min-width: 36px;
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.pagination button:hover {
+    border-color: var(--accent);
+}
+
+.pagination button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.pagination .page-info {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 0 12px;
+}
+

@@ -1,0 +1,88 @@
+# Keep the build context small and never bake host state, credentials or test output into the
+# production image. Runtime directories are recreated by docker/Dockerfile and mounted by
+# Docker Compose.
+.git/
+.github/
+.gitignore
+.gitattributes
+.idea/
+.vscode/
+.fleet/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Private configuration and local launch settings
+.env
+.env.*
+config/
+config.local.php
+scripts/filehost-env.bat
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# Runtime state and uploaded content
+uploads/
+data/
+src/data/
+
+# Local dependencies, tools and generated Python state
+vendor/
+node_modules/
+venv/
+venv-*/
+tools/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.pytype/
+.tox/
+.nox/
+build/
+dist/
+
+# Development-only sources and reports
+tests/
+requirements-dev.txt
+requirements-dev-lock.txt
+composer.json
+composer.lock
+phpstan.neon
+pyproject.toml
+.coverage
+.coverage.*
+coverage/
+coverage.xml
+clover.xml
+htmlcov/
+
+# Logs, backups, database dumps and local credentials
+*.log
+*.pid
+*.bak
+*.bak-*
+*.tmp
+*.temp
+*.orig
+*.rej
+*~
+backups/
+*.sql
+*.sql.gz
+*.dump
+*.sqlite
+*.sqlite3
+*.db
+auth.json
+composer.phar
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.csr

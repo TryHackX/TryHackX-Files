@@ -1,0 +1,60 @@
+# TryHackX Files — reproducible deployment.
+#
+#   1. cp .env.example .env   and set passwords, canonical URL and installer secret
+#   2. docker compose up -d --build
+#   3. open http://localhost:8080/install.php  → DB host: `db`, user/password from .env
+#
+# `app` runs Apache/PHP + the Python upload server together (they talk over loopback —
+# see docker/Dockerfile); `db` is MySQL. Storage, generated data and the installer's
+# config live in named volumes so rebuilds don't lose them.
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-filehost}
+      MYSQL_USER: ${MYSQL_USER:-filehost}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      # $$ escapes the compose interpolation so the shell inside the container expands it.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      FILEHOST_CANONICAL_URL: ${FILEHOST_CANONICAL_URL:?set FILEHOST_CANONICAL_URL in .env}
+      FILEHOST_INSTALL_TOKEN: ${FILEHOST_INSTALL_TOKEN:-}
+      FILEHOST_INSTALL_ALLOW_IPS: ${FILEHOST_INSTALL_ALLOW_IPS:-}
+      FILEHOST_THUMB_WORKERS: ${FILEHOST_THUMB_WORKERS:-2}
+      FILEHOST_THUMB_MAX_INPUT_BYTES: ${FILEHOST_THUMB_MAX_INPUT_BYTES:-268435456}
+      FILEHOST_THUMB_MAX_SOURCE_PIXELS: ${FILEHOST_THUMB_MAX_SOURCE_PIXELS:-40000000}
+      FILEHOST_DOWNLOAD_LEASE_SECONDS: ${FILEHOST_DOWNLOAD_LEASE_SECONDS:-120}
+      FILEHOST_MINIMAL_LOGS: ${FILEHOST_MINIMAL_LOGS:-0}
+      FILEHOST_CI_SMOKE: ${FILEHOST_CI_SMOKE:-0}
+      FILEHOST_CI_PREBODY_DELAY_MS: ${FILEHOST_CI_PREBODY_DELAY_MS:-0}
+    volumes:
+      - uploads:/app/uploads    # stored files
+      - appdata:/app/data       # thumbnails cache, fail-closed installer state, settings cache
+      - appconfig:/app/config   # config.local.php written by the installer
+
+volumes:
+  db_data:
+  uploads:
+  appdata:
+  appconfig:
