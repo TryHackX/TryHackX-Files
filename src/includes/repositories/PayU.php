@@ -398,6 +398,11 @@ final class PayU
 			'follow_location' => $follow ? 1 : 0,
 			'ignore_errors' => true,
 		]]);
+		// Load-bearing, do not delete: PHP 8.5 deprecates the *implicit* locally scoped
+		// `$http_response_header` and raises the notice when this file is compiled, whether or
+		// not the stream branch ever runs. Declaring the variable first makes it an ordinary
+		// local, which the HTTP wrapper still fills in, on every supported PHP version.
+		$http_response_header = [];
 		$out = @file_get_contents($url, false, $ctx);
 		$status = 0;
 		foreach ($http_response_header as $line) {

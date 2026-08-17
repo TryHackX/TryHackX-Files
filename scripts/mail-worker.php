@@ -26,7 +26,7 @@ if (!defined('PROJECT_ROOT')) {
 	define('PROJECT_ROOT', $projectRoot);
 }
 if (!defined('APP_VERSION')) {
-	define('APP_VERSION', '2.76.6');
+	define('APP_VERSION', '2.76.7');
 }
 if (!defined('APP_URL')) {
 	$canonical = defined('APP_CANONICAL_URL')

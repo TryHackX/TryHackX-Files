@@ -208,10 +208,14 @@ final class HttpApiTest extends TestCase
 			'timeout' => 10,
 			'ignore_errors' => true, // 4xx/5xx are answers to assert on, not failures
 		]]);
+		// Load-bearing, do not delete — see the note in PayU::request(). Without it PHP 8.5
+		// deprecates the implicit variable at compile time, and phpunit.xml runs with
+		// failOnWarning, so the whole suite would go red the day the matrix adds 8.5.
+		$http_response_header = [];
 		$out = @file_get_contents(self::$base . $path, false, $ctx);
 		$status = 0;
 		$respHeaders = [];
-		foreach ($http_response_header ?? [] as $line) {
+		foreach ($http_response_header as $line) {
 			if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) {
 				$status = (int) $m[1];
 			} else {

@@ -371,6 +371,8 @@ final class P24
 			'follow_location' => 0,
 			'ignore_errors' => true,
 		]]);
+		// Load-bearing, do not delete — see the note in PayU::request(). Declaring this before
+		// the call is what keeps PHP 8.5 from deprecating the implicit variable at compile time.
 		$http_response_header = [];
 		$out = @file_get_contents($url, false, $ctx);
 		$status = 0;

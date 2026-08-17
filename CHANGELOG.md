@@ -7,6 +7,18 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.7] - 2026-08-17
+
+### Fixed
+
+- The PayU transport no longer makes PHP 8.5 log "The predefined locally scoped
+  `$http_response_header` variable is deprecated" on every request that compiles the file. PHP
+  8.5 raises that notice at compile time for the *implicit* variable, so it appeared whether or
+  not the affected branch ever ran; declaring the variable before the call makes it an ordinary
+  local that the HTTP wrapper still fills in, on every supported PHP version. The same
+  declaration was added to the HTTP test harness, which `failOnWarning` would otherwise fail the
+  moment the CI matrix gains 8.5, and the one P24 already had is now documented as load-bearing.
+
 ## [2.76.6] - 2026-08-17
 
 ### Fixed
