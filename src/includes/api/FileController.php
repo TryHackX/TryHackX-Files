@@ -654,7 +654,6 @@ final class FileController
 		]);
 		$response = curl_exec($ch);
 		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		if ($httpCode === 200 && $response) {
 			$pythonHealth = json_decode($response, true);
@@ -880,13 +879,23 @@ final class FileController
 
 		// Reached either as the row's signed-in owner or with a verified capability token;
 		// `$isOwner` implies the row exists, and the capability path returned above if it did not.
-		$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `id` = ?");
-		$stmt->execute([$id]);
+		//
+		// This goes through the same durable path as the delete link and the admin list rather
+		// than issuing its own DELETE and then purging the bytes hopefully. The old shape
+		// dropped the row first and ignored whether the bytes actually went with it, so any
+		// failed unlink orphaned them for good: nothing referenced the file any more, so no
+		// retry could ever find it.
+		$deleted = FileManager::deleteAuthorisedFile(
+			$id,
+			$isOwner ? 'owner_delete' : 'delete_capability',
+			$isOwner ? 'user' : 'capability',
+			$isOwner ? (string) $sessionUser : null
+		);
 
-		// Close any moderation reports for this file (avoid orphaned entries).
-		Database::deleteReportsByFileIds([$id]);
-
-		FileManager::purgeFileArtifacts($id);
+		if (!$deleted) {
+			echo json_encode(['success' => false, 'error' => __('api.delete_file_failed')]);
+			return;
+		}
 
 		echo json_encode(['success' => true]);
 	}

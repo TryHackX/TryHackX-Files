@@ -32,7 +32,6 @@ final class CaptchaService
 		]);
 		$result = curl_exec($ch);
 		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		if ($result === false || $httpCode !== 200) {
 			error_log("reCAPTCHA verification failed: connection error");

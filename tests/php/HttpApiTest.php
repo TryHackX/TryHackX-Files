@@ -121,7 +121,7 @@ final class HttpApiTest extends TestCase
 			// column absent on this schema — nothing to force
 		}
 
-		$port = 8765;
+		$port = self::reserveFreePort();
 		self::$base = 'http://127.0.0.1:' . $port;
 		foreach ([PROJECT_ROOT . '/tests/php/.tmp-data-http', PROJECT_ROOT . '/tests/php/.tmp-uploads-http'] as $dir) {
 			self::resetHttpTestDirectory($dir);
@@ -152,23 +152,79 @@ final class HttpApiTest extends TestCase
 			self::fail('Could not start the php -S test server');
 		}
 		// Wait until it answers; ~5 s is plenty on a local socket.
+		//
+		// "Answered at all" is deliberately not the test. This used to accept any status > 0,
+		// which meant that if something else already held the port, its replies were mistaken
+		// for ours: the suite started against a foreign server and reported ~20 unrelated
+		// assertion failures instead of one clear "port busy". Insist on our own health payload.
 		$deadline = microtime(true) + 5.0;
+		$last = 'no response';
 		do {
 			usleep(150000);
 			$res = self::rawRequest('GET', '/api.php?action=health');
-			if ($res['status'] > 0) {
-				return;
+			if ($res['status'] === 200) {
+				// `action=health` answers {success, php:{version,...}, python, python_running}.
+				// Match on that shape, not on a bare 200, so a stranger's page cannot pass.
+				$decoded = json_decode((string) ($res['body'] ?? ''), true);
+				if (is_array($decoded) && isset($decoded['php']['version'])) {
+					return;
+				}
+				$last = 'HTTP 200 but the body is not this app\'s health JSON: '
+					. substr(preg_replace('/\s+/', ' ', (string) ($res['body'] ?? '')) ?? '', 0, 300);
+			} elseif ($res['status'] > 0) {
+				$last = 'HTTP ' . $res['status'] . ' from something else on this port';
 			}
 		} while (microtime(true) < $deadline);
-		self::fail('Test server did not come up');
+
+		// PHPUnit skips tearDownAfterClass when setUpBeforeClass throws, and an orphaned
+		// `php -S` still holding its stdin pipe stops the runner from exiting at all — the
+		// failure has to be reported, not turned into a hang.
+		self::stopServer();
+
+		$errLog = PROJECT_ROOT . '/tests/php/.tmp-data-http/server.err.log';
+		$detail = is_file($errLog) ? trim((string) file_get_contents($errLog)) : '';
+		self::fail(
+			'Test server did not come up on ' . self::$base . ' (' . $last . ').'
+			. ($detail !== '' ? "\nServer stderr:\n" . $detail : '')
+		);
 	}
 
-	public static function tearDownAfterClass(): void
+	/** Terminate the `php -S` child if it is still running. Safe to call more than once. */
+	private static function stopServer(): void
 	{
 		if (is_resource(self::$proc)) {
 			proc_terminate(self::$proc);
 			proc_close(self::$proc);
+			self::$proc = null;
 		}
+	}
+
+	/**
+	 * Ask the OS for an unused loopback port instead of hardcoding one.
+	 *
+	 * The fixed port this used to carry (8765) is a popular default, so on a developer machine
+	 * running anything else on it `php -S` could not bind and the whole class failed in a way
+	 * that pointed at the application rather than at the port.
+	 */
+	private static function reserveFreePort(): int
+	{
+		$socket = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+		if ($socket === false) {
+			self::fail("Could not reserve a loopback port for the test server: {$errstr} ({$errno})");
+		}
+		$name = (string) stream_socket_get_name($socket, false);
+		fclose($socket);
+
+		$port = (int) substr($name, (int) strrpos($name, ':') + 1);
+		if ($port < 1024) {
+			self::fail('Reserved an implausible test-server port: ' . $name);
+		}
+		return $port;
+	}
+
+	public static function tearDownAfterClass(): void
+	{
+		self::stopServer();
 		foreach ([PROJECT_ROOT . '/tests/php/.tmp-data-http', PROJECT_ROOT . '/tests/php/.tmp-uploads-http'] as $dir) {
 			try {
 				self::resetHttpTestDirectory($dir);

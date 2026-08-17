@@ -1470,8 +1470,9 @@ final class AdRepository
 			IMAGETYPE_PNG => @imagepng($dst, $path),
 			IMAGETYPE_WEBP => @imagewebp($dst, $path, 88),
 		};
-		imagedestroy($src);
-		imagedestroy($dst);
+		// No imagedestroy(): deprecated in PHP 8.5, and GdImage objects have been freed by
+		// refcount since 8.0. Both handles are function-locals and this returns immediately.
+		unset($src, $dst);
 	}
 
 	/**

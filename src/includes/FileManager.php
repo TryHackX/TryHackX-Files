@@ -572,6 +572,76 @@ class FileManager
 		}
 	}
 
+	/**
+	 * Delete a file whose caller this layer has already authorised.
+	 *
+	 * Same durable shape as deleteFile() and deleteFileAdmin(): lock the row, queue the bytes
+	 * for physical removal, drop the metadata in the same transaction, then try the removal
+	 * once. If that attempt fails — an open handle on Windows, a full or read-only volume —
+	 * the job stays in `file_deletion_queue` and the worker retries it.
+	 *
+	 * Authorisation is deliberately the caller's business. `action=delete` accepts either the
+	 * signed-in owner of the row or the per-upload capability token, and the capability check
+	 * there still honours the pre-bcrypt plaintext form that deleteFile() does not know about,
+	 * so it cannot simply delegate to deleteFile().
+	 */
+	public static function deleteAuthorisedFile(
+		string $id,
+		string $reason,
+		string $actorType,
+		?string $actorId = null
+	): bool
+	{
+		if (!self::isValidFileId($id)) {
+			return false;
+		}
+
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return false;
+		}
+
+		$table = self::table('files');
+
+		try {
+			$pdo->beginTransaction();
+			$stmt = $pdo->prepare(
+				"SELECT `original_name`, `mime_type`, `size`, `user_id`
+				 FROM `{$table}` WHERE `id` = ? FOR UPDATE"
+			);
+			$stmt->execute([$id]);
+			$file = $stmt->fetch(PDO::FETCH_ASSOC);
+			if (!$file) {
+				$pdo->rollBack();
+				return false;
+			}
+
+			// Owners' webhooks hear about their own deletions, exactly as on the delete link.
+			if (!empty($file['user_id'])) {
+				Database::enqueueWebhookEvent((int) $file['user_id'], 'delete', ['file' => [
+					'id' => $id,
+					'name' => $file['original_name'],
+					'mime' => $file['mime_type'],
+					'size' => (int) $file['size'],
+				]]);
+			}
+
+			if (!self::deleteLockedFile($pdo, $id, $reason, $actorType, $actorId)) {
+				throw new RuntimeException('The locked file row could not be deleted.');
+			}
+			$pdo->commit();
+			self::processDeletionQueue(1);
+
+			return true;
+		} catch (Throwable $e) {
+			if ($pdo->inTransaction()) {
+				$pdo->rollBack();
+			}
+			error_log('Authorised file deletion failed: ' . $e->getMessage());
+			return false;
+		}
+	}
+
 	public static function deleteFileAdmin(string $id): bool
 	{
 		if (!self::isValidFileId($id)) {

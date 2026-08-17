@@ -16,6 +16,10 @@ if (PHP_SAPI !== 'cli') {
 	exit("This script is CLI-only.\n");
 }
 
+// See scripts/mail-worker.php: `register_argc_argv` is Off in Debian's default php.ini, so
+// static analysis reports $argv as possibly undefined even though the CLI SAPI always sets it.
+$argv = $_SERVER['argv'] ?? [];
+
 $projectRoot = dirname(__DIR__);
 $configLocal = $projectRoot . '/config/config.local.php';
 if (!is_file($configLocal)) {

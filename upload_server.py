@@ -59,7 +59,7 @@ APP_DIR = Path(__file__).parent.absolute()
 # config.local.php moved out of the web root into config/ (St1). The server stays in the
 # project root, so the config is one dir over.
 CONFIG_FILE = APP_DIR / "config" / "config.local.php"
-SERVER_VERSION = "2.76.7"
+SERVER_VERSION = "2.76.8"
 
 
 def _decode_php_single_quoted(value: str) -> str:
@@ -192,7 +192,10 @@ def load_php_config() -> dict:
         return config
 
     try:
-        content = CONFIG_FILE.read_text()
+        # Decode as UTF-8 like _php_constant() does, never the locale code page: PHP writes
+        # this file as bytes, and on a Windows dev box the ANSI page would mangle any non-ASCII
+        # database password into a silent authentication failure.
+        content = CONFIG_FILE.read_text(encoding="utf-8", errors="replace")
 
         patterns = {
             'host': r"define\s*\(\s*['\"]DB_HOST['\"]\s*,\s*'((?:\\.|[^'\\])*)'\s*\)",
@@ -550,6 +553,20 @@ def safe_int(v, default: int = 0) -> int:
         return int(v) if v else default
     except (ValueError, TypeError):
         return default
+
+
+def build_lock_name(suffix: str) -> str:
+    """Build an advisory-lock name scoped to this installation.
+
+    `GET_LOCK()` names are server-wide, not per-schema, so two installations sharing one
+    MySQL/MariaDB server would block each other on any name that is a bare constant. Every
+    lock on the PHP side already namespaces itself by database and table prefix — see
+    Database::migrate() and FileManager::processDeletionQueue() — and this is the same rule
+    for the sidecar. Truncated to keep the whole name inside MySQL's 64-character limit.
+    """
+    config = db_config_cache or {}
+    identity = f"{config.get('database', '')}:{config.get('prefix', '')}"
+    return f"fh:{hashlib.sha1(identity.encode()).hexdigest()[:16]}:{suffix}"
 
 
 def request_client_ip(request: Request) -> str:
@@ -1324,6 +1341,21 @@ def parse_single_range_header(value: str, size: int):
     return start, min(end, size - 1)
 
 
+async def close_stream_reader(reader) -> None:
+    """Finalise a streaming reader once its response is done.
+
+    Must stay a real `async def` wrapper. Handing `reader.aclose` to BackgroundTasks directly
+    does not work: Starlette decides async-vs-sync with `asyncio.iscoroutinefunction()`, which
+    is False for an async generator's built-in `aclose`, so the task would be run in a worker
+    thread and the coroutine it returns dropped without ever being awaited — the generator
+    would stay suspended and its file stay open, which is the bug this is here to prevent.
+    """
+    try:
+        await reader.aclose()
+    except Exception as exc:  # noqa: BLE001
+        info_log(f"Stream reader close failed: {exc}")
+
+
 async def throttled_file_reader(
     path: Path,
     limit_Bps: int,
@@ -1517,7 +1549,7 @@ async def reserve_upload_capacity(
     """Reserve bytes atomically so concurrent uploads cannot all pass the same quota check."""
     prefix = db_config_cache.get("prefix", "") if db_config_cache else ""
     reservation_id = secrets.token_hex(16)
-    lock_name = "fh:upload-storage"
+    lock_name = build_lock_name("upload-storage")
     conn = None
     locked = False
     try:
@@ -1980,10 +2012,16 @@ async def startup():
 
 async def shutdown():
     """Close the database pool."""
-    global db_pool
+    global db_pool, db_config_mtime
     if db_pool:
         db_pool.close()
         await db_pool.wait_closed()
+        # Drop the reference too. _get_db_pool_unlocked() only rebuilds when this is None or
+        # the config mtime moved, so leaving a closed pool here means the next lifespan in the
+        # same process hands out a dead pool. Clearing the mtime makes that startup re-read
+        # config.local.php instead of trusting a value the previous cycle captured.
+        db_pool = None
+        db_config_mtime = 0
         info_log("Database pool closed")
 
 # ============================================================================
@@ -2721,7 +2759,7 @@ async def reserve_download_slot(ip: str, user_id: int | None, file_id: str) -> i
     pool = await require_storage_ready()
     group_limits = await get_user_group_limits(user_id)
     prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
-    lock_name = 'fh:download:' + hashlib.sha256(ip.encode()).hexdigest()[:32]
+    lock_name = build_lock_name('download:' + hashlib.sha256(ip.encode()).hexdigest()[:24])
     locked = False
     conn = None
     try:
@@ -3233,8 +3271,8 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                     request.headers.get('range', ''),
                     safe_int(file_size),
                 )
-                download_lock_name = (
-                    'fh:download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:32]
+                download_lock_name = build_lock_name(
+                    'download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:24]
                 )
                 await cur.execute("SELECT GET_LOCK(%s, 5)", (download_lock_name,))
                 lock_row = await cur.fetchone()
@@ -3366,15 +3404,26 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
         headers["Content-Range"] = f"bytes {range_start}-{range_end}/{file_size}"
         headers["Content-Length"] = str(range_end - range_start + 1)
         status_code = 206
+    # The reader holds the file open for as long as it is suspended at a yield. A consumer
+    # that stops early — a cancelled request, a client that closes once Content-Length is
+    # satisfied — leaves the generator suspended, so `async with aiofiles.open(...)` inside it
+    # never runs its exit and the descriptor stays open for the life of the process. That
+    # leaks a descriptor per download, keeps deleted files occupying disk on Linux, and on
+    # Windows makes the file undeletable outright, so purging it after `action=delete` fails
+    # and the bytes are orphaned. Closing the generator explicitly once the response is done
+    # is what guarantees the exit runs; on a reader that already finished it is a no-op.
+    reader = throttled_file_reader(
+        actual_file_path,
+        limit_Bps,
+        active_id,
+        range_start,
+        range_end,
+        transfer_state,
+    )
+    background_tasks.add_task(close_stream_reader, reader)
+
     return StreamingResponse(
-        throttled_file_reader(
-            actual_file_path,
-            limit_Bps,
-            active_id,
-            range_start,
-            range_end,
-            transfer_state,
-        ),
+        reader,
         status_code=status_code,
         media_type=mime_type,
         headers=headers,
@@ -3537,7 +3586,7 @@ async def _claim_pending_webhooks(pool, prefix: str, limit: int = 20):
     del_table = f"{prefix}webhook_deliveries"
     now = int(time.time())
     lease_until = now + 60
-    lock_name = f"fh:{prefix}:webhook-claim"
+    lock_name = build_lock_name("webhook-claim")
     conn = await pool.acquire()
     locked = False
     try:
@@ -4258,8 +4307,8 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
                 group_dl = safe_int(group_limits.get('limit_download'), 0)
                 limit_Bps = max(0, group_dl)
 
-                download_lock_name = (
-                    'fh:download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:32]
+                download_lock_name = build_lock_name(
+                    'download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:24]
                 )
                 await cur.execute("SELECT GET_LOCK(%s, 5)", (download_lock_name,))
                 lock_row = await cur.fetchone()
@@ -4681,7 +4730,14 @@ async def metrics(request: Request):
     Bearer token; when that setting is empty, only loopback scrapes are allowed (the usual
     single-host setup). Returns text/plain in the standard exposition format.
     """
-    await update_settings()
+    # A scrape must survive a database outage: this is the endpoint monitoring reads to find
+    # out something is wrong, so refreshing settings is best-effort and the cached values
+    # carry it. Without this the whole endpoint 500s exactly when it is most needed.
+    try:
+        await update_settings()
+    except Exception as exc:  # noqa: BLE001
+        info_log(f"/metrics: settings refresh failed, serving cached values ({exc})")
+
     client_ip = request.client.host if request.client else ''
     token = (settings_cache.get('metrics_token') or '').strip()
 

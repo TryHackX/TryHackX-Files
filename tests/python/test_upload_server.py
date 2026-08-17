@@ -32,6 +32,43 @@ class TestLoggingMode:
         assert capsys.readouterr().out == ""
 
 
+class TestAdvisoryLockNames:
+    """`GET_LOCK()` names are server-wide, so they must identify the installation."""
+
+    def test_name_is_scoped_to_database_and_prefix(self, monkeypatch):
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files_a", "prefix": "fh_"})
+        first = us.build_lock_name("upload-storage")
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files_b", "prefix": "fh_"})
+        second = us.build_lock_name("upload-storage")
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files_a", "prefix": "other_"})
+        third = us.build_lock_name("upload-storage")
+
+        assert first != second, "two installs on one server would block each other"
+        assert first != third, "two prefixes in one database would block each other"
+        assert first.startswith("fh:") and first.endswith(":upload-storage")
+
+    def test_name_is_stable_for_the_same_installation(self, monkeypatch):
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files", "prefix": "fh_"})
+        assert us.build_lock_name("webhook-claim") == us.build_lock_name("webhook-claim")
+
+    def test_every_name_fits_the_mysql_limit(self, monkeypatch):
+        monkeypatch.setattr(
+            us, "db_config_cache", {"database": "a" * 64, "prefix": "b" * 24}
+        )
+        suffixes = [
+            "upload-storage",
+            "webhook-claim",
+            "download:" + hashlib.sha256(b"203.0.113.9").hexdigest()[:24],
+        ]
+        for suffix in suffixes:
+            assert len(us.build_lock_name(suffix)) <= 64
+
+    def test_missing_config_still_produces_a_usable_name(self, monkeypatch):
+        monkeypatch.setattr(us, "db_config_cache", None)
+        name = us.build_lock_name("upload-storage")
+        assert name.startswith("fh:") and name.endswith(":upload-storage")
+
+
 class TestPhpConfigParsing:
     def test_commented_storage_examples_are_not_configuration(self, monkeypatch, tmp_path):
         config = tmp_path / "config.local.php"

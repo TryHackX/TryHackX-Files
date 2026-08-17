@@ -7,6 +7,55 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.8] - 2026-08-17
+
+### Fixed
+
+- `action=delete` now deletes through the same durable path as the delete link and the admin
+  list. It used to issue its own `DELETE` and then remove the bytes on a best-effort basis with
+  the result discarded, so a failed removal — a file still held open, a full or read-only volume
+  — orphaned them permanently: the row was already gone, so nothing could ever retry. The bytes
+  are queued in the same transaction that drops the row, and the worker finishes the job. The
+  old path also cleaned up moderation reports but not collection membership, leaving rows in
+  `collection_files` pointing at a file that no longer existed; there is no foreign key there to
+  catch it.
+- The sidecar's advisory locks are scoped to the installation. `GET_LOCK()` names are server-wide,
+  and the upload-capacity, download-concurrency and webhook-claim locks were bare constants, so
+  two installations sharing one MySQL server serialised against each other — the upload lock
+  worst of all, since every upload takes it. They now carry a database-and-prefix hash, matching
+  what the PHP side has always done.
+- The Python sidecar no longer leaks a file descriptor per download. The streaming reader holds
+  the file open while suspended at a yield, and a consumer that stops early left the generator
+  unfinalised, so its `async with` never ran its exit. Descriptors accumulated for the lifetime
+  of the process, deleted files kept occupying disk on Linux, and on Windows the file could not
+  be removed at all — so purging it after a delete failed and the bytes were orphaned. The
+  reader is now closed explicitly once the response completes.
+- `/metrics` degrades instead of failing when the database is unavailable. It refreshed settings
+  unguarded, so the endpoint monitoring reads to detect an outage answered HTTP 500 during one.
+  The refresh is now best-effort and the cached values carry the scrape.
+- Shutting the sidecar down no longer leaves the module-global pool pointing at a closed
+  aiomysql pool, which handed a dead pool to the next lifespan in the same process.
+- The sidecar reads `config.local.php` as UTF-8 rather than the locale code page. On a Windows
+  development box the ANSI page mangled any non-ASCII database password, so the sidecar failed
+  to authenticate while the PHP side — which reads the same file as bytes — worked normally.
+- Removed the remaining PHP 8.5 deprecations: `curl_close()` in six call sites and
+  `imagedestroy()` in the advertisement image cropper. Both have been no-ops since PHP 8.0 and
+  were writing two notices per call into the production error log.
+- `composer analyse` no longer fails on a default Debian install. `register_argc_argv` is Off in
+  Debian's `php.ini`, and static analysis believes the ini rather than the CLI SAPI, so `$argv`
+  was reported as possibly undefined in three CLI scripts. They now take it from `$_SERVER`.
+
+### Changed
+
+- The HTTP test harness picks an unused loopback port instead of a fixed one, and its readiness
+  probe requires the application's own health payload rather than accepting any reply. A fixed
+  port that something else already held made the whole class run against a foreign server and
+  report about twenty unrelated assertion failures; it now reports the busy port once. The
+  `php -S` child is also terminated when startup fails, where it previously survived and stopped
+  the runner from exiting.
+- Dropped `ReflectionMethod::setAccessible()` from two tests: a no-op since PHP 8.1, deprecated in
+  8.5, and `failOnWarning` would have turned the suite red once the matrix reaches 8.5.
+
 ## [2.76.7] - 2026-08-17
 
 ### Fixed

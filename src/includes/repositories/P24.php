@@ -360,7 +360,6 @@ final class P24
 				self::log('transport_error', curl_error($ch));
 				$out = '';
 			}
-			curl_close($ch);
 			return ['status' => $status, 'body' => (string) $out];
 		}
 		$ctx = stream_context_create(['http' => [

@@ -6,8 +6,9 @@ final class ReportControllerSecurityTest extends RepoTestCase
 {
 	private function accepts(string $url): bool
 	{
+		// No setAccessible(): reflection has reached private members unaided since PHP 8.1, and
+		// the call is deprecated as of 8.5 — it would fail the suite under `failOnWarning`.
 		$method = new ReflectionMethod(ReportController::class, 'safeHttpUrl');
-		$method->setAccessible(true);
 		return (bool) $method->invoke(null, $url);
 	}
 

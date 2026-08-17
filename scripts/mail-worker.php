@@ -14,6 +14,12 @@ if (PHP_SAPI !== 'cli') {
 	exit("This script is CLI-only.\n");
 }
 
+// The CLI SAPI always fills argv in, but `register_argc_argv` is Off by default in Debian's
+// php.ini, and static analysis believes the ini rather than the SAPI: `composer analyse` then
+// fails with "Variable $argv might not be defined" on exactly the platform this ships on.
+// Taking it from $_SERVER states the same value in a form that is true on every host.
+$argv = $_SERVER['argv'] ?? [];
+
 $projectRoot = dirname(__DIR__);
 $configLocal = $projectRoot . '/config/config.local.php';
 if (!is_file($configLocal)) {
@@ -26,7 +32,7 @@ if (!defined('PROJECT_ROOT')) {
 	define('PROJECT_ROOT', $projectRoot);
 }
 if (!defined('APP_VERSION')) {
-	define('APP_VERSION', '2.76.7');
+	define('APP_VERSION', '2.76.8');
 }
 if (!defined('APP_URL')) {
 	$canonical = defined('APP_CANONICAL_URL')

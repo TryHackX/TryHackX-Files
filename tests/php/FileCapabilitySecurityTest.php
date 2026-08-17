@@ -15,7 +15,7 @@ final class FileCapabilitySecurityTest extends RepoTestCase
 
 	protected function setUp(): void
 	{
-		$this->truncate('reports', 'collection_files', 'files', 'users');
+		$this->truncate('reports', 'collection_files', 'collections', 'file_deletion_queue', 'file_quarantine', 'files', 'users');
 		$_SESSION['delete_link_nonces'] = [];
 	}
 
@@ -273,6 +273,61 @@ final class FileCapabilitySecurityTest extends RepoTestCase
 
 		$this->assertFalse($this->callDelete(['id' => $id], $member)['success'] ?? false);
 		$this->assertSame(1, $this->rowCount($id));
+	}
+
+	/**
+	 * `action=delete` used to issue its own DELETE against `files` and clean up only reports,
+	 * so a deleted file left its collection memberships behind — there is no foreign key on
+	 * `collection_files.file_id` to catch that — and the bytes were purged on a best-effort
+	 * basis with the result discarded. It now runs the same durable path as the delete link.
+	 */
+	public function testDeleteClearsEveryReferenceToTheFile(): void
+	{
+		$owner = $this->user('owner');
+		$id = $this->id('linked');
+		$artifact = $this->artifact($id);
+		$this->insertFile($id, $owner, ['delete_token' => password_hash('never-sent', PASSWORD_DEFAULT)]);
+
+		$pdo = Database::getInstance();
+		$collection = 'coll_' . substr(bin2hex(random_bytes(8)), 0, 12);
+		$pdo->prepare(
+			'INSERT INTO `' . Database::table('collections') . '`
+			 (id, name, user_id, delete_token, created_at) VALUES (?,?,?,?,?)'
+		)->execute([$collection, 'bundle', $owner, password_hash('t', PASSWORD_DEFAULT), time()]);
+		$pdo->prepare(
+			'INSERT INTO `' . Database::table('collection_files') . '`
+			 (collection_id, file_id, position) VALUES (?,?,0)'
+		)->execute([$collection, $id]);
+		$pdo->prepare(
+			'INSERT INTO `' . Database::table('reports') . '`
+			 (file_id, reporter_name, reporter_email, report_title, created_at, ip_address)
+			 VALUES (?,?,?,?,?,?)'
+		)->execute([$id, 'someone', 'r@example.test', 'complaint', time(), '203.0.113.9']);
+
+		$countIn = function (string $table) use ($pdo, $id): int {
+			$stmt = $pdo->prepare(
+				'SELECT COUNT(*) FROM `' . Database::table($table) . '` WHERE `file_id` = ?'
+			);
+			$stmt->execute([$id]);
+			return (int) $stmt->fetchColumn();
+		};
+		$this->assertSame(1, $countIn('collection_files'));
+		$this->assertSame(1, $countIn('reports'));
+
+		$this->assertTrue($this->callDelete(['id' => $id], $owner)['success'] ?? false);
+
+		$this->assertSame(0, $this->rowCount($id));
+		$this->assertSame(0, $countIn('collection_files'), 'collection membership was orphaned');
+		$this->assertSame(0, $countIn('reports'));
+		$this->assertFileDoesNotExist($artifact);
+
+		// The collection row itself is not the file's to remove.
+		$stmt = $pdo->prepare('SELECT COUNT(*) FROM `' . Database::table('collections') . '` WHERE `id` = ?');
+		$stmt->execute([$collection]);
+		$this->assertSame(1, (int) $stmt->fetchColumn());
+
+		$pdo->prepare('DELETE FROM `' . Database::table('collections') . '` WHERE `id` = ?')
+			->execute([$collection]);
 	}
 
 	/**

@@ -9,9 +9,10 @@ final class SettingsRepositoryTest extends RepoTestCase
 	public function testFallbackCacheDirectoryIsThePrivateProjectDataDirectory(): void
 	{
 		$repository = PROJECT_ROOT . '/src/includes/repositories/SettingsRepository.php';
+		// No setAccessible(): a no-op since PHP 8.1 and deprecated in 8.5, and this subprocess
+		// writes its diagnostics into the output this test compares.
 		$code = 'require ' . var_export($repository, true) . ';'
 			. '$method = new ReflectionMethod(SettingsRepository::class, "dataDirectory");'
-			. '$method->setAccessible(true);'
 			. 'echo $method->invoke(null);';
 		$process = proc_open([PHP_BINARY, '-r', $code], [
 			1 => ['pipe', 'w'],
