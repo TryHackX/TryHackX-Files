@@ -2,4 +2,4 @@
 #   venv/Scripts/python -m pip install --require-hashes -r requirements-dev-lock.txt
 pytest>=8.0
 pip-tools==7.6.0
-ruff==0.16.0
+ruff==0.16.3
