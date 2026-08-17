@@ -7,6 +7,27 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.6] - 2026-08-17
+
+### Fixed
+
+- Deleting one's own upload from the panel's "My files" tab no longer fails with "Invalid delete
+  token". The list shipped the row's `delete_token` column to the browser and the delete button
+  sent it straight back, but that column holds a bcrypt hash rather than the token, so the
+  verification could never succeed. An own-file delete is now authorised by the session that owns
+  the row, and the bulk "delete selected" action in the same tab is fixed by the same change.
+
+### Security
+
+- The "My files" listing no longer exposes any form of a file's delete capability. It previously
+  emitted the stored `delete_token` for every row and rendered it into the page markup: a bcrypt
+  hash on current uploads, but the live plaintext capability on any row predating the switch to
+  hashed tokens.
+- Guest uploads are unaffected and still require the per-upload delete token, with the existing
+  failure counter and CAPTCHA gate. That gate no longer applies to owners deleting their own
+  files, so unrelated failed attempts from a shared address can no longer lock an account out of
+  its own panel.
+
 ## [2.76.5] - 2026-08-02
 
 ### Fixed

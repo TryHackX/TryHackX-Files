@@ -788,6 +788,24 @@ final class FileController
 		]);
 	}
 
+	/**
+	 * Delete one file.
+	 *
+	 * Two ways to prove the request may do that, and they are not interchangeable:
+	 *
+	 *  - the signed-in owner of the row. Owning the upload *is* the authorisation, so no
+	 *    per-upload token is asked for. This is what the panel's "My files" tab uses: the
+	 *    delete token is stored as a bcrypt hash, so the server cannot hand the row's token
+	 *    back to the browser and the browser has nothing to echo. The route is a `$write`
+	 *    (POST + session CSRF token), which is what keeps a session-authorised delete off
+	 *    limits to other origins.
+	 *  - anyone else: the per-upload delete capability, as before. That is the guest path —
+	 *    the token handed out once at upload time by the homepage and by ShareX.
+	 *
+	 * The brute-force gate (fail counter + CAPTCHA) belongs to the capability path only.
+	 * An owner deleting their own file is not guessing at a token, and must not be locked
+	 * out of their own panel by someone else's failures from the same IP.
+	 */
 	public static function handleDelete()
 	{
 		if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -800,24 +818,9 @@ final class FileController
 		$token = is_string($_POST['token'] ?? null) ? $_POST['token'] : '';
 		$captchaProof = $_POST['captcha_proof'] ?? ''; // Upload token from verify_captcha
 
-		if (!$id || !$token) {
+		if (!$id) {
 			echo json_encode(['success' => false, 'error' => __('api.missing_id_or_token2')]);
 			return;
-		}
-
-		$ip = getClientIP();
-
-		// Check Security Threshold
-		$failCount = Database::getSecurityEvent($ip, 'delete_fail');
-		$threshold = (int) Database::getSetting('recaptcha_delete_token_threshold', 1);
-
-		if ($threshold >= 0 && $failCount >= $threshold && Database::isRecaptchaEnabled()) {
-			if (empty($captchaProof) || !Database::verifyUploadToken($captchaProof, $ip)) {
-				echo json_encode(['success' => false, 'error' => __('api.captcha_required'), 'require_captcha' => true]);
-				return;
-			}
-			// Valid proof -> Consume it
-			Database::deleteUploadToken($captchaProof);
 		}
 
 		$prefix = defined('DB_PREFIX') ? DB_PREFIX : '';
@@ -828,34 +831,64 @@ final class FileController
 		}
 
 		$table = $prefix . 'files';
-		$stmt = $pdo->prepare("SELECT `delete_token` FROM `{$table}` WHERE `id` = ?");
+		$stmt = $pdo->prepare("SELECT `delete_token`, `user_id` FROM `{$table}` WHERE `id` = ?");
 		$stmt->execute([$id]);
 		$file = $stmt->fetch(PDO::FETCH_ASSOC);
 
-		if (!$file) {
-			echo json_encode(['success' => false, 'error' => __('api.file_not_found2')]);
-			return;
-		}
+		$sessionUser = (int) ($_SESSION['user_id'] ?? 0);
+		$isOwner = $file
+			&& $sessionUser > 0
+			&& $file['user_id'] !== null
+			&& (int) $file['user_id'] === $sessionUser;
 
-		// Verify token (bcrypt hash, with constant-time fallback for legacy plaintext tokens)
-		if (self::deleteTokenMatches($token, (string) $file['delete_token'])) {
-			// Success
+		if (!$isOwner) {
+			if (!$token) {
+				echo json_encode(['success' => false, 'error' => __('api.missing_id_or_token2')]);
+				return;
+			}
+
+			$ip = getClientIP();
+
+			// Check Security Threshold. Kept ahead of the row lookup's verdict so a throttled
+			// caller cannot use this endpoint to probe which ids exist.
+			$failCount = Database::getSecurityEvent($ip, 'delete_fail');
+			$threshold = (int) Database::getSetting('recaptcha_delete_token_threshold', 1);
+
+			if ($threshold >= 0 && $failCount >= $threshold && Database::isRecaptchaEnabled()) {
+				if (empty($captchaProof) || !Database::verifyUploadToken($captchaProof, $ip)) {
+					echo json_encode(['success' => false, 'error' => __('api.captcha_required'), 'require_captcha' => true]);
+					return;
+				}
+				// Valid proof -> Consume it
+				Database::deleteUploadToken($captchaProof);
+			}
+
+			if (!$file) {
+				echo json_encode(['success' => false, 'error' => __('api.file_not_found2')]);
+				return;
+			}
+
+			// Verify token (bcrypt hash, with constant-time fallback for legacy plaintext tokens)
+			if (!self::deleteTokenMatches($token, (string) $file['delete_token'])) {
+				Database::incrementSecurityEvent($ip, 'delete_fail');
+				echo json_encode(['success' => false, 'error' => __('api.bad_delete_token')]);
+				return;
+			}
+
 			Database::clearSecurityEvent($ip, 'delete_fail');
-
-			$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `id` = ?");
-			$stmt->execute([$id]);
-
-			// Close any moderation reports for this file (avoid orphaned entries).
-			Database::deleteReportsByFileIds([$id]);
-
-			FileManager::purgeFileArtifacts($id);
-
-			echo json_encode(['success' => true]);
-		} else {
-			// Failure
-			Database::incrementSecurityEvent($ip, 'delete_fail');
-			echo json_encode(['success' => false, 'error' => __('api.bad_delete_token')]);
 		}
+
+		// Reached either as the row's signed-in owner or with a verified capability token;
+		// `$isOwner` implies the row exists, and the capability path returned above if it did not.
+		$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `id` = ?");
+		$stmt->execute([$id]);
+
+		// Close any moderation reports for this file (avoid orphaned entries).
+		Database::deleteReportsByFileIds([$id]);
+
+		FileManager::purgeFileArtifacts($id);
+
+		echo json_encode(['success' => true]);
 	}
 
 	/**

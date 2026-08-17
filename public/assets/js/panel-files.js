@@ -1405,7 +1405,7 @@
 					<button class="action-btn" data-fh-click="copyUrl(event, '${f.id}')" title="${esc(t('panel.files.copy_link'))}"><i class="fa-solid fa-copy"></i></button>
 					${canAddToCollection(true) ? `<button class="action-btn" data-fh-click="openAddToCollection('${f.id}', '${safeName}', ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.atc.tooltip'))}"><i class="fa-solid fa-plus"></i></button>` : ''}
 					<button class="action-btn" data-fh-click="openFileOptions('${f.id}')" title="${esc(t('panel.my.options_tooltip'))}"><i class="fa-solid fa-gear"></i></button>
-					<button class="action-btn del" data-fh-click="deleteMyFile('${f.id}', '${safeName}', '${f.deleteToken}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>
+					<button class="action-btn del" data-fh-click="deleteMyFile('${f.id}', '${safeName}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>
 				</div></td>
 			</tr>`;
 		}).join('');
@@ -1465,10 +1465,10 @@
 	/**
 	 * Delete every ticked own file.
 	 *
-	 * One call per file, each carrying that file's delete token — the same request the trash
-	 * icon on a single row makes, because the token is what the server checks and there is no
-	 * bulk endpoint that takes a list of them. `user_delete_files` is a different thing: it
-	 * wipes the whole account's uploads behind a password prompt.
+	 * One call per file — the same request the trash icon on a single row makes, because there
+	 * is no bulk endpoint for it. Ownership comes from the session, so no per-file token is
+	 * sent. `user_delete_files` is a different thing: it wipes the whole account's uploads
+	 * behind a password prompt.
 	 */
 	function bulkDeleteMyFiles() {
 		if (!selectedMyFiles.size) return;
@@ -1481,7 +1481,6 @@
 				try {
 					const fd = new FormData();
 					fd.append('id', id);
-					fd.append('token', file.deleteToken);
 					const d = await FHApi.postForm('delete', fd);
 					if (d.success) ok++;
 				} catch (e) { /* continue — the count reports what got through */ }
@@ -2630,11 +2629,11 @@
 		}
 	}
 
-	function deleteMyFile(id, name, token) {
+	function deleteMyFile(id, name) {
 		document.getElementById('myFileDeleteName').textContent = name;
 		const msg = document.getElementById('myFileDeleteMessage');
 		if (msg) { msg.textContent = ''; msg.className = 'auth-message'; }
-		pendingMyFileDelete = { id, token };
+		pendingMyFileDelete = { id };
 		showModal('myFileDeleteModal');
 	}
 
@@ -2643,7 +2642,6 @@
 		try {
 			const formData = new FormData();
 			formData.append('id', pendingMyFileDelete.id);
-			formData.append('token', pendingMyFileDelete.token);
 			const d = await FHApi.postForm('delete', formData);
 			if (d.success) {
 				flashMessage('myFileDeleteMessage', t('panel.my.deleted'), 'success');

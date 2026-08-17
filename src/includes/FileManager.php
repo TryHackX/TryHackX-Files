@@ -1165,9 +1165,14 @@ class FileManager
 	 * A row shaped for the file's *owner* (pt 8) — the "My files" list.
 	 *
 	 * Same fields the old `user_files` endpoint returned: no owner name or uploader IP (they
-	 * are the reader), plus the delete token and the sharing options the row's own controls
-	 * need. Deliberately a separate shaper rather than a flag on `rowToListItem`, so a delete
-	 * token can never leak into the all-files browser by someone passing the wrong option.
+	 * are the reader), plus the sharing options the row's own controls need.
+	 *
+	 * No delete token. `delete_token` is stored as a bcrypt hash, so the only thing this
+	 * could put in the JSON is the hash — which is not the token, cannot be turned back into
+	 * it, and was rejected by `FileController::deleteTokenMatches()` when the panel echoed it
+	 * back ("Nieprawidłowy token usuwania" on every own-file delete). A row that still holds a
+	 * pre-bcrypt plaintext token would have leaked the live capability into the page instead.
+	 * The panel does not need either: an own-file delete is authorised by the session.
 	 */
 	private static function rowToOwnedItem(array $row): array
 	{
@@ -1178,7 +1183,6 @@ class FileManager
 			'size' => (int) $row['size'],
 			'uploadedAt' => (int) $row['uploaded_at'],
 			'downloads' => (int) $row['downloads'],
-			'deleteToken' => $row['delete_token'],
 			'expiresAt' => isset($row['expires_at']) ? (int) $row['expires_at'] : 0,
 			'maxDownloads' => isset($row['max_downloads']) ? (int) $row['max_downloads'] : 0,
 			'hasPassword' => !empty($row['password_hash']),

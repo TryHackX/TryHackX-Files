@@ -4,7 +4,7 @@ if (basename($_SERVER['PHP_SELF']) === 'config.php') {
 	exit('Direct access forbidden');
 }
 
-define('APP_VERSION', '2.76.5');
+define('APP_VERSION', '2.76.6');
 // APP_ROOT is this file's dir (src/). The project root is one level up and holds the
 // non-public dirs (uploads/, data/, config/) — outside the web root (public/), so secrets
 // and storage are not URL-reachable (St1).

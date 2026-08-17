@@ -15,8 +15,19 @@ final class FileCapabilitySecurityTest extends RepoTestCase
 
 	protected function setUp(): void
 	{
-		$this->truncate('reports', 'collection_files', 'files');
+		$this->truncate('reports', 'collection_files', 'files', 'users');
 		$_SESSION['delete_link_nonces'] = [];
+	}
+
+	/** A real account row — `files.user_id` carries a foreign key onto it. */
+	private function user(string $name): int
+	{
+		$pdo = Database::getInstance();
+		$pdo->prepare(
+			'INSERT INTO `' . Database::table('users') . '`
+			 (username, email, password_hash, role, is_active, created_at) VALUES (?,?,?,?,1,?)'
+		)->execute([$name, $name . '@example.test', 'x', 'user', time()]);
+		return (int) $pdo->lastInsertId();
 	}
 
 	protected function tearDown(): void
@@ -158,5 +169,128 @@ final class FileCapabilitySecurityTest extends RepoTestCase
 		$this->assertStringContainsString('name="nonce"', $html);
 		$this->assertStringNotContainsString('confirm=1', $html);
 		$this->assertStringNotContainsString('<a class="btn btn-danger"', $html);
+	}
+
+	/* ---- action=delete: who may delete, and on what proof ---- */
+
+	private function rowCount(string $id): int
+	{
+		$stmt = Database::getInstance()->prepare(
+			'SELECT COUNT(*) FROM `' . Database::table('files') . '` WHERE `id` = ?'
+		);
+		$stmt->execute([$id]);
+		return (int) $stmt->fetchColumn();
+	}
+
+	/** Drive handleDelete() as a POST from `$sessionUser` (null = signed out); decoded reply. */
+	private function callDelete(array $post, ?int $sessionUser = null): array
+	{
+		$method = $_SERVER['REQUEST_METHOD'] ?? null;
+		$session = $_SESSION;
+
+		$_SERVER['REQUEST_METHOD'] = 'POST';
+		$_POST = $post;
+		unset($_SESSION['user_id']);
+		if ($sessionUser !== null) {
+			$_SESSION['user_id'] = $sessionUser;
+		}
+
+		ob_start();
+		try {
+			FileController::handleDelete();
+		} finally {
+			$body = (string) ob_get_clean();
+			$_POST = [];
+			$_SESSION = $session;
+			if ($method === null) {
+				unset($_SERVER['REQUEST_METHOD']);
+			} else {
+				$_SERVER['REQUEST_METHOD'] = $method;
+			}
+		}
+
+		return is_array($decoded = json_decode($body, true)) ? $decoded : [];
+	}
+
+	/**
+	 * The "My files" regression: the panel has no delete token to send, because the stored one
+	 * is a bcrypt hash. Owning the row is the proof.
+	 */
+	public function testOwnerDeletesOwnFileWithoutPresentingADeleteToken(): void
+	{
+		$owner = $this->user('owner');
+		$id = $this->id('mine');
+		$artifact = $this->artifact($id);
+		$this->insertFile($id, $owner, ['delete_token' => password_hash('never-sent', PASSWORD_DEFAULT)]);
+
+		$reply = $this->callDelete(['id' => $id], $owner);
+
+		$this->assertTrue($reply['success'] ?? false);
+		$this->assertSame(0, $this->rowCount($id));
+		$this->assertFileDoesNotExist($artifact);
+	}
+
+	/** Being signed in is not the proof — being signed in *as the owner* is. */
+	public function testOtherAccountCannotDeleteSomeoneElsesFileWithoutTheToken(): void
+	{
+		$owner = $this->user('owner');
+		$stranger = $this->user('stranger');
+		$id = $this->id('theirs');
+		$artifact = $this->artifact($id);
+		$this->insertFile($id, $owner, ['delete_token' => password_hash('right-secret', PASSWORD_DEFAULT)]);
+
+		$this->assertFalse($this->callDelete(['id' => $id], $stranger)['success'] ?? false);
+		$this->assertFalse($this->callDelete(['id' => $id, 'token' => 'guessed'], $stranger)['success'] ?? false);
+		$this->assertSame(1, $this->rowCount($id));
+		$this->assertFileExists($artifact);
+	}
+
+	/** A guest upload has no owner to fall back on, so the capability is still required. */
+	public function testGuestUploadStillRequiresTheCapabilityToken(): void
+	{
+		$id = $this->id('guest');
+		$artifact = $this->artifact($id);
+		$this->insertFile($id, null, ['delete_token' => password_hash('right-secret', PASSWORD_DEFAULT)]);
+
+		$this->assertFalse($this->callDelete(['id' => $id])['success'] ?? false);
+		$this->assertFalse($this->callDelete(['id' => $id, 'token' => 'wrong-secret'])['success'] ?? false);
+		$this->assertSame(1, $this->rowCount($id));
+
+		$this->assertTrue($this->callDelete(['id' => $id, 'token' => 'right-secret'])['success'] ?? false);
+		$this->assertSame(0, $this->rowCount($id));
+		$this->assertFileDoesNotExist($artifact);
+	}
+
+	/**
+	 * A signed-in account must not inherit the guest path's reach over rows it does not own,
+	 * and `user_id = NULL` must never be read as "owned by nobody, so owned by me".
+	 */
+	public function testSignedInAccountDoesNotInheritGuestUploads(): void
+	{
+		$member = $this->user('member');
+		$id = $this->id('anon');
+		$this->insertFile($id, null, ['delete_token' => password_hash('right-secret', PASSWORD_DEFAULT)]);
+
+		$this->assertFalse($this->callDelete(['id' => $id], $member)['success'] ?? false);
+		$this->assertSame(1, $this->rowCount($id));
+	}
+
+	/**
+	 * The "My files" JSON must not carry the row's `delete_token` column. It is a bcrypt hash,
+	 * so it is useless to the client, and on a pre-bcrypt row it would be the live capability.
+	 */
+	public function testOwnedRowShapeNeverCarriesTheDeleteToken(): void
+	{
+		$owner = $this->user('owner');
+		$id = $this->id('shape');
+		$this->insertFile($id, $owner, ['delete_token' => password_hash('never-sent', PASSWORD_DEFAULT)]);
+
+		$res = FileManager::browse(['owner_id' => $owner, 'owner_fields' => true, 'unpaged' => true]);
+
+		$this->assertCount(1, $res['files']);
+		$this->assertSame($id, $res['files'][0]['id']);
+		$this->assertArrayNotHasKey('deleteToken', $res['files'][0]);
+		$this->assertArrayNotHasKey('delete_token', $res['files'][0]);
+		$this->assertStringNotContainsString('$2y$', json_encode($res['files']));
 	}
 }
