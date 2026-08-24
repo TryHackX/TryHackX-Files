@@ -1605,3 +1605,88 @@ class TestUploadStaging:
         assert connection.rolled_back
         assert not staging.exists()
         assert not final.exists()
+class TestStreamingResponseFinalisation:
+    """The contract the download path depends on, asserted against the installed Starlette.
+
+    A streaming download hands its reader to a background task so the generator is finalised
+    and its file descriptor released. Starlette classifies a background task with an
+    ``iscoroutinefunction()`` check, which is False for an async generator's built-in
+    ``aclose`` - handing that in directly would run it in a worker thread and drop the
+    coroutine unawaited, leaking a descriptor per download. These tests fail if a dependency
+    update ever changes either half of that.
+    """
+
+    def test_a_bare_aclose_is_not_recognised_as_an_async_task(self):
+        from starlette.background import BackgroundTask
+
+        async def generator():
+            yield b"chunk"
+
+        reader = generator()
+        assert not BackgroundTask(reader.aclose).is_async
+        assert BackgroundTask(us.close_stream_reader, reader).is_async
+        asyncio.run(us.close_stream_reader(reader))
+
+    def test_the_background_task_finalises_the_reader_after_the_body(self):
+        from starlette.background import BackgroundTask
+        from starlette.responses import StreamingResponse
+
+        finalised = []
+
+        async def generator():
+            try:
+                yield b"first"
+                yield b"second"
+            finally:
+                finalised.append(True)
+
+        reader = generator()
+        response = StreamingResponse(
+            reader,
+            media_type="application/octet-stream",
+            background=BackgroundTask(us.close_stream_reader, reader),
+        )
+
+        body = bytearray()
+        status = []
+
+        async def receive():
+            # Starlette watches for a client disconnect while it streams. Returning a message
+            # every time would spin that watcher and starve the sender, so this reports the
+            # (empty) request once and then waits to be cancelled with the response.
+            if not receive.sent:
+                receive.sent = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        receive.sent = False
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status.append(message["status"])
+            elif message["type"] == "http.response.body":
+                body.extend(message.get("body", b""))
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "raw_path": b"/",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("127.0.0.1", 8001),
+        }
+        async def drive():
+            await asyncio.wait_for(response(scope, receive, send), timeout=10)
+
+        asyncio.run(drive())
+
+        assert status == [200]
+        assert bytes(body) == b"firstsecond"
+        assert finalised == [True]

@@ -1345,7 +1345,7 @@ async def close_stream_reader(reader) -> None:
     """Finalise a streaming reader once its response is done.
 
     Must stay a real `async def` wrapper. Handing `reader.aclose` to BackgroundTasks directly
-    does not work: Starlette decides async-vs-sync with `asyncio.iscoroutinefunction()`, which
+    does not work: Starlette classifies the task with an `iscoroutinefunction()` check, which
     is False for an async generator's built-in `aclose`, so the task would be run in a worker
     thread and the coroutine it returns dropped without ever being awaited — the generator
     would stay suspended and its file stay open, which is the bug this is here to prevent.
