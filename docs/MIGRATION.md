@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.76.8**, database schema **62**. A code-only
+This guide upgrades a running installation to **2.76.9**, database schema **62**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce
@@ -110,6 +110,13 @@ The virtual host serves `/var/www/filehost/public`, never the project root.
 
 An unsupported newer schema is rejected and never downgraded automatically. Do not manually
 change `schema_version` after a failure; fix the journaled cause or restore the backup.
+
+Upgrading to 2.76.9 on a host that runs its own MTA: reinstall the systemd unit (it gained a
+watchdog and stricter sandboxing) and change **Settings → E-mail → Sending method** from
+**PHP mail()** to **Local mail server (SMTP on 127.0.0.1:25)**. The two belong together —
+the hardened unit sets `NoNewPrivileges=true`, and `mail()` cannot reach Postfix through its
+setgid `postdrop` helper under that flag. The worker logs a warning when it finds that
+combination, but it cannot fix the setting for you.
 
 ```bash
 curl --fail --show-error https://files.example.com/

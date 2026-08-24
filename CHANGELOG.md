@@ -7,6 +7,67 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.9] - 2026-08-25
+
+### Added
+
+- A third e-mail sending method. **Settings → E-mail → Sending method** now offers *Local mail
+  server*, which submits to the MTA already running on this host over SMTP — `127.0.0.1:25`
+  unless `FILEHOST_LOCAL_MTA=host:port` says otherwise. It is the transport a hardened service
+  can actually use, and it should be preferred to `PHP mail()` wherever Postfix, Exim or
+  anything similar runs beside the application. `PHP mail()` stays for hosts that offer nothing
+  else, and the external SMTP relay is unchanged.
+- `filehost-mail-worker` reports liveness to systemd between messages, and the unit asks for it
+  with `WatchdogSec=120`. A delivery that blocks despite everything below is now killed and
+  restarted instead of stalling the queue indefinitely, and `systemctl status` shows the live
+  queue depth. The unit also gained `LogRateLimitIntervalSec`/`LogRateLimitBurst`, `ProtectHome`,
+  `ProtectKernelTunables`, `ProtectControlGroups`, `RestrictSUIDSGID`, `RestrictRealtime`,
+  `RestrictAddressFamilies` and a restart rate limit.
+
+### Fixed
+
+- The mail worker can no longer be wedged forever by PHP `mail()`. The unit sets
+  `NoNewPrivileges=true`, which strips the setgid bit from `/usr/sbin/postdrop` on exec. The
+  helper then cannot create its file in `/var/spool/postfix/maildrop`, and Postfix's answer to
+  that condition is to log a warning, sleep ten seconds and try the same thing again, with no
+  attempt limit. `mail()` therefore never returns: the worker stopped inside its very first
+  delivery, held that message under an unexpiring claim, delivered nothing for four days and
+  reported `active (running)` the whole time. Nothing in the outbox was lost — every retry,
+  back-off and dead-letter rule was still correct — but none of them ran, because the process
+  never got back to them. The socket transports have no privilege transition to lose, and every
+  step of one is bounded, so the same broken MTA now costs one message one attempt.
+- A database connection dropped between handing a message to the transport and recording the
+  outcome no longer sends that message twice. The worker keeps one connection open across
+  batches, so MySQL's `wait_timeout` eventually closes an idle one; the finalising `UPDATE` then
+  failed, the row stayed `sending`, and the next expired lease delivered it again. Claim and
+  finalisation now retry once on a fresh connection.
+- SMTP submission is bounded and explains itself. The connect, every read, every write and the
+  conversation as a whole have deadlines; a short socket write is completed rather than silently
+  truncating the message; and a refusal is stored as the server's own reply
+  (`SMTP RCPT TO rejected: 550 …`) instead of `Mail transport returned failure.`
+- SMTP submission encodes the frozen HTML body as base64. It is 8-bit UTF-8 whose lines can
+  exceed the 998 octets SMTP allows — a local `sendmail` accepted that, a server on a socket is
+  not obliged to.
+- A failing transport is visible again. With `FILEHOST_MINIMAL_LOGS=1` the worker printed
+  nothing at all when delivery failed, which is how an outage lasted four days. It now writes
+  one line per batch that failed — deduplicated for five minutes, because a transport outage
+  affects every queued message at once — and one line for every message that exhausts its retry
+  budget.
+- The worker re-reads settings while it runs. Settings are cached for the lifetime of the
+  process, which is one request on the web side but weeks in a service, so a transport or SMTP
+  host changed in the panel used to require a restart nobody knew to perform. Only the
+  in-process copy is dropped; the shared cache every web request depends on is left alone.
+
+### Changed
+
+- Python dependencies: `cffi` 2.1.0 → 2.1.1 and `starlette` 1.3.1 → 1.6.0, with development
+  tools `ruff` 0.16.0 → 0.16.4 and `pip-tools` 7.6.0 → 7.6.1. `pydantic-core` stays at 2.46.4:
+  `pydantic` 2.13.4 requires exactly that version, so 2.48.0 cannot be installed beside it.
+- The streaming-download contract the sidecar depends on — that Starlette classifies an async
+  generator's built-in `aclose` as a *synchronous* background task, and would therefore drop the
+  coroutine it returns — is now asserted by tests against the installed Starlette rather than
+  only described in a comment.
+
 ## [2.76.8] - 2026-08-17
 
 ### Fixed
