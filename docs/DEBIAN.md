@@ -127,9 +127,30 @@ This disables uvicorn access logs and per-batch mail-worker output while preserv
 errors.
 
 The mail worker and Postfix have different jobs. TryHackX Files writes messages to a durable database
-outbox; `filehost-mail-worker` drains it and submits mail through PHP `mail()`/Postfix or the SMTP
-configuration selected in the panel. Postfix does not read the application database, so keep the
-systemd worker enabled even when Postfix is installed.
+outbox; `filehost-mail-worker` drains it and submits each message through the transport selected
+in **Settings → E-mail**. Postfix does not read the application database, so keep the systemd
+worker enabled even when Postfix is installed.
+
+On a host that runs its own MTA, select **Local mail server (SMTP on 127.0.0.1:25)** rather than
+**PHP mail()**. The installed unit is hardened with `NoNewPrivileges=true`, and that flag strips
+the setgid bit from `/usr/sbin/postdrop` on exec. `mail()` then reaches a helper that cannot write
+to `/var/spool/postfix/maildrop`, warns, sleeps ten seconds and tries again forever: the call
+never returns, the worker stays `active (running)` while delivering nothing, and the journal fills
+with one identical warning every ten seconds. Submitting over a socket needs no privilege
+transition and fails within seconds when the MTA is down, which is what the outbox retry schedule
+expects.
+
+Set `FILEHOST_LOCAL_MTA=host:port` in `/etc/default/filehost` if the local mail server does not
+listen on `127.0.0.1:25`. Verify a working transport with:
+
+```bash
+sudo systemctl --no-pager --full status filehost-mail-worker
+sudo journalctl -u filehost-mail-worker --since "10 min ago"
+```
+
+The unit reports liveness to systemd every few seconds (`WatchdogSec=120`). A delivery that
+blocks anyway is killed and restarted instead of stalling the queue, and `systemctl status` shows
+the current queue depth.
 
 If a long-running worker is not desired, disable it and create
 `/etc/cron.d/filehost-mail-worker` with exactly this system-cron entry instead:

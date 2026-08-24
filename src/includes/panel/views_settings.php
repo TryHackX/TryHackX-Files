@@ -1066,6 +1066,7 @@ if (!defined('APP_ROOT')) {
 						<label><?= _h('panel.set.mail_method') ?></label>
 						<select name="email_method" id="emailMethod" data-fh-change="toggleEmailFields()" class="input">
 							<option value="php" <?= ($settings['email_method'] ?? 'php') === 'php' ? 'selected' : '' ?>><?= _h('panel.set.mail_php') ?></option>
+							<option value="local" <?= ($settings['email_method'] ?? 'php') === 'local' ? 'selected' : '' ?>><?= _h('panel.set.mail_local') ?></option>
 							<option value="smtp" <?= ($settings['email_method'] ?? 'php') === 'smtp' ? 'selected' : '' ?>><?= _h('panel.set.mail_smtp') ?></option>
 						</select>
 					</div>

@@ -27,7 +27,9 @@
 		const fullInput = document.getElementById('emailFromFull');
 		if (smtpFields) smtpFields.style.display = method === 'smtp' ? 'block' : 'none';
 		if (prefixGroup && fullInput) {
-			if (method === 'php') {
+			// php and local both post through this host, so the sender is offered as a
+			// prefix on the site's own domain; only an external relay takes a full address.
+			if (method !== 'smtp') {
 				prefixGroup.style.display = 'flex';
 				fullInput.style.display = 'none';
 				syncEmailFromPrefix();

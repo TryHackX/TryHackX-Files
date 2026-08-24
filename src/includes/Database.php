@@ -470,6 +470,12 @@ class Database
 		SettingsRepository::invalidateCache();
 	}
 
+	/** Re-read settings on the next access without discarding the shared on-disk cache. */
+	public static function forgetLocalSettingsCache(): void
+	{
+		SettingsRepository::forgetLocalCache();
+	}
+
 	public static function getSetting(string $key, $default = null)
 	{
 		return SettingsRepository::get($key, $default);

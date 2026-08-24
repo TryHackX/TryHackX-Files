@@ -11,7 +11,7 @@ const source = fs.readFileSync(
 	'utf8'
 );
 
-function loadModule() {
+function loadModule(elements = {}) {
 	const bootstrap = {
 		dataset: {
 			config: JSON.stringify({ host: 'files.example.test' })
@@ -19,7 +19,8 @@ function loadModule() {
 	};
 	const document = {
 		getElementById(id) {
-			return id === 'panelBootstrap' ? bootstrap : null;
+			if (id === 'panelBootstrap') return bootstrap;
+			return Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null;
 		}
 	};
 	const window = {
@@ -69,6 +70,30 @@ test('settings initializers are harmless outside their server-rendered tabs', ()
 	settings.toggleRecaptchaFields();
 	settings.initPanelValidation();
 	settings.loadUserStats();
+});
+
+test('the local mail method keeps the external SMTP block hidden', () => {
+	const elements = {
+		emailMethod: { value: 'local' },
+		smtpFields: { style: { display: 'block' } },
+		emailFromPrefixGroup: { style: { display: 'none' } },
+		emailFromFull: { style: { display: 'block' }, value: 'ignored@example.test' },
+		emailFromPrefix: { value: ' noreply ' },
+		emailFromReal: { value: '' }
+	};
+	const settings = loadModule(elements);
+
+	settings.toggleEmailFields();
+	assert.equal(elements.smtpFields.style.display, 'none');
+	assert.equal(elements.emailFromPrefixGroup.style.display, 'flex');
+	assert.equal(elements.emailFromFull.style.display, 'none');
+	assert.equal(elements.emailFromReal.value, 'noreply@files.example.test');
+
+	elements.emailMethod.value = 'smtp';
+	settings.toggleEmailFields();
+	assert.equal(elements.smtpFields.style.display, 'block');
+	assert.equal(elements.emailFromPrefixGroup.style.display, 'none');
+	assert.equal(elements.emailFromReal.value, 'ignored@example.test');
 });
 
 test('settings module contains no inline event attributes', () => {

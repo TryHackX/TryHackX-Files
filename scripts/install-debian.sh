@@ -53,6 +53,9 @@ if [[ ! -e /etc/default/filehost ]]; then
         '# TryHackX Files service environment' \
         '# Set to 1 to suppress routine HTTP and worker output while retaining warnings/errors.' \
         'FILEHOST_MINIMAL_LOGS=0' \
+        '# Where the "Local mail server" e-mail method submits. Uncomment only when a local' \
+        '# MTA does not listen on 127.0.0.1:25.' \
+        '#FILEHOST_LOCAL_MTA=127.0.0.1:25' \
         > /etc/default/filehost
     chmod 0640 /etc/default/filehost
     chown root:"$SERVICE_GROUP" /etc/default/filehost

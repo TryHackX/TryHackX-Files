@@ -841,7 +841,8 @@ return [
 	/* ---- settings: email ---- */
 	'panel.set.mail_config' => 'Mailing Configuration',
 	'panel.set.mail_method' => 'Sending Method',
-	'panel.set.mail_php' => 'PHP mail() (Local)',
+	'panel.set.mail_php' => 'PHP mail() (local sendmail)',
+	'panel.set.mail_local' => 'Local mail server (SMTP on 127.0.0.1:25)',
 	'panel.set.mail_smtp' => 'SMTP (External Server)',
 	'panel.set.mail_from' => 'From Email',
 	'panel.set.mail_from_name' => 'From Name',

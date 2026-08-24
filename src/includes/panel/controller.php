@@ -205,7 +205,7 @@ if ($action === 'save_settings') {
 		}
 	} elseif ($group === 'email') {
 		$settingsToUpdate = [
-			'email_method' => in_array($_POST['email_method'] ?? 'php', ['php', 'smtp']) ? $_POST['email_method'] : 'php',
+			'email_method' => in_array($_POST['email_method'] ?? 'php', ['php', 'local', 'smtp']) ? $_POST['email_method'] : 'php',
 			'email_from' => trim($_POST['email_from'] ?? ''),
 			'email_from_name' => trim($_POST['email_from_name'] ?? (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files')),
 			'email_resend_cooldown' => max(1, (int) ($_POST['email_resend_cooldown'] ?? 30)),

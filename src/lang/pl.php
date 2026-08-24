@@ -843,7 +843,8 @@ return [
 	/* ---- ustawienia: e-mail ---- */
 	'panel.set.mail_config' => 'Konfiguracja poczty',
 	'panel.set.mail_method' => 'Metoda wysyłki',
-	'panel.set.mail_php' => 'PHP mail() (lokalnie)',
+	'panel.set.mail_php' => 'PHP mail() (lokalny sendmail)',
+	'panel.set.mail_local' => 'Lokalny serwer poczty (SMTP na 127.0.0.1:25)',
 	'panel.set.mail_smtp' => 'SMTP (serwer zewnętrzny)',
 	'panel.set.mail_from' => 'Adres nadawcy',
 	'panel.set.mail_from_name' => 'Nazwa nadawcy',

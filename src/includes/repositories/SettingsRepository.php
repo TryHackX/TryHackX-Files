@@ -276,6 +276,19 @@ final class SettingsRepository
 		});
 	}
 
+	/**
+	 * Drop only the request-local copy, so the next read reloads from the shared cache.
+	 *
+	 * A request lives for milliseconds, but a worker process lives for weeks: without this it
+	 * would answer from the settings it happened to read at start-up, and a mail transport
+	 * changed in the panel would not take effect until someone restarted the service.
+	 * Invalidating instead would delete the shared cache every web request depends on.
+	 */
+	public static function forgetLocalCache(): void
+	{
+		self::$cache = null;
+	}
+
 	public static function get(string $key, $default = null)
 	{
 		$settings = self::load();

@@ -182,8 +182,24 @@ or throughput improvement is expected to be small and should be measured.
 
 The mail worker is not Postfix and does not replace it. TryHackX Files commits outgoing messages to a
 durable database outbox; the worker claims those rows and hands each message to the configured
-PHP `mail()`/Postfix or SMTP transport. Postfix alone does not poll the TryHackX Files database, so the
-worker is required for queued application e-mail.
+transport. Postfix alone does not poll the TryHackX Files database, so the worker is required for
+queued application e-mail.
+
+**Settings → E-mail → Sending method** offers three transports:
+
+| Method | Submission | Use it when |
+| --- | --- | --- |
+| PHP `mail()` (local sendmail) | the `sendmail_path` binary | shared hosting, where only `mail()` is available |
+| Local mail server | SMTP to `127.0.0.1:25` | this host runs Postfix, Exim or another MTA |
+| SMTP (external server) | SMTP to the configured relay | mail leaves through a provider |
+
+Prefer **Local mail server** over `mail()` wherever an MTA runs on the same host. `mail()` reaches
+Postfix through the setgid `postdrop` helper, and the hardened `filehost-mail-worker` unit sets
+`NoNewPrivileges=true`, which strips that bit on exec: `postdrop` then warns about an unwritable
+maildrop and sleeps ten seconds in a loop that never ends, so `mail()` never returns. The worker
+warns about that combination in the journal, restarts itself through the systemd watchdog when a
+delivery blocks anyway, and `FILEHOST_LOCAL_MTA=host:port` moves the local submission endpoint
+when the MTA is not on this host's port 25.
 
 The preferred Debian setup is the long-running `filehost-mail-worker` systemd service installed
 by `scripts/install-debian.sh`. As an alternative, disable that service and place this entry in

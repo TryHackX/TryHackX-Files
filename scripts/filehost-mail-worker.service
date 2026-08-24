@@ -1,7 +1,15 @@
 # TryHackX Files - durable e-mail outbox worker (template for install-debian.sh)
+#
+# The worker must never hand mail to a setgid helper. NoNewPrivileges below strips the setgid
+# bit from Postfix's postdrop, which then warns about an unwritable maildrop and sleeps ten
+# seconds in a loop with no end - PHP mail() never returns and the queue silently stops.
+# Set Settings -> E-mail to the local mail server (SMTP on 127.0.0.1:25) or to an external
+# SMTP server; both submit over a socket and need no privilege transition.
 [Unit]
 Description=TryHackX Files E-mail Outbox Worker
-After=network.target mysql.service mariadb.service
+After=network.target mysql.service mariadb.service postfix.service
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -10,12 +18,30 @@ Group=__GROUP__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=-/etc/default/filehost
 ExecStart=/usr/bin/php __APP_DIR__/scripts/mail-worker.php --loop --limit=25 --sleep=5
-Restart=on-failure
+Restart=always
 RestartSec=5
 
+# A blocked transport used to leave the process "active (running)" while it delivered nothing.
+# The worker reports liveness between messages, so a stuck delivery is restarted, not endured.
+NotifyAccess=main
+WatchdogSec=120
+
+# One misbehaving helper filled a journal with 3.4 GB of identical warnings. Cap the unit.
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=200
+
+# Hardening
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+# AF_UNIX carries the database socket and the watchdog datagrams, AF_NETLINK is what glibc
+# resolves host names with.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=__APP_DIR__/data
 UMask=0027
 
