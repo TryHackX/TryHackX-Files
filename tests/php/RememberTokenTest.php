@@ -41,6 +41,25 @@ final class RememberTokenTest extends RepoTestCase
 		$_COOKIE = [];
 	}
 
+	/**
+	 * Run one closure inside a real PHP session.
+	 *
+	 * `completeLogin()` rotates the session id, which the CLI cannot do without one. The
+	 * session is closed again straight away so the next test starts from nothing.
+	 */
+	private function withSession(callable $operation): void
+	{
+		if (session_status() !== PHP_SESSION_ACTIVE) {
+			session_start();
+		}
+		try {
+			$operation();
+		} finally {
+			session_write_close();
+			$_SESSION = [];
+		}
+	}
+
 	private function rows(): array
 	{
 		return Database::getInstance()->query(
@@ -203,6 +222,40 @@ final class RememberTokenTest extends RepoTestCase
 		$this->assertSame('Phone/1.0', $left[0]['user_agent']);
 		[$userId] = RememberTokenRepository::consume($here, '203.0.113.9', 'Phone/1.0');
 		$this->assertSame($this->userId, $userId, 'and it still works');
+	}
+
+	/**
+	 * Signing in again replaces this browser's token instead of stacking another one.
+	 *
+	 * Without this, every sign-in on the same machine left the previous row behind: the device
+	 * list filled up with entries for one browser, and the older ones were credentials nobody
+	 * could tell apart or knew they still held.
+	 */
+	public function testSigningInAgainReplacesThisBrowsersToken(): void
+	{
+		$first = RememberTokenRepository::issue($this->userId, 86400, '203.0.113.9', 'Chrome/1.0');
+		$_COOKIE[RememberTokenRepository::COOKIE] = $first;
+		$this->assertCount(1, $this->rows());
+
+		$user = Database::getUserById($this->userId);
+		$this->withSession(static fn() => completeLogin($user, '', 86400));
+
+		$rows = $this->rows();
+		$this->assertCount(1, $rows, 'one browser, one row');
+		[$userId] = RememberTokenRepository::consume($first, '203.0.113.9', 'Chrome/1.0');
+		$this->assertSame(0, $userId, 'the superseded token stops working');
+	}
+
+	/** Choosing "this browser session only" stops the browser being remembered at all. */
+	public function testSigningInWithoutADurationForgetsThisBrowser(): void
+	{
+		$first = RememberTokenRepository::issue($this->userId, 86400, '203.0.113.9', 'Chrome/1.0');
+		$_COOKIE[RememberTokenRepository::COOKIE] = $first;
+
+		$user = Database::getUserById($this->userId);
+		$this->withSession(static fn() => completeLogin($user, '', 0));
+
+		$this->assertSame([], $this->rows());
 	}
 
 	/** A session-only sign-in has nothing to spare, so the button clears everything. */

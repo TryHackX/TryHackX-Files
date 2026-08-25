@@ -893,7 +893,7 @@ return [
 	'panel.acct.devices_revoke' => 'Sign out other devices',
 	'panel.acct.devices_revoke_title' => 'Sign out other devices',
 	'panel.acct.devices_revoke_msg' => 'Confirm with your password. Every remembered browser except this one will have to sign in again.',
-	'panel.acct.devices_revoked' => 'Signed out {n} other device(s).',
+	'panel.acct.devices_revoked' => 'Signed out :n other device(s).',
 	'panel.set.mail_smtp' => 'SMTP (External Server)',
 	'panel.set.mail_from' => 'From Email',
 	'panel.set.mail_from_name' => 'From Name',

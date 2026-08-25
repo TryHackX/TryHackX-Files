@@ -7,6 +7,20 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.77.2] - 2026-08-25
+
+### Fixed
+
+- The "signed out N devices" toast said `{n}`. The browser-side translator substitutes `:name`,
+  not `{name}`, which every other string in the file already knew; this one was written to the
+  PHP convention and shipped straight past the tests, because nothing asserts on a toast.
+- Signing in on a browser that already held a device token left the old row behind instead of
+  replacing it. One browser could therefore own several entries in its own device list, all but
+  one of them credentials nobody could match to anything. A sign-in is a statement about the
+  device making it, so the previous token for that browser is dropped first — and choosing
+  "this browser session only" now stops it being remembered at all rather than quietly leaving
+  the last token alive.
+
 ## [2.77.1] - 2026-08-25
 
 ### Changed

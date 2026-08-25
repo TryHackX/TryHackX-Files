@@ -59,6 +59,16 @@ function completeLogin(array $user, string $uploadToken = '', int $rememberSecon
 	// This one *is* a credential check, so the panel window opens here too.
 	$_SESSION['panel_auth_at'] = time();
 
+	// This browser may already hold a device token from an earlier sign-in. Signing in again is
+	// a statement about *this* device, so the previous one is replaced rather than left beside
+	// it — and choosing "this browser session only" means it should stop being remembered at
+	// all, not keep a token nobody can see they still have.
+	$previousDevice = RememberTokenRepository::presentedCookie();
+	if ($previousDevice !== '') {
+		RememberTokenRepository::forget($previousDevice);
+		RememberTokenRepository::sendCookie('', 0);
+	}
+
 	// A PHP session ends with the browser. "Stay signed in" therefore needs its own device
 	// credential, issued only when the user asked for one and only as long as the
 	// administrator permits.

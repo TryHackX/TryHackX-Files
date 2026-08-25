@@ -823,7 +823,7 @@ return array (
   'panel.acct.devices_revoke' => 'Cerrar sesión en los demás dispositivos',
   'panel.acct.devices_revoke_title' => 'Cerrar sesión en los demás dispositivos',
   'panel.acct.devices_revoke_msg' => 'Confirme con su contraseña. Todos los navegadores recordados salvo este tendrán que iniciar sesión de nuevo.',
-  'panel.acct.devices_revoked' => 'Se cerró la sesión en {n} dispositivo(s) más.',
+  'panel.acct.devices_revoked' => 'Se cerró la sesión en :n dispositivo(s) más.',
   'panel.set.mail_smtp' => 'SMTP (servidor externo)',
   'panel.set.mail_from' => 'Correo del remitente',
   'panel.set.mail_from_name' => 'Nombre del remitente',

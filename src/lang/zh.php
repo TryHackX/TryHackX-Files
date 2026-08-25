@@ -823,7 +823,7 @@ return array (
   'panel.acct.devices_revoke' => '登出其他设备',
   'panel.acct.devices_revoke_title' => '登出其他设备',
   'panel.acct.devices_revoke_msg' => '请用密码确认。除当前浏览器外，所有已记住的浏览器都需要重新登录。',
-  'panel.acct.devices_revoked' => '已登出其他 {n} 台设备。',
+  'panel.acct.devices_revoked' => '已登出其他 :n 台设备。',
   'panel.set.mail_smtp' => 'SMTP（外部服务器）',
   'panel.set.mail_from' => '发件人邮箱',
   'panel.set.mail_from_name' => '发件人名称',

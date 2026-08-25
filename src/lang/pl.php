@@ -895,7 +895,7 @@ return [
 	'panel.acct.devices_revoke' => 'Wyloguj pozostałe urządzenia',
 	'panel.acct.devices_revoke_title' => 'Wyloguj pozostałe urządzenia',
 	'panel.acct.devices_revoke_msg' => 'Potwierdź hasłem. Każda zapamiętana przeglądarka poza tą będzie musiała zalogować się ponownie.',
-	'panel.acct.devices_revoked' => 'Wylogowano pozostałe urządzenia: {n}.',
+	'panel.acct.devices_revoked' => 'Wylogowano pozostałe urządzenia: :n.',
 	'panel.set.mail_smtp' => 'SMTP (serwer zewnętrzny)',
 	'panel.set.mail_from' => 'Adres nadawcy',
 	'panel.set.mail_from_name' => 'Nazwa nadawcy',
