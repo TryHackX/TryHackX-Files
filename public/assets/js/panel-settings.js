@@ -166,7 +166,62 @@
 		confirmInput.classList.toggle('error', !ok);
 	}
 
+	/**
+	 * List the devices that can sign this account back in without a password.
+	 *
+	 * A persistent sign-in is a credential the owner never sees, so the only way it can be
+	 * managed is if it is shown. Nothing secret is rendered here — the series and the secret
+	 * stay on the server and in the cookie.
+	 */
+	function loadRememberDevices() {
+		const host = document.getElementById('rememberDevices');
+		if (!host) return;
+		FHApi.get('user_remember_devices').then(data => {
+			if (!data.success) {
+				host.innerHTML = '';
+				return;
+			}
+			if (!data.devices.length) {
+				host.innerHTML = '<p style="color: var(--text-secondary);">'
+					+ escapeText(host.dataset.empty || '') + '</p>';
+				return;
+			}
+			host.innerHTML = data.devices.map(device => {
+				const used = device.last_used_at
+					? new Date(device.last_used_at * 1000).toLocaleString()
+					: new Date(device.created_at * 1000).toLocaleString();
+				const until = new Date(device.expires_at * 1000).toLocaleString();
+				return '<div class="remember-device">'
+					+ '<strong>' + escapeText(device.user_agent || '?') + '</strong>'
+					+ '<small>' + escapeText(device.last_ip || '?') + ' · '
+					+ escapeText(used) + ' → ' + escapeText(until) + '</small>'
+					+ '</div>';
+			}).join('');
+		}).catch(() => { host.innerHTML = ''; });
+	}
+
+	/** Escape before injecting a browser-supplied string into markup. */
+	function escapeText(value) {
+		const node = document.createElement('span');
+		node.textContent = String(value ?? '');
+		return node.innerHTML;
+	}
+
+	function revokeRememberDevices(btn) {
+		promptForPassword(t('panel.acct.devices_revoke_title'), t('panel.acct.devices_revoke_msg'), (pass) => {
+			FHApi.post('user_remember_revoke', { password: pass }).then(data => {
+				if (data.success) {
+					showNotification(t('panel.acct.devices_revoked', { n: data.revoked }), 'success', btn);
+					loadRememberDevices();
+				} else {
+					showNotification(data.error || t('api.invalid_request'), 'error', btn);
+				}
+			}).catch(error => showNotification(error.message, 'error', btn));
+		});
+	}
+
 	function loadUserStats() {
+		loadRememberDevices();
 		if (!document.getElementById('uStatFiles')) return;
 		FHApi.get('get_user_stats').then(data => {
 			if (data.success) {
@@ -260,7 +315,7 @@
 
 
 	window.FHPanelSettings = Object.freeze({
-		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull,
+		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull, revokeRememberDevices,
 		toggleRecaptchaFields, confirmCleanup, previewCleanup,
 		initPanelValidation, loadUserStats, submitPasswordConfirm,
 		changeUserPassword, changeUserEmail,

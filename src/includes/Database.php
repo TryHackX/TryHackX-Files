@@ -28,6 +28,7 @@ require_once __DIR__ . '/repositories/FileRepository.php';
 require_once __DIR__ . '/repositories/UserRepository.php';
 require_once __DIR__ . '/repositories/RecoveryRepository.php';
 require_once __DIR__ . '/repositories/RecoveryCodeRepository.php';
+require_once __DIR__ . '/repositories/RememberTokenRepository.php';
 require_once __DIR__ . '/repositories/PlanRepository.php';
 require_once __DIR__ . '/repositories/PromoCodeRepository.php';
 require_once __DIR__ . '/repositories/PaymentPlugins.php';
@@ -46,7 +47,7 @@ require_once __DIR__ . '/Permissions.php';
 
 class Database
 {
-	public const CURRENT_SCHEMA_VERSION = 62;
+	public const CURRENT_SCHEMA_VERSION = 63;
 	private const SCHEMA_CONTRACT_CACHE_SECONDS = 300;
 	private static bool $migrationJournalActive = false;
 	private static string $migrationJournalPrefix = '';
@@ -126,6 +127,7 @@ class Database
 					'download_tokens', 'upload_tokens', 'upload_storage_reservations',
 					'file_quarantine', 'file_deletion_queue', 'ad_file_deletion_queue', 'reports', 'files',
 					'recovery_tokens', 'recovery_attempts', 'email_reservations',
+					'remember_tokens',
 					'security_events', 'rate_limits', 'traffic_daily', 'traffic_logs',
 					'audit_log', 'blacklists', 'users', 'promo_codes',
 					'migration_journal', 'settings', 'admins',
@@ -1420,6 +1422,22 @@ class Database
 					'idx_uploaded_ip' => ['uploaded_ip'],
 				]],
 			],
+			63 => [
+				'columns' => [
+					'remember_tokens' => [
+						'id', 'user_id', 'series', 'token_hash', 'expires_at',
+						'created_at', 'last_used_at', 'last_ip', 'user_agent',
+					],
+				],
+				'indexes' => [
+					'remember_tokens' => [
+						'PRIMARY' => ['id'],
+						'uniq_remember_series' => ['series'],
+						'idx_remember_user' => ['user_id'],
+						'idx_remember_expires' => ['expires_at'],
+					],
+				],
+			],
 		];
 	}
 
@@ -1663,6 +1681,18 @@ class Database
 					if ($query->fetchColumn() !== $expectedRule) {
 						$problems[] = "foreign key {$name} is missing or malformed";
 					}
+				}
+				break;
+			case 63:
+				$constraintPrefix = 'fk_' . substr(hash('sha256', $prefix), 0, 8) . '_';
+				$name = substr($constraintPrefix . 'remember_user', 0, 64);
+				$query = $pdo->prepare(
+					"SELECT `DELETE_RULE` FROM information_schema.REFERENTIAL_CONSTRAINTS "
+					. "WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ?"
+				);
+				$query->execute([$name]);
+				if ($query->fetchColumn() !== 'CASCADE') {
+					$problems[] = "foreign key {$name} is missing or malformed";
 				}
 				break;
 			case 60:
@@ -4542,6 +4572,67 @@ class Database
 			}
 		}
 
+		// --- v63: persistent sign-in, one rotating token family per device ---
+		if ($runStep(63)) {
+			$migrated = false;
+			try {
+				// A browser session dies with the browser, so "stay signed in" cannot be one.
+				// Each device gets its own series; the secret inside it is replaced on every
+				// use, and only the hashes are stored — a stolen database yields nothing that
+				// can be presented as a cookie. Seeing an old secret for a live series is the
+				// signal that a cookie was copied, and the whole family is dropped.
+				self::createOrRepairTable($pdo, "CREATE TABLE IF NOT EXISTS `{$prefix}remember_tokens` (
+					`id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+					`user_id` INT UNSIGNED NOT NULL,
+					`series` CHAR(64) NOT NULL,
+					`token_hash` CHAR(64) NOT NULL,
+					`expires_at` INT UNSIGNED NOT NULL,
+					`created_at` INT UNSIGNED NOT NULL,
+					`last_used_at` INT UNSIGNED DEFAULT NULL,
+					`last_ip` VARCHAR(45) DEFAULT NULL,
+					`user_agent` VARCHAR(255) DEFAULT NULL,
+					UNIQUE INDEX `uniq_remember_series` (`series`),
+					INDEX `idx_remember_user` (`user_id`),
+					INDEX `idx_remember_expires` (`expires_at`)
+				) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+				$constraintPrefix = 'fk_' . substr(hash('sha256', $prefix), 0, 8) . '_';
+				$constraintName = substr($constraintPrefix . 'remember_user', 0, 64);
+				$constraintExists = $pdo->prepare(
+					"SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS
+					 WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_NAME = ?"
+				);
+				$constraintExists->execute([$constraintName]);
+				if ((int) $constraintExists->fetchColumn() === 0) {
+					// A deleted account must not leave a live credential behind, and the
+					// database is the only place that can promise it.
+					$pdo->exec(
+						"DELETE r FROM `{$prefix}remember_tokens` r
+						 LEFT JOIN `{$prefix}users` u ON u.`id` = r.`user_id`
+						 WHERE u.`id` IS NULL"
+					);
+					$pdo->exec(
+						"ALTER TABLE `{$prefix}remember_tokens`
+						 ADD CONSTRAINT `{$constraintName}` FOREIGN KEY (`user_id`)
+						 REFERENCES `{$prefix}users` (`id`) ON DELETE CASCADE"
+					);
+				}
+
+				self::persistMigrationVersion(63);
+				$version = max($version, 63);
+				$migrated = true;
+			} catch (\Throwable $e) {
+				error_log('Database migration v63 failed: ' . $e->getMessage());
+				self::failMigrationJournalStep(63, $e);
+				throw $e;
+			}
+			if (!$migrated) {
+				self::$migrationJournalActive = false;
+				$releaseMigrationLock();
+				return;
+			}
+		}
+
 			self::assertSupportedSchema($pdo, $prefix);
 			self::publishSchemaVerification(time());
 			self::completeMigrationJournalStep($version);
@@ -4751,6 +4842,7 @@ class Database
 			'email_user' => 'SET NULL',
 			'promo_res_code' => 'RESTRICT',
 			'promo_res_order' => 'CASCADE',
+			'remember_user' => 'CASCADE',
 		];
 		$constraintQuery = $pdo->prepare(
 			"SELECT `DELETE_RULE` FROM information_schema.REFERENTIAL_CONSTRAINTS

@@ -46,7 +46,7 @@ function previewGranted(string $id): bool
  * Grant the session after all factors have passed. Shared by the plain password login and
  * the 2FA second step, so both take exactly the same path (fresh session id, audit, token claim).
  */
-function completeLogin(array $user, string $uploadToken = ''): void
+function completeLogin(array $user, string $uploadToken = '', int $rememberSeconds = 0): void
 {
 	// Prevent session fixation: issue a fresh session ID on privilege change.
 	session_regenerate_id(true);
@@ -56,6 +56,24 @@ function completeLogin(array $user, string $uploadToken = ''): void
 	SessionAuth::establish($user);
 	unset($_SESSION['pending_2fa']);
 	$_SESSION['recent_auth_at'] = time();
+	// This one *is* a credential check, so the panel window opens here too.
+	$_SESSION['panel_auth_at'] = time();
+
+	// A PHP session ends with the browser. "Stay signed in" therefore needs its own device
+	// credential, issued only when the user asked for one and only as long as the
+	// administrator permits.
+	$lifetime = RememberTokenRepository::resolveLifetime($rememberSeconds);
+	if ($lifetime > 0) {
+		$cookie = RememberTokenRepository::issue(
+			(int) $user['id'],
+			$lifetime,
+			function_exists('getClientIP') ? getClientIP() : '',
+			(string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
+		);
+		if ($cookie !== '') {
+			RememberTokenRepository::sendCookie($cookie, $lifetime);
+		}
+	}
 
 	if (($user['role'] ?? 'user') === 'admin') {
 		Database::logAudit('admin_login', 'user: ' . $user['username'], $user['id'], $user['username']);
@@ -71,6 +89,58 @@ function hasRecentAuthentication(int $maxAgeSeconds = 600): bool
 {
 	$at = (int) ($_SESSION['recent_auth_at'] ?? 0);
 	return $at > 0 && time() - $at <= max(60, $maxAgeSeconds);
+}
+
+/**
+ * How long the panel stays open on one credential check, in seconds. 0 disables the gate.
+ */
+function panelReauthWindow(): int
+{
+	$minutes = (int) Database::getSetting('panel_reauth_minutes', 30);
+	if ($minutes <= 0) {
+		return 0;
+	}
+	return max(5, min(1440, $minutes)) * 60;
+}
+
+/** Whether this account is inside the group the panel gate applies to. */
+function panelReauthApplies(?array $user): bool
+{
+	if (!$user || panelReauthWindow() === 0) {
+		return false;
+	}
+	$scope = (string) Database::getSetting('panel_reauth_scope', 'staff');
+	if ($scope === 'all') {
+		return true;
+	}
+	$role = (string) ($user['role'] ?? 'user');
+	return $role === 'admin' || $role === 'moderator';
+}
+
+/**
+ * Whether the panel may be entered without asking for the password again.
+ *
+ * The window is idle-based: every panel request pushes it forward, so a session someone is
+ * actually working in never interrupts them, while one left open on a borrowed machine closes
+ * on its own. Coming back on a "stay signed in" cookie never opens it — that cookie proves
+ * possession of a device, not knowledge of a password.
+ */
+function panelAuthorizationValid(?array $user): bool
+{
+	$window = panelReauthWindow();
+	if (!panelReauthApplies($user)) {
+		return true;
+	}
+	$at = (int) ($_SESSION['panel_auth_at'] ?? 0);
+	return $at > 0 && time() - $at <= $window;
+}
+
+/** Push the idle window forward after a request the panel served. */
+function touchPanelAuthorization(): void
+{
+	if (isset($_SESSION['panel_auth_at'])) {
+		$_SESSION['panel_auth_at'] = time();
+	}
 }
 
 /** JSON gate shared by destructive controller handlers. */

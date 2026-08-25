@@ -113,6 +113,8 @@ $routes = [
 	'user_2fa_disable' => $write([AuthController::class, 'handleUser2faDisable'], true, null, 'auth'),
 	'user_2fa_login' => $write([AuthController::class, 'handleUser2faLogin'], false, null, 'auth'),
 	'user_2fa_recovery_codes' => $write([AuthController::class, 'handleUser2faRecoveryCodes'], true, null, 'auth'),
+	'user_remember_devices' => $read([AuthController::class, 'handleUserRememberDevices'], true, null, 'auth'),
+	'user_remember_revoke' => $write([AuthController::class, 'handleUserRememberRevoke'], true, null, 'auth'),
 	'user_set_language' => $write([AuthController::class, 'handleUserSetLanguage'], true),
 
 	// ---- Admin panel ----

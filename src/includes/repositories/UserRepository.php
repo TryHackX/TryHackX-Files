@@ -20,7 +20,12 @@ final class UserRepository
 	 */
 	private static function revokeAuthenticationArtifacts(PDO $pdo, int $userId): void
 	{
-		foreach (['api_keys', 'upload_tokens', 'download_tokens', 'recovery_tokens'] as $name) {
+		// `remember_tokens` belongs here for the same reason as the rest: it is a credential
+		// that reconstructs a session without a password, so a password change, a 2FA change
+		// or a disabled account has to take every device's copy with it.
+		foreach ([
+			'api_keys', 'upload_tokens', 'download_tokens', 'recovery_tokens', 'remember_tokens',
+		] as $name) {
 			$table = Database::table($name);
 			$pdo->prepare("DELETE FROM `{$table}` WHERE `user_id` = ?")->execute([$userId]);
 		}

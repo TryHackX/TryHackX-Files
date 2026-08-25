@@ -24,6 +24,8 @@ into memory.
 - streamed multi-file drag-and-drop uploads with progress and guest deletion tokens;
 - bounded-memory full and Range downloads which remain interruptible by an administrator;
 - accounts, e-mail/admin activation, password recovery and e-mail changes;
+- optional persistent sign-in with a per-device rotating token, a device list the owner can
+  revoke, and a separate password window in front of the panel;
 - files, collections and on-the-fly ZIP downloads;
 - per-group storage, retention, bandwidth and renewable download-transfer allowances (guest
   usage is accounted by IP);

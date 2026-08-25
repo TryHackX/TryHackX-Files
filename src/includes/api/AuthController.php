@@ -56,6 +56,12 @@ final class AuthController
 			unset($_SESSION['login_attempts']); // Cleanup legacy
 
 			$uploadToken = $input['upload_token'] ?? '';
+			// Only durations the form actually offers; anything else is treated as
+			// "this browser session only", which is the safe reading of a bad request.
+			$remember = (int) ($input['remember'] ?? 0);
+			if (!in_array($remember, RememberTokenRepository::DURATIONS, true)) {
+				$remember = 0;
+			}
 
 			// 2FA: the password alone doesn't grant a session — park the login and ask for a
 			// TOTP code (handleUser2faLogin finishes it). Nothing privileged is set yet.
@@ -65,12 +71,13 @@ final class AuthController
 					'user_id' => (int) $result['user']['id'],
 					'at' => time(),
 					'upload_token' => $uploadToken,
+					'remember' => $remember,
 				];
 				echo json_encode(['success' => false, 'require_2fa' => true]);
 				return;
 			}
 
-			completeLogin($result['user'], $uploadToken);
+			completeLogin($result['user'], $uploadToken, $remember);
 		} else {
 			// Increment attempts
 			Database::incrementSecurityEvent($ip, 'login_fail');
@@ -378,7 +385,7 @@ final class AuthController
 
 		Database::clearSecurityEvent($ip, 'totp_fail');
 		$user['is_admin'] = ($user['role'] === 'admin');
-		completeLogin($user, (string) ($pending['upload_token'] ?? ''));
+		completeLogin($user, (string) ($pending['upload_token'] ?? ''), (int) ($pending['remember'] ?? 0));
 
 		echo json_encode(['success' => true, 'user' => [
 			'id' => (int) $user['id'],
@@ -442,10 +449,91 @@ final class AuthController
 		}
 	}
 
+	/**
+	 * The devices that can currently sign this account back in without a password.
+	 *
+	 * A persistent sign-in is a credential the user cannot see, so it has to be listed
+	 * somewhere they can. The series and secret are never exposed — only when the device was
+	 * first trusted, when it last used its token, when it stops working, and the address and
+	 * browser string it was last seen from.
+	 */
+	public static function handleUserRememberDevices()
+	{
+		header('Content-Type: application/json');
+		$userId = (int) ($_SESSION['user_id'] ?? 0);
+		if ($userId < 1) {
+			http_response_code(403);
+			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
+			return;
+		}
+		$devices = array_map(static function (array $row): array {
+			return [
+				'created_at' => (int) $row['created_at'],
+				'last_used_at' => (int) ($row['last_used_at'] ?? 0),
+				'expires_at' => (int) $row['expires_at'],
+				'last_ip' => (string) ($row['last_ip'] ?? ''),
+				'user_agent' => (string) ($row['user_agent'] ?? ''),
+			];
+		}, RememberTokenRepository::devices($userId));
+
+		echo json_encode([
+			'success' => true,
+			'enabled' => RememberTokenRepository::enabled(),
+			'devices' => $devices,
+		]);
+	}
+
+	/**
+	 * Revoke every persistent sign-in for this account, this browser included.
+	 *
+	 * Deliberately all of them and not "the others": the point of the button is that someone
+	 * has lost a device and cannot tell which entry it is. Leaving the current one alive would
+	 * also mean trusting that whoever clicked is the owner, which is what the password check
+	 * in front of it establishes rather than assumes.
+	 */
+	public static function handleUserRememberRevoke()
+	{
+		header('Content-Type: application/json');
+		$userId = (int) ($_SESSION['user_id'] ?? 0);
+		if ($userId < 1) {
+			http_response_code(403);
+			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
+			return;
+		}
+		// The password, here and now — the same rule the rest of the account tab follows. A
+		// hijacked session must not be able to quietly cut the owner's other devices loose.
+		$input = json_decode(file_get_contents('php://input'), true) ?: [];
+		$password = (string) ($input['password'] ?? '');
+		if (strlen($password) > InputLimits::HARD_PASSWORD_MAX
+			|| !Database::verifyUserPassword($userId, $password)) {
+			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
+			return;
+		}
+		$_SESSION['recent_auth_at'] = time();
+
+		$revoked = RememberTokenRepository::forgetUser($userId);
+		RememberTokenRepository::sendCookie('', 0);
+		Database::logAudit(
+			'remember_tokens_revoked',
+			"user revoked {$revoked} persistent sign-in(s)",
+			$userId,
+			(string) ($_SESSION['user_name'] ?? '')
+		);
+		echo json_encode(['success' => true, 'revoked' => $revoked]);
+	}
+
 	public static function handleUserLogout()
 	{
 		header('Content-Type: application/json');
 		// Session already started at the top of api.php
+
+		// Signing out has to take the device credential with it. Destroying the session alone
+		// would leave a cookie that silently signs the browser straight back in.
+		$cookie = RememberTokenRepository::presentedCookie();
+		if ($cookie !== '') {
+			RememberTokenRepository::forget($cookie);
+			RememberTokenRepository::sendCookie('', 0);
+		}
 
 		$_SESSION = [];
 		if (ini_get("session.use_cookies")) {

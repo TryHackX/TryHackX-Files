@@ -194,7 +194,31 @@ if ($action === 'save_settings') {
 			'reg_ip_limit' => max(0, (int) ($_POST['reg_ip_limit'] ?? 0)),
 			'reg_ip_window_days' => max(1, min(3650, (int) ($_POST['reg_ip_window_days'] ?? 90))),
 			'email_release_days' => max(0, min(3650, (int) ($_POST['email_release_days'] ?? 0))),
+			'login_remember_enabled' => isset($_POST['login_remember_enabled']) ? '1' : '0',
+			'login_remember_max_days' => max(1, min(365, (int) ($_POST['login_remember_max_days'] ?? 30))),
+			// 0 disables the panel gate entirely; anything else is clamped to a window that is
+			// long enough to work in and short enough to matter.
+			'panel_reauth_minutes' => (int) ($_POST['panel_reauth_minutes'] ?? 30) <= 0
+				? 0
+				: max(5, min(1440, (int) $_POST['panel_reauth_minutes'])),
+			'panel_reauth_scope' => in_array($_POST['panel_reauth_scope'] ?? 'staff', ['staff', 'all'], true)
+				? $_POST['panel_reauth_scope']
+				: 'staff',
 		];
+		// Switching persistent sign-in off has to take the outstanding cookies with it. Left
+		// alone, the setting would only stop new ones and every device already holding a token
+		// would stay signed in for the rest of its month.
+		if ((string) Database::getSetting('login_remember_enabled', '1') === '1'
+			&& $settingsToUpdate['login_remember_enabled'] === '0') {
+			$revoked = RememberTokenRepository::forgetAll();
+			if ($revoked > 0) {
+				Database::logAudit(
+					'remember_tokens_revoked',
+					"persistent sign-in disabled; {$revoked} device(s) signed out"
+				);
+			}
+		}
+
 		$recaptchaSecret = trim((string) ($_POST['recaptcha_secret_key'] ?? ''));
 		if ($recaptchaSecret !== '') {
 			if (strlen($recaptchaSecret) > InputLimits::PASSWORD_MAX) {

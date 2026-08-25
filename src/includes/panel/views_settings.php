@@ -812,6 +812,38 @@ if (!defined('APP_ROOT')) {
 
 			<?php elseif ($subTab === 'security'): ?>
 				<div class="settings-section">
+					<h3><i class="fa-solid fa-user-clock"></i> <?= _h('panel.set.sessions') ?></h3>
+					<div class="form-group">
+						<label class="form-check">
+							<input type="checkbox" name="login_remember_enabled" <?= ($settings['login_remember_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+							<span><?= _h('panel.set.remember_enabled') ?></span>
+						</label>
+						<small><?= _h('panel.set.remember_enabled_hint') ?></small>
+					</div>
+					<div class="form-row">
+						<div class="form-group">
+							<label><?= _h('panel.set.remember_max_days') ?></label>
+							<input type="number" name="login_remember_max_days" min="1" max="365"
+								value="<?= (int) ($settings['login_remember_max_days'] ?? 30) ?>">
+							<small><?= _h('panel.set.remember_max_days_hint') ?></small>
+						</div>
+						<div class="form-group">
+							<label><?= _h('panel.set.panel_reauth_minutes') ?></label>
+							<input type="number" name="panel_reauth_minutes" min="0" max="1440"
+								value="<?= (int) ($settings['panel_reauth_minutes'] ?? 30) ?>">
+							<small><?= _h('panel.set.panel_reauth_minutes_hint') ?></small>
+						</div>
+						<div class="form-group">
+							<label><?= _h('panel.set.panel_reauth_scope') ?></label>
+							<select name="panel_reauth_scope" class="input">
+								<option value="staff" <?= ($settings['panel_reauth_scope'] ?? 'staff') === 'staff' ? 'selected' : '' ?>><?= _h('panel.set.panel_reauth_staff') ?></option>
+								<option value="all" <?= ($settings['panel_reauth_scope'] ?? 'staff') === 'all' ? 'selected' : '' ?>><?= _h('panel.set.panel_reauth_all') ?></option>
+							</select>
+							<small><?= _h('panel.set.panel_reauth_scope_hint') ?></small>
+						</div>
+					</div>
+				</div>
+				<div class="settings-section">
 					<h3><i class="fa-solid fa-lock"></i> <?= _h('panel.set.access') ?></h3>
 					<div class="form-group">
 						<label class="form-check">

@@ -11,6 +11,7 @@ final class SessionAuth
 {
 	private const VERSION_KEY = 'auth_version';
 	private static bool $resolved = false;
+	private static bool $restoredFromCookie = false;
 	private static ?array $cachedUser = null;
 
 	/**
@@ -43,6 +44,16 @@ final class SessionAuth
 			'preview_grants',
 		] as $key) {
 			unset($_SESSION[$key]);
+		}
+
+		self::$restoredFromCookie = false;
+		// A session torn down here must not be resurrectable by the cookie that made it.
+		if (class_exists('RememberTokenRepository')) {
+			$cookie = RememberTokenRepository::presentedCookie();
+			if ($cookie !== '') {
+				RememberTokenRepository::forget($cookie);
+				RememberTokenRepository::sendCookie('', 0);
+			}
 		}
 
 		if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
@@ -81,11 +92,14 @@ final class SessionAuth
 		if ($userId === false || $userId === null) {
 			if (isset($_SESSION['user_id'])) {
 				self::invalidate();
-			} else {
+				return null;
+			}
+			$userId = self::restoreFromCookie();
+			if ($userId === null) {
 				self::$resolved = true;
 				self::$cachedUser = null;
+				return null;
 			}
-			return null;
 		}
 
 		$pdo = Database::getInstance();
@@ -109,8 +123,15 @@ final class SessionAuth
 			return null;
 		}
 
-		$storedVersion = (int) ($_SESSION[self::VERSION_KEY] ?? 0);
 		$currentVersion = (int) ($user['session_version'] ?? 0);
+		if (self::$restoredFromCookie) {
+			// A cookie carries no session generation, and it does not need to: any change that
+			// advances one also deletes every remember token for the account, so a token that
+			// still resolves was issued against the credential in force right now.
+			self::$restoredFromCookie = false;
+			$_SESSION[self::VERSION_KEY] = $currentVersion;
+		}
+		$storedVersion = (int) ($_SESSION[self::VERSION_KEY] ?? 0);
 		if (
 			$storedVersion < 1
 			|| $currentVersion < 1
@@ -129,6 +150,50 @@ final class SessionAuth
 		self::$resolved = true;
 		self::$cachedUser = $user;
 		return self::$cachedUser;
+	}
+
+	/**
+	 * Rebuild a session from a persistent sign-in cookie, if one was presented and holds up.
+	 *
+	 * The user row is not trusted from here — the caller re-reads it from the users table and
+	 * re-checks status and session version, exactly as it does for an ordinary session. All
+	 * this does is decide whose id to look up.
+	 *
+	 * Deliberately absent: `recent_auth_at`. Coming back on a cookie is not a credential
+	 * check, so the panel and every destructive action still ask for the password.
+	 */
+	private static function restoreFromCookie(): ?int
+	{
+		if (session_status() !== PHP_SESSION_ACTIVE || !class_exists('RememberTokenRepository')) {
+			return null;
+		}
+		$cookie = RememberTokenRepository::presentedCookie();
+		if ($cookie === '') {
+			return null;
+		}
+
+		[$userId, $rotated, $expiresAt] = RememberTokenRepository::consume(
+			$cookie,
+			function_exists('getClientIP') ? getClientIP() : '',
+			(string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
+		);
+		if ($userId < 1) {
+			RememberTokenRepository::sendCookie('', 0);
+			return null;
+		}
+
+		// The cookie proved possession of a device credential, which is a privilege change:
+		// the id it lands on must not be one an attacker could have fixed in advance.
+		if (!headers_sent()) {
+			session_regenerate_id(true);
+		}
+		// The row's own deadline, never a fresh one: using the token again must not extend the
+		// window the user actually asked for.
+		RememberTokenRepository::sendCookie($rotated, max(60, $expiresAt - time()));
+		$_SESSION['user_id'] = $userId;
+		$_SESSION['restored_from_cookie_at'] = time();
+		self::$restoredFromCookie = true;
+		return $userId;
 	}
 
 	/** Store a freshly authenticated user's authoritative identity in the active session. */

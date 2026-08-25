@@ -261,9 +261,15 @@
         btn.textContent = t('js.logging_in');
 
         try {
+            // How long the sign-in should survive the browser closing. Absent (the setting is
+            // off) or unparsable means this browser session only, which is the old behaviour.
+            const rememberField = document.getElementById('loginRemember');
+            const remember = Number.parseInt(rememberField?.value ?? '0', 10);
+
             const data = await FHApi.post('user_login', {
                 username,
                 password,
+                remember: Number.isFinite(remember) ? remember : 0,
                 captcha_response: captchaResponse,
                 upload_token: sessionStorage.getItem('uploadToken') || ''
             });

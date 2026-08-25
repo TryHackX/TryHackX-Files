@@ -573,6 +573,27 @@ textarea:autofill {
     margin-top: 2px;
 }
 
+/* One remembered device per row: the browser it identifies itself as, then where and when it
+   was last seen. Deliberately plain — this is an audit list, not a dashboard. */
+.remember-device {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    background: var(--bg-secondary);
+}
+.remember-device strong {
+    display: block;
+    font-size: 0.9rem;
+    word-break: break-word;
+}
+.remember-device small {
+    display: block;
+    color: var(--text-muted);
+    margin-top: 3px;
+    font-size: 0.8rem;
+}
+
 /* Per-section search above a chip list (owner / IP / extension). Kept visually lighter than a
    form field so it reads as a filter on the chips below, not another criterion. */
 .chip-search {

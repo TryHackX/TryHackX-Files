@@ -44,10 +44,49 @@ if (!$loggedIn) {
 }
 
 if (isset($_GET['logout'])) {
+	// Destroying the session is not enough: a "stay signed in" cookie would restore it on the
+	// next request, and the user would watch themselves get signed back in.
+	$rememberCookie = RememberTokenRepository::presentedCookie();
+	if ($rememberCookie !== '') {
+		RememberTokenRepository::forget($rememberCookie);
+		RememberTokenRepository::sendCookie('', 0);
+	}
 	session_destroy();
 	header('Location: ' . $appUrl . '/');
 	exit;
 }
+
+// --- Second gate: the panel wants a password, not just a session ---------------------------
+// A valid session says the browser signed in once. It does not say the person here now is the
+// account owner: the machine may be shared, the tab may be weeks old, the session may have
+// been restored from a device cookie. Staff pay for that with one password per idle window.
+require_once __DIR__ . '/../src/includes/api/ApiSupport.php';
+$reauthError = '';
+if (($_POST['action'] ?? '') === 'panel_reauth') {
+	if (!csrfValidate()) {
+		$reauthError = __('api.csrf');
+	} elseif (!Database::verifyUserPassword((int) $currentUser['id'], (string) ($_POST['password'] ?? ''))) {
+		$reauthError = __('api.bad_password');
+		Database::logAudit(
+			'panel_reauth_failed',
+			'wrong password at the panel gate',
+			(int) $currentUser['id'],
+			(string) ($currentUser['username'] ?? '')
+		);
+	} else {
+		$_SESSION['panel_auth_at'] = time();
+		$_SESSION['recent_auth_at'] = time();
+		header('Location: ' . $appUrl . '/panel.php');
+		exit;
+	}
+}
+if (!panelAuthorizationValid($currentUser)) {
+	$reauthUsername = (string) ($currentUser['username'] ?? '');
+	require __DIR__ . '/../src/includes/panel_reauth_page.php';
+	exit;
+}
+// Idle window: working in the panel keeps it open, walking away closes it.
+touchPanelAuthorization();
 
 $userRole = $currentUser['role'] ?? 'user';
 $isMod = $isAdmin || $userRole === 'moderator';

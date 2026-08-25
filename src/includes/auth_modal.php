@@ -29,6 +29,34 @@
 					<input type="password" class="auth-input" id="loginPassword" name="password"
 						placeholder="<?= _h('auth.password_ph') ?>" required maxlength="<?= InputLimits::HARD_PASSWORD_MAX ?>" autocomplete="current-password">
                 </div>
+                <?php if (RememberTokenRepository::enabled()): ?>
+                    <?php
+                    // Offered durations are capped by the administrator, so a 30-day option on
+                    // an installation that allows seven would be a lie. Anything above the cap
+                    // simply is not listed.
+                    $rememberMax = RememberTokenRepository::maxLifetime();
+                    $rememberChoices = [
+                        0 => 'auth.remember_session',
+                        1800 => 'auth.remember_30m',
+                        3600 => 'auth.remember_1h',
+                        10800 => 'auth.remember_3h',
+                        86400 => 'auth.remember_1d',
+                        604800 => 'auth.remember_7d',
+                        2592000 => 'auth.remember_30d',
+                    ];
+                    ?>
+                    <div class="form-group">
+                        <label for="loginRemember"><?= _h('auth.remember_label') ?></label>
+                        <select class="auth-input" id="loginRemember" name="remember">
+                            <?php foreach ($rememberChoices as $seconds => $key): ?>
+                                <?php if ($seconds === 0 || $seconds <= $rememberMax): ?>
+                                    <option value="<?= (int) $seconds ?>"><?= _h($key) ?></option>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                            <option value="-1"><?= _h('auth.remember_max') ?></option>
+                        </select>
+                    </div>
+                <?php endif; ?>
                 <div style="display:flex; justify-content:flex-end; margin-top:-10px; margin-bottom:15px;">
                     <a href="#" style="font-size:0.85rem; color:var(--text-secondary); text-decoration:none;"
                         data-auth-action="recovery"><?= _h('auth.forgot') ?></a>

@@ -13,6 +13,7 @@ parameters:
             - src/includes/auth_modal.php
             - src/includes/delete_link_page.php
             - src/includes/error_page.php
+            - src/includes/panel_reauth_page.php
             - src/includes/header_ui.php
             - src/includes/panel/*
     tmpDir: data/phpstan-cache

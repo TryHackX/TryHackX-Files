@@ -592,7 +592,7 @@
 
 	/* Settings and account self-service live in panel-settings.js. */
 	const {
-		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull,
+		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull, revokeRememberDevices,
 		toggleRecaptchaFields, confirmCleanup, previewCleanup,
 		initPanelValidation, loadUserStats, submitPasswordConfirm,
 		changeUserPassword, changeUserEmail,
@@ -974,7 +974,7 @@
 		loadAuditLog, loadDashboard,
 		openTopFilesSettings, onTopFilesPeriodChange, applyTopFilesSettings, loadTopFiles,
 		setTrafficRange, openTrafficRange, applyTrafficRange, loadTraffic,
-		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull, toggleRecaptchaFields, confirmCleanup, previewCleanup, showConfirm, confirmAction,
+		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull, revokeRememberDevices, toggleRecaptchaFields, confirmCleanup, previewCleanup, showConfirm, confirmAction,
 		changeUserPassword, changeUserEmail, submitPasswordConfirm, confirmDeleteAllFiles, confirmDeleteAccount,
 		toggleMyFileSelect, toggleSelectAllMyFiles, bulkDeleteMyFiles,
 		toggleMyCollectionSelect, toggleSelectAllMyCollections, bulkDeleteMyCollections,

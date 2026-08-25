@@ -128,6 +128,20 @@ if (!defined('APP_ROOT')) {
 		</div>
 	</div>
 
+	<?php if (RememberTokenRepository::enabled()): ?>
+		<div class="settings-section">
+			<h3><i class="fa-solid fa-mobile-screen"></i> <?= _h('panel.acct.devices') ?></h3>
+			<p style="color: var(--text-secondary); margin-bottom: 16px;"><?= _h('panel.acct.devices_sub') ?></p>
+			<div id="rememberDevices" data-empty="<?= _h('panel.acct.devices_none') ?>">
+				<p style="color: var(--text-secondary);"><?= _h('panel.acct.devices_loading') ?></p>
+			</div>
+			<button type="button" class="btn btn-danger" style="margin-top: 14px;"
+				data-fh-click="revokeRememberDevices(this)">
+				<i class="fa-solid fa-right-from-bracket"></i> <?= _h('panel.acct.devices_revoke') ?>
+			</button>
+		</div>
+	<?php endif; ?>
+
 	<div class="settings-section">
 		<h3><i class="fa-solid fa-envelope"></i> <?= _h('panel.acct.email_settings') ?></h3>
 		<div style="margin-bottom: 16px;">
