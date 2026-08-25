@@ -1,6 +1,6 @@
 # TryHackX Files roadmap
 
-**Updated:** 2026-08-25 for version 2.76.9
+**Updated:** 2026-08-25 for version 2.76.10
 
 This file contains only work that remains open. Completed and verified work is removed; released
 changes belong in [CHANGELOG.md](../CHANGELOG.md).

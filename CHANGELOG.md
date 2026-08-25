@@ -7,6 +7,32 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.10] - 2026-08-25
+
+### Fixed
+
+- The Docker transfer smoke test throttles downloads again, and therefore runs at all. It has
+  failed in every recorded run of this repository, always on the same assertion: no download
+  reservation was ever observed in the `started` state. The script slowed transfers to
+  128 KiB/s by writing `limit_download_guest` into the settings table — a key that stopped
+  driving anything when limits moved into groups. The migration copied it into the guest
+  group's `limit_download` once, at install time, and the upload server has read the group row
+  ever since; the panel writes the flat key back only for legacy readers. With the throttle
+  left at zero the 512 KiB payload was delivered in a single burst, so the reservation passed
+  through `started` in less time than one `docker compose exec` takes to answer, and every
+  later assertion that interrupts a transfer in flight was equally doomed. The script now sets
+  the column that is read, and two tests pin the rule it got wrong: a guest resolves to the
+  guest group's `limit_download`, a stale flat setting does not override it, and a missing
+  guest group is an error rather than an unthrottled download.
+
+### Changed
+
+- Every pinned dependency is now at its current release: `cryptography` 50.0.0, `idna` 3.19,
+  `python-dotenv` 1.2.3, `typing-inspection` 0.4.4, `uvicorn` 0.52.4 and `websockets` 17.0.1 at
+  runtime, plus `packaging`, `pip`, `pygments`, `setuptools` and `wheel` for development.
+  `pydantic-core` is the one exception and not a choice: `pydantic` 2.13.4 requires exactly
+  2.46.4, so 2.48.0 cannot be installed until pydantic itself moves.
+
 ## [2.76.9] - 2026-08-25
 
 ### Added
