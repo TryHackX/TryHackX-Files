@@ -7,6 +7,27 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.12] - 2026-08-25
+
+### Added
+
+- `scripts/mail-worker-hardening.sh` switches the mail worker's sandbox between the shipped
+  `NoNewPrivileges=true` and a relaxed unit that lets `PHP mail()` reach a setgid helper. The
+  restriction is this project's own choice, so changing it should be one command rather than a
+  hand-written drop-in — but it cannot be a button in the panel. `no_new_privs` is one-way for
+  the life of a process, so nothing already running can clear it; only systemd can decide it,
+  at exec time, from a unit file root owns. Letting the web user rewrite that file and restart
+  the service would turn a panel compromise into control of a root-owned unit, which is the
+  precise thing the flag exists to prevent. Root presses the button; the panel says which one
+  to press.
+- **Settings -> E-mail** shows what the worker actually reports: when it last ran, its PHP
+  version, whether its sandbox is strict or relaxed, and the command that changes it. The panel
+  cannot read any of that from its own process — the kernel flag belongs to one process tree
+  and PHP-FPM is not that tree, so it always answers "no" regardless of how the worker runs.
+  The worker therefore publishes a snapshot into the data directory it already owns, rewritten
+  only when something changes, and a worker that stopped reads as stale rather than as good
+  news.
+
 ## [2.76.11] - 2026-08-25
 
 ### Added

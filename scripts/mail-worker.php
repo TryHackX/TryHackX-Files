@@ -32,7 +32,7 @@ if (!defined('PROJECT_ROOT')) {
 	define('PROJECT_ROOT', $projectRoot);
 }
 if (!defined('APP_VERSION')) {
-	define('APP_VERSION', '2.76.11');
+	define('APP_VERSION', '2.76.12');
 }
 if (!defined('APP_URL')) {
 	$canonical = defined('APP_CANONICAL_URL')
