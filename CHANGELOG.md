@@ -7,6 +7,35 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.79.2] - 2026-08-26
+
+### Added
+
+- The panel gate now resists being guessed at. It had CSRF and an audit line and nothing else:
+  a wrong password could be retried without limit, which matters because the gate is reached
+  *with* a valid session — a machine left signed in, or a stolen session cookie. Attempts are
+  now counted per account and address through the existing `auth` limiter (ten in five
+  minutes), and once that is spent the form is withdrawn rather than merely rejecting, so
+  there is nothing left to submit against.
+- A captcha appears on the gate from the third wrong password, using whichever provider is
+  configured. By then it is not a typo. It is skipped entirely when the captcha feature is
+  off, and the counter lives in the session — clearing that costs the attacker the session
+  that got them to the gate in the first place, and the sign-in form they land on is already
+  throttled and captcha'd.
+
+### Changed
+
+- The drifting-orb background is one stylesheet now, `assets/css/background.css`, and the
+  panel finally shows it. The rules had been copied into `index.css` and `download.css` and the
+  copies had already diverged — the download one was missing the third orb — while the panel
+  carried the markup with no styles at all, so the elements rendered and did nothing. The panel
+  matching the rest of the site was the point; removing a duplicate that was already wrong came
+  with it.
+- `download.php` and `collection.php` stop rendering their own background layer. They emitted
+  one and then included the site header, which emits another, so both pages had been stacking
+  two sets of orbs at double opacity. The shared partial carries the ids the download page
+  parallaxes, so that still works.
+
 ## [2.79.1] - 2026-08-25
 
 ### Changed

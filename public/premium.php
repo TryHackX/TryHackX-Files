@@ -128,6 +128,7 @@ if ($errCode !== '' && Lang::has('premium.err_' . $errCode)) {
 	<?php require_once __DIR__ . '/../src/includes/i18n_head.php'; ?>
 	<title><?= APP_NAME ?> — <?= htmlspecialchars($title) ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/index.css?v=<?= APP_VERSION ?>">
+	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/notifications.css?v=<?= APP_VERSION ?>">
 	<?php require __DIR__ . '/../src/includes/site_footer_assets.php'; ?>
 	<?= AdRenderer::styles() ?>

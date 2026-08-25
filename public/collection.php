@@ -79,6 +79,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<script src="<?= APP_URL ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
 	<title><?= $collection ? htmlspecialchars($collection['name']) : _h('common.error') ?> - <?= APP_NAME ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/download.css?v=<?= APP_VERSION ?>">
+	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/notifications.css?v=<?= APP_VERSION ?>">
 	<?php require __DIR__ . '/../src/includes/site_footer_assets.php'; ?>
 	<style>
@@ -141,11 +142,6 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 </head>
 
 <body class="<?= $theme === 'light' ? 'light' : '' ?>">
-	<div class="bg-wrap">
-		<div class="orb orb-1" id="orb1"></div>
-		<div class="orb orb-2" id="orb2"></div>
-		<div class="bg-grid"></div>
-	</div>
 	<div class="container">
 		<?php require_once __DIR__ . '/../src/includes/header_ui.php'; ?>
 

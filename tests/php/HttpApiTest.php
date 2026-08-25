@@ -876,6 +876,104 @@ final class HttpApiTest extends TestCase
 		}
 	}
 
+	/**
+	 * The gate is reachable only with a valid session, so whoever is typing at it already got
+	 * past the sign-in form. That is exactly the person who must not be allowed to sit there
+	 * guessing: a shared machine, or a stolen session cookie. Wrong passwords are capped.
+	 */
+	public function testTheGateStopsAcceptingGuessesAfterTooManyAttempts(): void
+	{
+		$limits = Database::getInstance();
+		$limits->exec('TRUNCATE TABLE `' . Database::table('rate_limits') . '`');
+
+		Database::setSetting('login_remember_enabled', '1');
+		Database::setSetting('panel_reauth_minutes', 30);
+		Database::setSetting('panel_reauth_scope', 'staff');
+
+		try {
+			self::$cookies = [];
+			self::$csrf = '';
+			self::refreshCsrf();
+			$signedIn = self::postJson('/api.php?action=user_login', [
+				'username' => 'httpadmin',
+				'password' => 'HttpAdmin1!',
+				'remember' => 3600,
+			]);
+			$this->assertTrue($signedIn['success'] ?? false, json_encode($signedIn));
+
+			// Drop the session so the device cookie restores it without panel authorization.
+			unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+			$gate = self::rawRequest('GET', '/panel.php?tab=dashboard');
+			$this->assertStringContainsString('value="panel_reauth"', $gate['body']);
+			self::refreshCsrf();
+
+			$wrong = static function (): array {
+				return self::rawRequest(
+					'POST',
+					'/panel.php',
+					http_build_query([
+						'action' => 'panel_reauth',
+						'_csrf' => self::$csrf,
+						'password' => 'DefinitelyNotIt1!',
+					]),
+					['Content-Type: application/x-www-form-urlencoded']
+				);
+			};
+
+			// The 'auth' bucket allows ten in a five-minute window, but the windows are aligned
+			// to the clock: a run that starts just before a boundary gets its counter reset
+			// mid-way. So keep going until the door shuts rather than assuming attempt eleven
+			// is the one — the cap is what matters, not the exact number.
+			$body = '';
+			$spent = 0;
+			for ($attempt = 1; $attempt <= 30; $attempt++) {
+				$body = $wrong()['body'];
+				$spent = $attempt;
+				if (!str_contains($body, 'value="panel_reauth"')) {
+					break;
+				}
+			}
+			$this->assertLessThan(30, $spent, 'the gate never stopped accepting guesses');
+			$this->assertStringNotContainsString(
+				'value="panel_reauth"',
+				$body,
+				'once the limit is spent the form itself is withdrawn'
+			);
+			// Language-neutral: the error block is rendered rather than the form.
+			$this->assertStringContainsString('class="auth-message error show"', $body);
+
+			// And the correct password is refused too — the cap is on the address, not on luck.
+			$right = self::rawRequest(
+				'POST',
+				'/panel.php',
+				http_build_query([
+					'action' => 'panel_reauth',
+					'_csrf' => self::$csrf,
+					'password' => 'HttpAdmin1!',
+				]),
+				['Content-Type: application/x-www-form-urlencoded']
+			);
+			$this->assertStringNotContainsString('id="dashFiles"', $right['body']);
+
+			// Clearing the window lets the owner back in.
+			$limits->exec('TRUNCATE TABLE `' . Database::table('rate_limits') . '`');
+			self::refreshCsrf();
+			$reopened = self::rawRequest(
+				'POST',
+				'/panel.php',
+				http_build_query([
+					'action' => 'panel_reauth',
+					'_csrf' => self::$csrf,
+					'password' => 'HttpAdmin1!',
+				]),
+				['Content-Type: application/x-www-form-urlencoded']
+			);
+			$this->assertStringContainsString('id="dashFiles"', $reopened['body']);
+		} finally {
+			$limits->exec('TRUNCATE TABLE `' . Database::table('rate_limits') . '`');
+		}
+	}
+
 	public function testUnknownActionIsAnError(): void
 	{
 		$d = self::getJson('/api.php?action=definitely_not_a_route');

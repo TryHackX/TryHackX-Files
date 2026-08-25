@@ -61,19 +61,53 @@ if (isset($_GET['logout'])) {
 // account owner: the machine may be shared, the tab may be weeks old, the session may have
 // been restored from a device cookie. Staff pay for that with one password per idle window.
 require_once __DIR__ . '/../src/includes/api/ApiSupport.php';
+require_once __DIR__ . '/../src/includes/RateLimiter.php';
 $reauthError = '';
+$reauthLocked = false;
+
+// Two counters, because they answer different questions.
+//
+// The session counter decides when to add a captcha. It cannot be cheaply reset: clearing the
+// session is what gets you sent back to the sign-in form, and that path is already throttled
+// and captcha'd. The rate limiter is the durable backstop — keyed on account plus address, it
+// survives a dropped session and caps the attempt rate no matter what the browser does.
+$reauthFails = (int) ($_SESSION['panel_reauth_fails'] ?? 0);
+$reauthCaptchaRequired = $reauthFails >= 3 && Database::isRecaptchaEnabled();
+
 if (($_POST['action'] ?? '') === 'panel_reauth') {
-	if (!csrfValidate()) {
+	$quota = RateLimiter::hit(
+		'reauth:' . (int) $currentUser['id'] . ':' . getClientIP(),
+		'auth'
+	);
+	if (!$quota['allowed']) {
+		$reauthLocked = true;
+		$reauthError = __('panel.reauth.throttled', [
+			'minutes' => (string) max(1, (int) ceil(($quota['reset'] - time()) / 60)),
+		]);
+		Database::logAudit(
+			'panel_reauth_throttled',
+			'attempt rate exceeded at the panel gate',
+			(int) $currentUser['id'],
+			(string) ($currentUser['username'] ?? '')
+		);
+	} elseif (!csrfValidate()) {
 		$reauthError = __('api.csrf');
+	} elseif ($reauthCaptchaRequired
+		&& !Database::verifyRecaptcha((string) ($_POST['captcha_response'] ?? ''), getClientIP())) {
+		$reauthError = __('panel.reauth.captcha_failed');
 	} elseif (!Database::verifyUserPassword((int) $currentUser['id'], (string) ($_POST['password'] ?? ''))) {
+		$reauthFails++;
+		$_SESSION['panel_reauth_fails'] = $reauthFails;
+		$reauthCaptchaRequired = $reauthFails >= 3 && Database::isRecaptchaEnabled();
 		$reauthError = __('api.bad_password');
 		Database::logAudit(
 			'panel_reauth_failed',
-			'wrong password at the panel gate',
+			'wrong password at the panel gate (attempt ' . $reauthFails . ')',
 			(int) $currentUser['id'],
 			(string) ($currentUser['username'] ?? '')
 		);
 	} else {
+		unset($_SESSION['panel_reauth_fails']);
 		$_SESSION['panel_auth_at'] = time();
 		$_SESSION['recent_auth_at'] = time();
 		header('Location: ' . $appUrl . '/panel.php');
@@ -217,6 +251,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<title><?= _h('panel.title') ?> - <?= APP_NAME ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/fontawesome/css/all.min.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/panel.css?v=<?= APP_VERSION ?>">
+	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/panel-forms.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/panel-shell.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/panel-features.css?v=<?= APP_VERSION ?>">
