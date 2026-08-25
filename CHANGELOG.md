@@ -7,6 +7,40 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.78.0] - 2026-08-25
+
+### Added
+
+- Changing the address on an account is now confirmed from both ends. The old flow asked only
+  the new address, which meant a session someone else was holding — with the password, which it
+  already required — could move an account away and the real owner would never hear about it.
+  Now the address on file has to approve first, and that message doubles as the warning: it
+  says what was asked, that nothing has changed yet, and that whoever asked knows the password.
+  Only after that does the new address get its own link, proving the mailbox exists and is
+  readable. When it lands, both addresses are told what changed and that every session and API
+  key was signed out with it.
+- The account page finally renders the result of those links. `msg=` and `err=` were being put
+  in the URL and read by nothing, so confirming an e-mail change looked like it had done
+  nothing at all — and the halfway point of a two-step flow is exactly when a person needs to
+  be told where to look next.
+
+### Fixed
+
+- Transactional e-mails carrying a link arrive as HTML instead of as their own source code.
+  `Database::sendEmail()` escapes its body, which is right for anything that might contain text
+  a person typed and wrong for the templates this project writes itself: activation, password
+  recovery and e-mail change all built markup and had it escaped on the way out, so recipients
+  saw `<a href='...'>` as words and had no link to click. Those three now go through
+  `sendTemplate()`, which renders application-authored HTML as-is; every value interpolated
+  into them is escaped where it is interpolated. Plain-text mail is untouched, and
+  administrator-authored broadcasts keep their sanitizer.
+
+### Changed
+
+- Database schema 64: `users.email_change_stage`. Any e-mail change still in flight at upgrade
+  time is dropped — it was issued under the one-sided rule and finishing it would skip the
+  confirmation the new rule exists to require. The Python sidecar moves to 64 with it.
+
 ## [2.77.2] - 2026-08-25
 
 ### Fixed
