@@ -162,7 +162,20 @@ if ($action === 'save_settings') {
 			'input_password_min' => $passwordMin,
 			'input_password_max' => $passwordMax,
 			'recaptcha_enabled' => isset($_POST['recaptcha_enabled']) ? '1' : '0',
+			// Which provider answers the challenge. The site keys below are stored one per
+			// provider on purpose: switching the selector must not discard the keys of the
+			// provider you were on a minute ago.
+			'captcha_provider' => CaptchaService::normaliseProvider($_POST['captcha_provider'] ?? null),
 			'recaptcha_site_key' => trim($_POST['recaptcha_site_key'] ?? ''),
+			'recaptcha_v3_site_key' => trim($_POST['recaptcha_v3_site_key'] ?? ''),
+			'turnstile_site_key' => trim($_POST['turnstile_site_key'] ?? ''),
+			'hcaptcha_site_key' => trim($_POST['hcaptcha_site_key'] ?? ''),
+			'recaptcha_min_score' => number_format(
+				max(0.0, min(1.0, (float) ($_POST['recaptcha_min_score'] ?? 0.5))),
+				2,
+				'.',
+				''
+			),
 			'recaptcha_token_lifetime' => max(1, min(1440, (int) ($_POST['recaptcha_token_lifetime'] ?? 120))),
 			'recaptcha_max_files_per_session_guest' => max(0, (int) ($_POST['recaptcha_max_files_per_session_guest'] ?? 0)),
 			'recaptcha_max_files_per_session_auth' => max(0, (int) ($_POST['recaptcha_max_files_per_session_auth'] ?? 0)),
@@ -219,13 +232,21 @@ if ($action === 'save_settings') {
 			}
 		}
 
-		$recaptchaSecret = trim((string) ($_POST['recaptcha_secret_key'] ?? ''));
-		if ($recaptchaSecret !== '') {
-			if (strlen($recaptchaSecret) > InputLimits::PASSWORD_MAX) {
-				$error = __('api.password_too_long');
-			} else {
-				Database::setSecretSetting('recaptcha_secret_key', $recaptchaSecret);
+		// One secret field per provider, each encrypted at rest and never prefilled into the
+		// form: a submitted non-empty value replaces that provider's secret, a blank field
+		// leaves it alone. That is what lets an operator flip between providers — and back —
+		// without retyping anything.
+		foreach (CaptchaService::providers() as $captchaProvider) {
+			$field = CaptchaService::secretKeySetting($captchaProvider);
+			$submitted = trim((string) ($_POST[$field] ?? ''));
+			if ($submitted === '') {
+				continue;
 			}
+			if (strlen($submitted) > InputLimits::PASSWORD_MAX) {
+				$error = __('api.password_too_long');
+				break;
+			}
+			Database::setSecretSetting($field, $submitted);
 		}
 	} elseif ($group === 'email') {
 		$settingsToUpdate = [

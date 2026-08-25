@@ -998,7 +998,7 @@ if (!defined('APP_ROOT')) {
 				<div class="settings-section">
 					<h3><i class="fa-solid fa-robot"></i> <?= _h('panel.set.recaptcha') ?></h3>
 					<p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9rem;">
-						<?= __('panel.set.recaptcha_intro', ['url' => 'https://www.google.com/recaptcha/admin']) ?>
+						<?= _h('panel.set.captcha_intro') ?>
 					</p>
 					<div class="form-group">
 						<label class="form-check">
@@ -1007,16 +1007,68 @@ if (!defined('APP_ROOT')) {
 						</label>
 					</div>
 					<div id="recaptchaFields" style="<?= ($settings['recaptcha_enabled'] ?? '0') !== '1' ? 'display:none' : '' ?>">
-						<div class="form-row">
-							<div class="form-group">
-								<label><?= _h('panel.set.site_key') ?></label>
-								<input type="text" name="recaptcha_site_key" value="<?= htmlspecialchars($settings['recaptcha_site_key'] ?? '') ?>">
-							</div>
-							<div class="form-group">
-								<label><?= _h('panel.set.secret_key') ?></label>
-								<input type="password" name="recaptcha_secret_key" value="" maxlength="1024" autocomplete="new-password">
-							</div>
+						<?php
+						$captchaProvider = CaptchaService::normaliseProvider($settings['captcha_provider'] ?? null);
+						/* Console URL + label per provider; the keys themselves live one pair per
+						   provider, so switching the selector never discards the other pairs. */
+						$captchaProviders = [
+							CaptchaService::PROVIDER_TURNSTILE => [
+								'label' => __('panel.set.captcha_turnstile'),
+								'console' => 'https://dash.cloudflare.com/?to=/:account/turnstile',
+							],
+							CaptchaService::PROVIDER_RECAPTCHA_V3 => [
+								'label' => __('panel.set.captcha_recaptcha_v3'),
+								'console' => 'https://www.google.com/recaptcha/admin',
+							],
+							CaptchaService::PROVIDER_RECAPTCHA_V2 => [
+								'label' => __('panel.set.captcha_recaptcha_v2'),
+								'console' => 'https://www.google.com/recaptcha/admin',
+							],
+							CaptchaService::PROVIDER_HCAPTCHA => [
+								'label' => __('panel.set.captcha_hcaptcha'),
+								'console' => 'https://dashboard.hcaptcha.com/sites',
+							],
+						];
+						?>
+						<div class="form-group">
+							<label><?= _h('panel.set.captcha_provider') ?></label>
+							<select name="captcha_provider" id="captchaProvider" class="input" data-fh-change="toggleCaptchaProviderFields()">
+								<?php foreach ($captchaProviders as $providerId => $meta): ?>
+									<option value="<?= htmlspecialchars($providerId) ?>" <?= $captchaProvider === $providerId ? 'selected' : '' ?>><?= htmlspecialchars($meta['label']) ?></option>
+								<?php endforeach; ?>
+							</select>
+							<small><?= _h('panel.set.captcha_provider_hint') ?></small>
 						</div>
+						<?php foreach ($captchaProviders as $providerId => $meta): ?>
+							<div class="captcha-provider-fields" id="captchaFields-<?= htmlspecialchars($providerId) ?>" data-captcha-provider="<?= htmlspecialchars($providerId) ?>" style="<?= $captchaProvider === $providerId ? '' : 'display:none' ?>">
+								<p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 0.9rem;">
+									<?= __('panel.set.captcha_keys_intro', [
+										'provider' => htmlspecialchars($meta['label']),
+										'url' => htmlspecialchars($meta['console']),
+									]) ?>
+								</p>
+								<div class="form-row">
+									<div class="form-group">
+										<label><?= _h('panel.set.site_key') ?></label>
+										<input type="text" name="<?= htmlspecialchars(CaptchaService::siteKeySetting($providerId)) ?>" value="<?= htmlspecialchars($settings[CaptchaService::siteKeySetting($providerId)] ?? '') ?>">
+									</div>
+									<div class="form-group">
+										<label><?= _h('panel.set.secret_key') ?></label>
+										<input type="password" name="<?= htmlspecialchars(CaptchaService::secretKeySetting($providerId)) ?>" value="" maxlength="1024" autocomplete="new-password" placeholder="<?= Database::getSecretSetting(CaptchaService::secretKeySetting($providerId), '') !== '' ? _h('panel.set.captcha_secret_kept') : '' ?>">
+										<small><?= _h('panel.set.captcha_secret_hint') ?></small>
+									</div>
+								</div>
+								<?php if ($providerId === CaptchaService::PROVIDER_RECAPTCHA_V3): ?>
+									<div class="form-row">
+										<div class="form-group">
+											<label><?= _h('panel.set.captcha_min_score') ?></label>
+											<input type="number" name="recaptcha_min_score" value="<?= htmlspecialchars((string) ($settings['recaptcha_min_score'] ?? '0.5')) ?>" min="0" max="1" step="0.05">
+											<small><?= _h('panel.set.captcha_min_score_hint') ?></small>
+										</div>
+									</div>
+								<?php endif; ?>
+							</div>
+						<?php endforeach; ?>
 						<hr style="border-color: var(--border); margin: 24px 0;">
 						<h4 style="margin: 24px 0 16px 0;"><?= _h('panel.set.session_settings') ?></h4>
 						<div class="form-row">

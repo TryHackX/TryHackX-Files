@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.78.0**, database schema **64**. A code-only
+This guide upgrades a running installation to **2.79.0**, database schema **64**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce
@@ -110,6 +110,13 @@ The virtual host serves `/var/www/filehost/public`, never the project root.
 
 An unsupported newer schema is rejected and never downgraded automatically. Do not manually
 change `schema_version` after a failure; fix the journaled cause or restore the backup.
+
+2.79.0 is a **code-only upgrade — the schema stays at 64.** It adds the selectable captcha
+provider (Cloudflare Turnstile, reCAPTCHA v3, reCAPTCHA v2, hCaptcha) and stores a key pair
+per provider under new settings keys, which are created on demand; nothing has to be migrated
+and nothing has to be re-entered. An installation upgrading from 2.78.0 or earlier keeps
+reCAPTCHA v2 selected with the keys it already had, because that provider still reads the
+historical `recaptcha_site_key` / `recaptcha_secret_key` pair.
 
 2.78.0 adds column `users.email_change_stage` (schema 64) and drops any half-finished
 e-mail change, because those were issued under the old one-sided rule. 2.77.0 added table

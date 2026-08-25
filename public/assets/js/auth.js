@@ -254,7 +254,7 @@
         // Check if captcha is visible and get response
         let captchaResponse = '';
         if (loginCaptchaWidgetId !== null && document.getElementById('recaptchaContainer').style.display !== 'none') {
-            captchaResponse = grecaptcha.getResponse(loginCaptchaWidgetId);
+            captchaResponse = FHCaptcha.getResponse(loginCaptchaWidgetId);
         }
 
         btn.disabled = true;
@@ -326,7 +326,7 @@
 
             // Reset captcha if it was used and failed
             if (loginCaptchaWidgetId !== null) {
-                grecaptcha.reset(loginCaptchaWidgetId);
+                FHCaptcha.reset(loginCaptchaWidgetId, {});
             }
         } catch (err) {
             showAuthMessage(t('common.connection_error'), 'error');
@@ -479,36 +479,28 @@
         if (!container) return;
 
         container.style.display = 'flex';
-
-        // Load script if needed
-        if (typeof grecaptcha === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://www.google.com/recaptcha/api.js?onload=onLoginCaptchaReady&render=explicit';
-            script.async = true;
-            script.defer = true;
-            document.head.appendChild(script);
-        } else if (loginCaptchaWidgetId === null) {
-            renderLoginCaptcha();
-        }
-    }
-
-    function onLoginCaptchaReady() {
         renderLoginCaptcha();
     }
 
+    function onLoginCaptchaReady() {
+        if (loginCaptchaWidgetId === null && document.getElementById('authCaptchaWidget')) {
+            loginCaptchaWidgetId = FHCaptcha.render('authCaptchaWidget', {});
+        }
+    }
+
+    /*
+     * Provider and site key come from the same public config endpoint the rest of the modal
+     * uses, and they have to be known before the SDK can be fetched — the loader URL differs
+     * per provider, and reCAPTCHA v3 needs the site key in the query string. So: ask,
+     * configure, then load, then render. configure() is idempotent, so a second visit costs
+     * nothing and picks up an operator's provider change mid-session.
+     */
     function renderLoginCaptcha() {
-        // Need site key. We can fetch it or inject it.
-        // Let's fetch config first if we don't have it.
         FHApi.get('captcha_config')
             .then(config => {
-                if (config.recaptcha_enabled && config.recaptcha_site_key) {
-                    if (loginCaptchaWidgetId === null && document.getElementById('authCaptchaWidget')) {
-                        loginCaptchaWidgetId = grecaptcha.render('authCaptchaWidget', {
-                            'sitekey': config.recaptcha_site_key,
-                            'theme': 'dark'
-                        });
-                    }
-                }
+                if (!config.recaptcha_enabled || !config.recaptcha_site_key) return;
+                FHCaptcha.configure(config);
+                FHCaptcha.load(onLoginCaptchaReady);
             });
     }
 
@@ -517,34 +509,21 @@
         if (!container) return;
 
         container.style.display = 'flex';
-
-        // Load script if needed
-        if (typeof grecaptcha === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://www.google.com/recaptcha/api.js?onload=onRegisterCaptchaReady&render=explicit';
-            script.async = true;
-            script.defer = true;
-            document.head.appendChild(script);
-        } else if (registerCaptchaWidgetId === null) {
-            renderRegisterCaptcha();
-        }
+        renderRegisterCaptcha();
     }
 
     function onRegisterCaptchaReady() {
-        renderRegisterCaptcha();
+        if (registerCaptchaWidgetId === null && document.getElementById('authCaptchaRegisterWidget')) {
+            registerCaptchaWidgetId = FHCaptcha.render('authCaptchaRegisterWidget', {});
+        }
     }
 
     function renderRegisterCaptcha() {
         FHApi.get('captcha_config')
             .then(config => {
-                if (config.recaptcha_enabled && config.recaptcha_site_key) {
-                    if (registerCaptchaWidgetId === null && document.getElementById('authCaptchaRegisterWidget')) {
-                        registerCaptchaWidgetId = grecaptcha.render('authCaptchaRegisterWidget', {
-                            'sitekey': config.recaptcha_site_key,
-                            'theme': 'dark'
-                        });
-                    }
-                }
+                if (!config.recaptcha_enabled || !config.recaptcha_site_key) return;
+                FHCaptcha.configure(config);
+                FHCaptcha.load(onRegisterCaptchaReady);
             });
     }
 
@@ -565,7 +544,7 @@
                 username,
                 email,
                 password,
-                captcha_response: (registerCaptchaWidgetId !== null) ? grecaptcha.getResponse(registerCaptchaWidgetId) : ''
+                captcha_response: FHCaptcha.getResponse(registerCaptchaWidgetId)
             });
 
             if (data.success) {

@@ -577,7 +577,10 @@ final class AuthController
 		$config = [
 			'registration_enabled' => Database::getSetting('registration_enabled', '1') === '1',
 			'recaptcha_enabled' => Database::isRecaptchaEnabled(),
-			'recaptcha_site_key' => Database::getSetting('recaptcha_site_key', ''),
+			// Site key of the ACTIVE provider — the front end renders whatever this pair
+			// says, so a v2 key must never leak out while Turnstile is the selected one.
+			'captcha_provider' => CaptchaService::provider(),
+			'recaptcha_site_key' => CaptchaService::siteKey(),
 			'recaptcha_on_login' => Database::getSetting('recaptcha_on_admin', '0') === '1',
 			'login_captcha_required' => $loginCaptchaRequired,
 			'recaptcha_register_always' => Database::getSetting('recaptcha_register_always', '1') === '1',

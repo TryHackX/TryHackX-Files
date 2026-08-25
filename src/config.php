@@ -4,7 +4,7 @@ if (basename($_SERVER['PHP_SELF']) === 'config.php') {
 	exit('Direct access forbidden');
 }
 
-define('APP_VERSION', '2.78.0');
+define('APP_VERSION', '2.79.0');
 // APP_ROOT is this file's dir (src/). The project root is one level up and holds the
 // non-public dirs (uploads/, data/, config/) — outside the web root (public/), so secrets
 // and storage are not URL-reachable (St1).
@@ -192,7 +192,12 @@ foreach (['uploads' => UPLOADS_DIR, 'data' => DATA_DIR] as $label => $dir) {
 /**
  * Content-Security-Policy for PHP responses (Faza 8).
  *
- * The baseline below mirrors public/.htaccess exactly. While the advertising feature is
+ * The baseline below mirrors public/.htaccess, minus the captcha origins: those depend on
+ * which provider is selected, which a static Apache header cannot know. Every page that can
+ * render a challenge is a PHP page, so PHP's header is the one that counts there; the
+ * .htaccess policy stays as the strict fallback for static assets.
+ *
+ * While the advertising feature is
  * enabled AND external ad code can actually render (`ads_adsense_active` — kept current by
  * AdRepository on every ad/settings change), Google's ad-serving origins are admitted;
  * `ads_csp_extra` lets the operator whitelist another network's origins. The moment ads
@@ -207,14 +212,21 @@ function emitContentSecurityPolicy(array $settings): void
 
 	$strictScripts = defined('FILEHOST_CSP_STRICT_SCRIPTS')
 		&& FILEHOST_CSP_STRICT_SCRIPTS === true;
-	$script = "'self'"
-		. ($strictScripts ? '' : " 'unsafe-inline'")
-		. ' https://www.google.com https://www.gstatic.com';
+	$script = "'self'" . ($strictScripts ? '' : " 'unsafe-inline'");
 	// blob: is same-origin object URLs only — the panel's banner cropper previews the
 	// picked file through URL.createObjectURL, which img-src would otherwise block.
 	$img = "'self' data: blob:";
 	$connect = "'self'";
-	$frame = "'self' https://www.google.com";
+	$frame = "'self'";
+
+	// Captcha (2.79.0): only the selected provider's origins are admitted, and only while the
+	// captcha is switched on. Picking Turnstile must not leave Google's script hosts
+	// whitelisted, and switching the feature off must not leave anyone's.
+	foreach (CaptchaService::cspOrigins($settings) as $origin) {
+		$script .= ' ' . $origin;
+		$frame .= ' ' . $origin;
+		$connect .= ' ' . $origin;
+	}
 
 	$adsOn = ($settings['ads_enabled'] ?? '0') === '1';
 	if ($adsOn && ($settings['ads_adsense_active'] ?? '0') === '1') {

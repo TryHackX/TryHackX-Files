@@ -652,8 +652,18 @@ function handleDefaultSettings(): never
 		'concurrent_downloads_guest' => '1',
 		'concurrent_downloads_user' => '0',
 		'recaptcha_enabled' => '0',
+		// Which captcha answers the challenge. Four are supported (Settings → Security);
+		// the default keeps a fresh install on the same one every older install already had.
+		'captcha_provider' => 'recaptcha_v2',
 		'recaptcha_site_key' => '',
 		'recaptcha_secret_key' => '',
+		'recaptcha_v3_site_key' => '',
+		'recaptcha_v3_secret_key' => '',
+		'recaptcha_min_score' => '0.5',
+		'turnstile_site_key' => '',
+		'turnstile_secret_key' => '',
+		'hcaptcha_site_key' => '',
+		'hcaptcha_secret_key' => '',
 		'recaptcha_token_lifetime' => '120',
 		'recaptcha_login_attempt_threshold' => '3',
 		'recaptcha_delete_token_threshold' => '3',

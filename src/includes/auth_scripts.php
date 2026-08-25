@@ -13,6 +13,11 @@ $authBootstrapApi = (isset($appUrl) ? $appUrl : '') . '/api.php';
 	data-api="<?= htmlspecialchars($authBootstrapApi, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
 	data-user="<?= htmlspecialchars($authBootstrapJson, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"></div>
 <script src="<?= htmlspecialchars(
+	(isset($appUrl) ? $appUrl : '') . '/assets/js/captcha.js?v=' . APP_VERSION,
+	ENT_QUOTES | ENT_SUBSTITUTE,
+	'UTF-8'
+) ?>"></script>
+<script src="<?= htmlspecialchars(
 	(isset($appUrl) ? $appUrl : '') . '/assets/js/auth.js?v=' . APP_VERSION,
 	ENT_QUOTES | ENT_SUBSTITUTE,
 	'UTF-8'

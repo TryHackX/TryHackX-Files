@@ -59,6 +59,21 @@
 		if (fields) fields.style.display = enabled ? 'block' : 'none';
 	}
 
+	/*
+	 * Show the key pair of the selected captcha provider and hide the rest.
+	 *
+	 * Every provider's inputs stay in the DOM — hidden fields still post, which is exactly
+	 * what keeps the other providers' site keys from being wiped on save. The secret inputs
+	 * are always blank, and a blank secret means "keep the stored one".
+	 */
+	function toggleCaptchaProviderFields() {
+		const selected = document.getElementById('captchaProvider')?.value;
+		if (!selected) return;
+		document.querySelectorAll('[data-captcha-provider]').forEach(block => {
+			block.style.display = block.dataset.captchaProvider === selected ? 'block' : 'none';
+		});
+	}
+
 	function confirmCleanup() {
 		showModal('cleanupModal');
 	}
@@ -323,7 +338,7 @@
 
 	window.FHPanelSettings = Object.freeze({
 		toggleEmailFields, syncEmailFromPrefix, syncEmailFromFull, revokeRememberDevices,
-		toggleRecaptchaFields, confirmCleanup, previewCleanup,
+		toggleRecaptchaFields, toggleCaptchaProviderFields, confirmCleanup, previewCleanup,
 		initPanelValidation, loadUserStats, submitPasswordConfirm,
 		changeUserPassword, changeUserEmail,
 		confirmDeleteAllFiles, confirmDeleteAccount

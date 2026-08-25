@@ -24,7 +24,8 @@ $isProtected = false;
 
 $recaptchaEnabled = Database::isRecaptchaEnabled();
 $recaptchaOnReport = $recaptchaEnabled ? Database::getSetting('recaptcha_on_report', '0') : '0';
-$recaptchaSiteKey = $recaptchaEnabled ? Database::getSetting('recaptcha_site_key', '') : '';
+$recaptchaSiteKey = $recaptchaEnabled ? CaptchaService::siteKey() : '';
+$captchaProvider = CaptchaService::provider();
 $recaptchaReportRequired = false; // Recomputed below when the file exists.
 
 if (empty($fileId)) {
@@ -53,6 +54,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<?php require_once __DIR__ . '/../src/includes/i18n_head.php'; ?>
 	<script src="<?= $appUrl ?>/assets/js/api.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
+	<script src="<?= $appUrl ?>/assets/js/captcha.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
 	<title><?= $file ? htmlspecialchars($file['name']) : _h('common.error') ?> - <?= APP_NAME ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/download.css?v=<?= APP_VERSION ?>">
@@ -405,6 +407,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 		'previewUrl' => $appUrl . '/api.php?action=preview&id=' . urlencode($fileId),
 		'thumbnailUrl' => $appUrl . '/api/thumb?id=' . urlencode($fileId),
 		'captchaSiteKey' => $recaptchaSiteKey,
+		'captchaProvider' => $captchaProvider,
 		'reportCaptchaRequired' => $recaptchaReportRequired,
 		'embedCodes' => $embedCodes,
 	], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);

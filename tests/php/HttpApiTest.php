@@ -824,6 +824,44 @@ final class HttpApiTest extends TestCase
 		$this->assertStringContainsString('id="promoFormPlan"', $premiumSettings['body']);
 	}
 
+	/**
+	 * Settings -> Security offers all four captcha providers, each with its own key pair in
+	 * the form (that is what makes switching non-destructive), and no secret input is ever
+	 * prefilled — a blank one means "keep the stored value".
+	 */
+	public function testSecurityTabOffersEveryCaptchaProviderWithoutPrefillingSecrets(): void
+	{
+		$response = self::rawRequest('GET', '/panel.php?tab=settings&stab=security');
+		$this->assertSame(200, $response['status']);
+		$body = $response['body'];
+
+		$this->assertStringContainsString('name="captcha_provider"', $body);
+		$this->assertStringContainsString('name="recaptcha_min_score"', $body);
+
+		foreach ([
+			'turnstile',
+			'recaptcha_v3',
+			'recaptcha_v2',
+			'hcaptcha',
+		] as $provider) {
+			$this->assertStringContainsString(
+				'data-captcha-provider="' . $provider . '"',
+				$body,
+				$provider . ' has no key block'
+			);
+			$this->assertStringContainsString(
+				'name="' . CaptchaService::siteKeySetting($provider) . '"',
+				$body,
+				$provider . ' has no site-key field'
+			);
+			$this->assertStringContainsString(
+				'name="' . CaptchaService::secretKeySetting($provider) . '" value=""',
+				$body,
+				$provider . ' prefills its secret into the page'
+			);
+		}
+	}
+
 	public function testUnknownActionIsAnError(): void
 	{
 		$d = self::getJson('/api.php?action=definitely_not_a_route');

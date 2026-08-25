@@ -11,7 +11,7 @@ const source = fs.readFileSync(
 	'utf8'
 );
 
-function loadModule(elements = {}) {
+function loadModule(elements = {}, queryAll = {}) {
 	const bootstrap = {
 		dataset: {
 			config: JSON.stringify({ host: 'files.example.test' })
@@ -21,6 +21,9 @@ function loadModule(elements = {}) {
 		getElementById(id) {
 			if (id === 'panelBootstrap') return bootstrap;
 			return Object.prototype.hasOwnProperty.call(elements, id) ? elements[id] : null;
+		},
+		querySelectorAll(selector) {
+			return Object.prototype.hasOwnProperty.call(queryAll, selector) ? queryAll[selector] : [];
 		}
 	};
 	const window = {
@@ -49,6 +52,7 @@ test('settings module exposes a frozen settings and self-service API', () => {
 	for (const action of [
 		'toggleEmailFields',
 		'toggleRecaptchaFields',
+		'toggleCaptchaProviderFields',
 		'confirmCleanup',
 		'previewCleanup',
 		'initPanelValidation',
@@ -68,8 +72,26 @@ test('settings initializers are harmless outside their server-rendered tabs', ()
 
 	settings.toggleEmailFields();
 	settings.toggleRecaptchaFields();
+	settings.toggleCaptchaProviderFields();
 	settings.initPanelValidation();
 	settings.loadUserStats();
+});
+
+test('the captcha selector reveals exactly one provider block', () => {
+	const blocks = [
+		{ dataset: { captchaProvider: 'turnstile' }, style: { display: 'none' } },
+		{ dataset: { captchaProvider: 'recaptcha_v3' }, style: { display: 'none' } },
+		{ dataset: { captchaProvider: 'recaptcha_v2' }, style: { display: 'block' } },
+		{ dataset: { captchaProvider: 'hcaptcha' }, style: { display: 'none' } }
+	];
+	const settings = loadModule(
+		{ captchaProvider: { value: 'turnstile' } },
+		{ '[data-captcha-provider]': blocks }
+	);
+
+	settings.toggleCaptchaProviderFields();
+
+	assert.deepEqual(blocks.map(block => block.style.display), ['block', 'none', 'none', 'none']);
 });
 
 test('the local mail method keeps the external SMTP block hidden', () => {

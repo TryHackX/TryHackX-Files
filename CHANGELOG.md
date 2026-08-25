@@ -7,6 +7,45 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.79.0] - 2026-08-25
+
+### Added
+
+- The captcha is no longer hard-wired to reCAPTCHA v2. **Settings → Security → Captcha
+  provider** picks one of four — Cloudflare Turnstile, reCAPTCHA v3, reCAPTCHA v2 or hCaptcha —
+  and the whole stack follows: the verification endpoint, the widget the browser renders, and
+  the Content-Security-Policy origins the page admits.
+- Keys are kept **per provider**, so evaluating one does not cost you another. Switching the
+  selector away from reCAPTCHA v2 and back leaves its site key and secret exactly where they
+  were; every provider has its own pair, each secret encrypted at rest through
+  `Database::setSecretSetting()` and never prefilled back into the form.
+- reCAPTCHA v3 brings its score threshold into the panel (**Minimum score**, default 0.5). It
+  is the only provider judged that way on purpose: hCaptcha's enterprise answer also carries a
+  `score`, but there higher means *more* risk, so applying v3's rule to it would reject the
+  humans and pass the bots.
+- `public/assets/js/captcha.js`: one front-end adapter (`FHCaptcha`) that the upload page, the
+  download page and the auth modal all share, instead of three hand-rolled copies of the
+  grecaptcha dance. reCAPTCHA v3 has no widget to click, so it is folded in behind the same
+  render/getResponse/reset API — the caller gets its token from the same callback as everyone
+  else, and `reset()` fetches a fresh one because v3 tokens expire after two minutes.
+
+### Changed
+
+- The Content-Security-Policy now admits **only the selected provider's** origins, and only
+  while the captcha is switched on. Choosing Turnstile no longer leaves Google's script hosts
+  whitelisted, and switching the captcha off leaves nobody's. The static `public/.htaccess`
+  policy stays as-is: it is the fallback for responses PHP did not stamp, and every page that
+  can render a challenge is a PHP page.
+- Captcha verification retries once. A single request was enough to lose a solved challenge to
+  a timeout whenever the uplink was saturated, and the visitor was told the captcha had failed
+  on a challenge they had just completed. Two attempts at 5 s connect / 8 s total.
+- A captcha that is switched **on** but whose selected provider has no secret now rejects
+  responses instead of waving them through. With the feature off, verification stays the
+  historical no-op so a fresh install still works out of the box.
+- No schema change: 2.79.0 stays on schema 64 and adds settings keys only. An upgrade needs no
+  migration and no keys re-entered — reCAPTCHA v2 stays selected, reading the same
+  `recaptcha_site_key` / `recaptcha_secret_key` it always did.
+
 ## [2.78.0] - 2026-08-25
 
 ### Added

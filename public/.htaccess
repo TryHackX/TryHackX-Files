@@ -56,7 +56,11 @@ Options -Indexes -MultiViews
 	# Content-Security-Policy. 'unsafe-inline' for scripts is required by the app's
 	# inline onclick handlers; the rest (object-src none, base-uri/form-action self,
 	# frame-ancestors self, connect/img self) still blocks many injection vectors.
-	# google.com/gstatic are allowed only for optional reCAPTCHA.
+	# google.com/gstatic are allowed only for optional reCAPTCHA. Since 2.79.0 the captcha
+	# provider is selectable (reCAPTCHA v2/v3, Turnstile, hCaptcha) and a static header cannot
+	# know which one is on, so PHP emits the provider's origins itself (config.php,
+	# emitContentSecurityPolicy) and this fallback keeps only the Google pair. Every page that
+	# can render a challenge is a PHP page, so the fallback never has to serve one.
 	#
 	# frame-src must include 'self': the download page renders a PDF preview in an
 	# <iframe src="api.php?action=preview&…">, and without 'self' the browser blocked it
