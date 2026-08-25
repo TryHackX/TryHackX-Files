@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This script only ever runs inside the CI container stack, where nobody can attach to it.
+# A bare `test` that fails under `set -e` says nothing at all, so every exit reports the line
+# and the command that produced it — one failure, one answer.
+trap 'smoke_status=$?; if [ "${smoke_status}" -ne 0 ]; then
+  echo "docker-transfer.sh FAILED at line ${LINENO}: ${BASH_COMMAND} (exit ${smoke_status})" >&2
+fi' ERR
+
+# Compare one value and say what was expected when it does not match.
+expect() {
+  local label="$1" expected="$2" actual="$3"
+  if [[ "${actual}" != "${expected}" ]]; then
+    echo "${label}: expected '${expected}', got '${actual}'" >&2
+    return 1
+  fi
+}
+
 : "${FILEHOST_CANONICAL_URL:?FILEHOST_CANONICAL_URL is required}"
 : "${MYSQL_DATABASE:?MYSQL_DATABASE is required}"
 : "${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}"
@@ -127,7 +143,7 @@ curl --fail --silent --show-error --output "${basic_download}" \
 cmp "${basic_payload}" "${basic_download}"
 reuse_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${basic_token}")"
-test "${reuse_status}" = "403"
+expect "a consumed download token is refused" "403" "${reuse_status}"
 
 # Slow downloads make concurrency and disconnect states observable without a race against
 # the unthrottled streaming path. Five seconds is used only by this isolated stack, never as a production default.
@@ -141,7 +157,8 @@ sql "UPDATE fh_groups SET limit_download=131072 WHERE slug='guest'"
 sql "INSERT INTO fh_settings (setting_key, setting_value) VALUES
   ('limit_download_guest','131072')
   ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)"
-test "$(sql "SELECT limit_download FROM fh_groups WHERE slug='guest'")" = "131072"
+expect "the guest group carries the test throttle" "131072" \
+  "$(sql "SELECT limit_download FROM fh_groups WHERE slug='guest'")"
 reload_upload_server >/dev/null
 
 large_payload="${work_dir}/large.bin"
@@ -163,12 +180,13 @@ wait_for_value \
   "1"
 cap_second_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${cap_token_b}")"
-test "${cap_second_status}" = "410"
+expect "a second token while the cap is held" "410" "${cap_second_status}"
 wait "${cap_curl_pid}"
-test "$(cat "${cap_status_file}")" = "200"
+expect "the capped download itself" "200" "$(cat "${cap_status_file}")"
 cmp "${large_payload}" "${work_dir}/cap-a.bin"
 wait_for_value "SELECT downloads FROM fh_files WHERE id='${cap_id}'" "1"
-test "$(sql "SELECT used FROM fh_download_tokens WHERE token='${cap_token_b}'")" = "0"
+expect "the refused token stays unused" "0" \
+  "$(sql "SELECT used FROM fh_download_tokens WHERE token='${cap_token_b}'")"
 
 # A client disconnect in the middle of a full response consumes its capability but does not
 # increment the durable file counter. The reservation must settle as released.
@@ -179,12 +197,17 @@ curl --silent --show-error --max-time 1 --output "${work_dir}/partial.bin" \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${partial_token}"
 partial_exit=$?
 set -e
-test "${partial_exit}" -ne 0
+if [[ "${partial_exit}" -eq 0 ]]; then
+  echo "an interrupted download was not interrupted: curl exited 0" >&2
+  exit 1
+fi
 wait_for_value \
   "SELECT state FROM fh_download_reservations WHERE resource_id='${partial_id}' ORDER BY created_at DESC LIMIT 1" \
   "released"
-test "$(sql "SELECT used FROM fh_download_tokens WHERE token='${partial_token}'")" = "1"
-test "$(sql "SELECT downloads FROM fh_files WHERE id='${partial_id}'")" = "0"
+expect "an interrupted download still consumes its token" "1" \
+  "$(sql "SELECT used FROM fh_download_tokens WHERE token='${partial_token}'")"
+expect "an interrupted download does not count" "0" \
+  "$(sql "SELECT downloads FROM fh_files WHERE id='${partial_id}'")"
 
 # The same rule applies to an interrupted Range. A later complete Range is one completed
 # download and increments the counter exactly once.
@@ -196,11 +219,15 @@ curl --silent --show-error --max-time 1 --range 0-262143 \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${range_partial_token}"
 range_exit=$?
 set -e
-test "${range_exit}" -ne 0
+if [[ "${range_exit}" -eq 0 ]]; then
+  echo "an interrupted Range download was not interrupted: curl exited 0" >&2
+  exit 1
+fi
 wait_for_value \
   "SELECT state FROM fh_download_reservations WHERE resource_id='${range_id}' ORDER BY created_at DESC LIMIT 1" \
   "released"
-test "$(sql "SELECT downloads FROM fh_files WHERE id='${range_id}'")" = "0"
+expect "an interrupted Range does not count" "0" \
+  "$(sql "SELECT downloads FROM fh_files WHERE id='${range_id}'")"
 
 # Close a real uvicorn socket while the reservation is committed but before the first response
 # body is offered to ASGI. The test-only delay is enabled only in this isolated CI container.
@@ -220,18 +247,22 @@ wait "${prebody_client_pid}"
 wait_for_value \
   "SELECT state FROM fh_download_reservations WHERE resource_id='${prebody_id}' ORDER BY created_at DESC LIMIT 1" \
   "released"
-test "$(sql "SELECT used FROM fh_download_tokens WHERE token='${prebody_token}'")" = "0"
-test "$(sql "SELECT downloads FROM fh_files WHERE id='${prebody_id}'")" = "0"
-test "$(sql "SELECT consumed_at IS NULL AND consume_reservation_id IS NULL FROM fh_files WHERE id='${prebody_id}'")" = "1"
-test "$(sql "SELECT COUNT(*) FROM fh_active_downloads WHERE file_id='${prebody_id}'")" = "0"
-test "$(download_metric)" = "${prebody_metric_before}"
+expect "a pre-body abort leaves the token unused" "0" \
+  "$(sql "SELECT used FROM fh_download_tokens WHERE token='${prebody_token}'")"
+expect "a pre-body abort does not count" "0" \
+  "$(sql "SELECT downloads FROM fh_files WHERE id='${prebody_id}'")"
+expect "a pre-body abort releases the one-time claim" "1" \
+  "$(sql "SELECT consumed_at IS NULL AND consume_reservation_id IS NULL FROM fh_files WHERE id='${prebody_id}'")"
+expect "a pre-body abort leaves no active row" "0" \
+  "$(sql "SELECT COUNT(*) FROM fh_active_downloads WHERE file_id='${prebody_id}'")"
+expect "a pre-body abort does not move the metric" "${prebody_metric_before}" "$(download_metric)"
 
 range_complete_token="$(get_download_token "${range_id}")"
 range_complete_status="$(curl --fail --silent --show-error --range 0-262143 \
   --output "${work_dir}/range-complete.bin" --write-out '%{http_code}' \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${range_complete_token}")"
-test "${range_complete_status}" = "206"
-test "$(wc -c <"${work_dir}/range-complete.bin")" = "262144"
+expect "a complete Range request" "206" "${range_complete_status}"
+expect "the Range payload size" "262144" "$(wc -c <"${work_dir}/range-complete.bin")"
 wait_for_value "SELECT downloads FROM fh_files WHERE id='${range_id}'" "1"
 
 # Kill the uvicorn process after its first body bytes. No finally block can run; after the
@@ -247,7 +278,10 @@ wait_for_value \
   "SELECT COUNT(*) FROM fh_download_reservations WHERE resource_id='${crash_id}' AND state='started'" \
   "1"
 worker_pid="$(docker compose exec --no-TTY app supervisorctl pid upload | tr -d '\r')"
-test "${worker_pid}" -gt 1
+if [[ "${worker_pid}" -le 1 ]]; then
+  echo "supervisorctl did not report an upload worker pid: '${worker_pid}'" >&2
+  exit 1
+fi
 docker compose exec --no-TTY --user root app kill -9 "${worker_pid}"
 set +e
 wait "${crash_curl_pid}"
@@ -259,10 +293,14 @@ wait_ready
 wait_for_value \
   "SELECT state FROM fh_download_reservations WHERE resource_id='${crash_id}' ORDER BY created_at DESC LIMIT 1" \
   "released"
-test "$(sql "SELECT used FROM fh_download_tokens WHERE token='${crash_token}'")" = "1"
-test "$(sql "SELECT downloads FROM fh_files WHERE id='${crash_id}'")" = "0"
-test "$(sql "SELECT COUNT(*) FROM fh_active_downloads WHERE file_id='${crash_id}'")" = "0"
-test "$(sql "SELECT consumed_at IS NOT NULL FROM fh_files WHERE id='${crash_id}'")" = "1"
+expect "a crashed transfer keeps its token consumed" "1" \
+  "$(sql "SELECT used FROM fh_download_tokens WHERE token='${crash_token}'")"
+expect "a crashed transfer does not count" "0" \
+  "$(sql "SELECT downloads FROM fh_files WHERE id='${crash_id}'")"
+expect "startup reaping clears the active row" "0" \
+  "$(sql "SELECT COUNT(*) FROM fh_active_downloads WHERE file_id='${crash_id}'")"
+expect "a crashed transfer keeps the one-time claim" "1" \
+  "$(sql "SELECT consumed_at IS NOT NULL FROM fh_files WHERE id='${crash_id}'")"
 
 before_reap="$(sql "SELECT CONCAT(state,':',bytes_sent) FROM fh_download_reservations
   WHERE resource_id='${crash_id}' ORDER BY created_at DESC LIMIT 1")"
@@ -270,6 +308,6 @@ docker compose restart app
 wait_ready
 after_reap="$(sql "SELECT CONCAT(state,':',bytes_sent) FROM fh_download_reservations
   WHERE resource_id='${crash_id}' ORDER BY created_at DESC LIMIT 1")"
-test "${after_reap}" = "${before_reap}"
+expect "reaping is idempotent across restarts" "${before_reap}" "${after_reap}"
 
 echo "Docker transfer and interrupted-download smoke passed."
