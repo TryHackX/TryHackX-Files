@@ -666,6 +666,7 @@ function handleDefaultSettings(): never
 		'recovery_attempts_limit' => '5',
 		'recovery_window_hours' => '48',
 		'email_method' => 'php',
+		'email_php_mail_guard' => 'fail',
 		'email_from' => 'noreply@' . $emailHost,
 		'email_from_name' => $appName,
 	];

@@ -32,7 +32,7 @@ if (!defined('PROJECT_ROOT')) {
 	define('PROJECT_ROOT', $projectRoot);
 }
 if (!defined('APP_VERSION')) {
-	define('APP_VERSION', '2.76.10');
+	define('APP_VERSION', '2.76.11');
 }
 if (!defined('APP_URL')) {
 	$canonical = defined('APP_CANONICAL_URL')
@@ -81,13 +81,6 @@ $heartbeat = static function () use ($watchdog): void {
 	$watchdog->ping();
 };
 
-// PHP mail() reaches Postfix through the setgid `postdrop` helper, and NoNewPrivileges strips
-// that bit on exec. The helper then warns about an unwritable maildrop and sleeps ten seconds
-// in a loop that has no end, so mail() never returns: no error, no retry, no dead letter, just
-// a service that looks healthy and delivers nothing. The transports that speak SMTP over a
-// socket need no privilege transition at all.
-$noNewPrivileges = is_readable('/proc/self/status')
-	&& preg_match('/^NoNewPrivs:\s*1$/m', (string) file_get_contents('/proc/self/status')) === 1;
 $lastTransportWarningAt = 0;
 $lastErrorSignature = '';
 $lastErrorAt = 0;
@@ -100,15 +93,20 @@ do {
 		Database::forgetLocalSettingsCache();
 		$lastSettingsRefresh = time();
 	}
-	if ($noNewPrivileges && MailService::method() === 'php'
+	// One warning per hour for the one combination nothing can rescue: the administrator has
+	// turned the safeguard off, so mail() is about to be called on a host where a setgid
+	// postdrop cannot run. Every other combination either works or fails with its own message.
+	if (MailService::method() === 'php'
+		&& MailService::noNewPrivileges()
+		&& MailService::phpMailGuard() === 'off'
 		&& time() - $lastTransportWarningAt >= 3600) {
 		$lastTransportWarningAt = time();
 		fwrite(
 			STDERR,
-			'[' . date('Y-m-d H:i:s') . '] mail-worker: e-mail method is "php" while this service'
-			. ' runs under NoNewPrivileges. PHP mail() cannot hand mail to a setgid postdrop'
-			. ' there and blocks instead of failing. Switch Settings -> E-mail to the local mail'
-			. ' server (SMTP on 127.0.0.1:25) or to an external SMTP server.' . PHP_EOL
+			'[' . date('Y-m-d H:i:s') . '] mail-worker: calling PHP mail() under NoNewPrivileges'
+			. ' with the safeguard disabled. If this host delivers through a setgid postdrop,'
+			. ' the call will not return and this worker will be restarted by its watchdog'
+			. ' until the transport or the safeguard changes.' . PHP_EOL
 		);
 	}
 

@@ -170,6 +170,49 @@ final class MailTransportTest extends RepoTestCase
 		);
 	}
 
+	/** The one combination that needs a decision: `php` where mail() cannot work. */
+	#[\PHPUnit\Framework\Attributes\DataProvider('guardedTransports')]
+	public function testTheGuardDecidesWhatPhpMailMeansUnderNoNewPrivileges(
+		string $method,
+		bool $noNewPrivileges,
+		string $guard,
+		string $expectedTransport,
+		bool $expectRefusal
+	): void {
+		[$transport, $refusal] = MailService::resolveTransport($method, $noNewPrivileges, $guard);
+
+		$this->assertSame($expectedTransport, $transport);
+		if ($expectRefusal) {
+			$this->assertStringContainsString('NoNewPrivileges', $refusal);
+		} else {
+			$this->assertSame('', $refusal);
+		}
+	}
+
+	/** @return array<string, array{0:string,1:bool,2:string,3:string,4:bool}> */
+	public static function guardedTransports(): array
+	{
+		return [
+			'unrestricted host keeps mail()' => ['php', false, 'fail', 'php', false],
+			'restricted host refuses by default' => ['php', true, 'fail', '', true],
+			'restricted host can divert to the local MTA' => ['php', true, 'local', 'local', false],
+			'restricted host can be told to try anyway' => ['php', true, 'off', 'php', false],
+			'an unknown guard value is treated as refuse' => ['php', true, 'nonsense', '', true],
+			'the guard never touches the local transport' => ['local', true, 'fail', 'local', false],
+			'the guard never touches an external relay' => ['smtp', true, 'fail', 'smtp', false],
+		];
+	}
+
+	public function testTheGuardSettingFallsBackToRefusing(): void
+	{
+		Database::setSetting('email_php_mail_guard', 'sometimes');
+		$this->assertSame('fail', MailService::phpMailGuard());
+		Database::setSetting('email_php_mail_guard', 'LOCAL');
+		$this->assertSame('local', MailService::phpMailGuard());
+		Database::setSetting('email_php_mail_guard', 'off');
+		$this->assertSame('off', MailService::phpMailGuard());
+	}
+
 	/** Start the stub, point the local transport at it, and return its transcript path. */
 	private function startStubServer(string $rcptReply = '250 2.1.5 Ok'): string
 	{

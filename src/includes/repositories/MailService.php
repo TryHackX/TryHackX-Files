@@ -21,6 +21,9 @@ final class MailService
 	private const SMTP_IO_TIMEOUT = 30;
 	private const SMTP_DEADLINE = 60;
 
+	/** Resolved once per process; the kernel flag cannot be cleared once set. */
+	private static ?bool $noNewPrivileges = null;
+
 	/**
 	 * Render and enqueue an e-mail.
 	 *
@@ -577,12 +580,78 @@ final class MailService
 			|| preg_match('/[\r\n]/', $to . $from) === 1) {
 			return false;
 		}
-		$method = self::method();
+		[$method, $refusal] = self::resolveTransport(
+			self::method(),
+			self::noNewPrivileges(),
+			self::phpMailGuard()
+		);
+		if ($refusal !== '') {
+			throw new RuntimeException($refusal);
+		}
 		if ($method === 'php') {
 			return @mail($to, $subject, $body, $headers, '-f' . $from);
 		}
 		self::submit(self::transport($method), $to, $from, $subject, $headers, $body);
 		return true;
+	}
+
+	/**
+	 * Decide what `php` actually means on this host.
+	 *
+	 * `mail()` hands the message to whatever `sendmail_path` points at. With Postfix that is a
+	 * setgid `postdrop`, and `NoNewPrivileges` strips the setgid bit on exec: the helper then
+	 * cannot write to the maildrop, warns, sleeps ten seconds and tries again, forever. mail()
+	 * never returns. Other agents — msmtp, ssmtp, an exim that does not need the transition —
+	 * are perfectly happy under the same flag, so this cannot simply be forbidden.
+	 *
+	 * The administrator therefore chooses what should happen in that one combination. Nothing
+	 * here applies to `local` or `smtp`, and nothing applies off Linux or outside a hardened
+	 * service, where the flag is not set at all.
+	 *
+	 * @return array{0:string,1:string} the transport to use, or an empty transport and the
+	 *                                  reason to record against the message
+	 */
+	public static function resolveTransport(
+		string $method,
+		bool $noNewPrivileges,
+		string $guard
+	): array {
+		if ($method !== 'php' || !$noNewPrivileges) {
+			return [$method, ''];
+		}
+		if ($guard === 'off') {
+			return ['php', ''];
+		}
+		if ($guard === 'local') {
+			return ['local', ''];
+		}
+		return ['', 'PHP mail() is refused under NoNewPrivileges: a setgid postdrop cannot run '
+			. 'there and mail() would block instead of failing. Choose the local mail server in '
+			. 'Settings -> E-mail, or change the safeguard for PHP mail() if this host uses a '
+			. 'mail agent that needs no privilege transition.'];
+	}
+
+	/** What to do when `php` is configured on a host where `mail()` cannot work. */
+	public static function phpMailGuard(): string
+	{
+		$guard = strtolower(trim((string) Database::getSetting('email_php_mail_guard', 'fail')));
+		return in_array($guard, ['fail', 'local', 'off'], true) ? $guard : 'fail';
+	}
+
+	/**
+	 * Whether this process runs with `NoNewPrivileges` in effect.
+	 *
+	 * Read once: the flag is one-way and cannot be cleared for the life of the process.
+	 */
+	public static function noNewPrivileges(): bool
+	{
+		if (self::$noNewPrivileges === null) {
+			$status = is_readable('/proc/self/status')
+				? (string) file_get_contents('/proc/self/status')
+				: '';
+			self::$noNewPrivileges = preg_match('/^NoNewPrivs:\s*1$/m', $status) === 1;
+		}
+		return self::$noNewPrivileges;
 	}
 
 	/**

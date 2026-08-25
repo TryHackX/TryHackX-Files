@@ -23,9 +23,12 @@
 	function toggleEmailFields() {
 		const method = document.getElementById('emailMethod')?.value;
 		const smtpFields = document.getElementById('smtpFields');
+		const phpMailGuard = document.getElementById('phpMailGuardField');
 		const prefixGroup = document.getElementById('emailFromPrefixGroup');
 		const fullInput = document.getElementById('emailFromFull');
 		if (smtpFields) smtpFields.style.display = method === 'smtp' ? 'block' : 'none';
+		// The safeguard only decides what mail() does; it is meaningless for the other two.
+		if (phpMailGuard) phpMailGuard.style.display = method === 'php' ? 'block' : 'none';
 		if (prefixGroup && fullInput) {
 			// php and local both post through this host, so the sender is offered as a
 			// prefix on the site's own domain; only an external relay takes a full address.

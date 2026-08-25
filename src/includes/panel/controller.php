@@ -213,6 +213,7 @@ if ($action === 'save_settings') {
 			'smtp_port' => max(1, (int) ($_POST['smtp_port'] ?? 587)),
 			'smtp_user' => trim($_POST['smtp_user'] ?? ''),
 			'smtp_encryption' => in_array($_POST['smtp_encryption'] ?? 'tls', ['', 'tls', 'ssl']) ? $_POST['smtp_encryption'] : 'tls',
+			'email_php_mail_guard' => in_array($_POST['email_php_mail_guard'] ?? 'fail', ['fail', 'local', 'off'], true) ? $_POST['email_php_mail_guard'] : 'fail',
 		];
 
 		// SMTP password (S12): stored encrypted at rest, never prefilled into the form.

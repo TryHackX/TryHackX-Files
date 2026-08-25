@@ -1090,6 +1090,15 @@ if (!defined('APP_ROOT')) {
 							<small><?= _h('panel.set.resend_cooldown_hint') ?></small>
 						</div>
 					</div>
+					<div id="phpMailGuardField" class="form-group" style="<?= ($settings['email_method'] ?? 'php') !== 'php' ? 'display:none' : '' ?>">
+						<label><?= _h('panel.set.mail_guard') ?></label>
+						<select name="email_php_mail_guard" class="input">
+							<option value="fail" <?= ($settings['email_php_mail_guard'] ?? 'fail') === 'fail' ? 'selected' : '' ?>><?= _h('panel.set.mail_guard_fail') ?></option>
+							<option value="local" <?= ($settings['email_php_mail_guard'] ?? 'fail') === 'local' ? 'selected' : '' ?>><?= _h('panel.set.mail_guard_local') ?></option>
+							<option value="off" <?= ($settings['email_php_mail_guard'] ?? 'fail') === 'off' ? 'selected' : '' ?>><?= _h('panel.set.mail_guard_off') ?></option>
+						</select>
+						<small><?= _h('panel.set.mail_guard_hint') ?></small>
+					</div>
 					<div id="smtpFields" style="<?= ($settings['email_method'] ?? 'php') !== 'smtp' ? 'display:none' : '' ?>">
 						<hr style="border-color: var(--border); margin: 24px 0;">
 						<h4 style="margin-bottom: 20px;"><?= _h('panel.set.smtp_details') ?></h4>

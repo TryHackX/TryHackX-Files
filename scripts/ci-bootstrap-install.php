@@ -99,6 +99,7 @@ $defaults = [
 	'limit_upload_user' => '0',
 	'limit_download_user' => '0',
 	'email_method' => 'php',
+	'email_php_mail_guard' => 'fail',
 	'email_from' => 'noreply@example.invalid',
 	'email_from_name' => 'FileHost CI',
 ];
