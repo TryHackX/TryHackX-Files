@@ -1,5 +1,7 @@
 <?php
 
+require_once PROJECT_ROOT . '/src/includes/ContentSecurityPolicy.php';
+
 /**
  * CaptchaService: provider selection, per-provider key storage and the answer checks.
  *
@@ -295,6 +297,57 @@ final class CaptchaServiceTest extends RepoTestCase
 		]);
 		$this->assertContains('https://www.google.com', $v3);
 		$this->assertContains('https://www.gstatic.com', $v3);
+	}
+
+	/**
+	 * The policy string the browser actually receives, not just the origin list.
+	 *
+	 * `emitContentSecurityPolicy()` calls `header()`, which does nothing under the CLI SAPI,
+	 * so the string is built by `buildContentSecurityPolicy()` and asserted here.
+	 */
+	public function testThePolicyStringCarriesOnlyTheSelectedProvidersOrigins(): void
+	{
+		$off = buildContentSecurityPolicy(['recaptcha_enabled' => '0']);
+		$this->assertStringContainsString("script-src 'self'", $off);
+		$this->assertStringNotContainsString('google.com', $off);
+		$this->assertStringNotContainsString('cloudflare.com', $off);
+		$this->assertStringNotContainsString('hcaptcha.com', $off);
+
+		$turnstile = buildContentSecurityPolicy([
+			'recaptcha_enabled' => '1',
+			'captcha_provider' => CaptchaService::PROVIDER_TURNSTILE,
+		]);
+		$this->assertStringContainsString('https://challenges.cloudflare.com', $turnstile);
+		$this->assertStringNotContainsString('google.com', $turnstile);
+		// The origin has to reach script-src AND frame-src: the widget is an iframe.
+		$this->assertMatchesRegularExpression(
+			'/script-src[^;]*https:\/\/challenges\.cloudflare\.com/',
+			$turnstile
+		);
+		$this->assertMatchesRegularExpression(
+			'/frame-src[^;]*https:\/\/challenges\.cloudflare\.com/',
+			$turnstile
+		);
+
+		$hcaptcha = buildContentSecurityPolicy([
+			'recaptcha_enabled' => '1',
+			'captcha_provider' => CaptchaService::PROVIDER_HCAPTCHA,
+		]);
+		$this->assertStringContainsString('https://js.hcaptcha.com', $hcaptcha);
+		$this->assertStringNotContainsString('google.com', $hcaptcha);
+
+		foreach ([
+			CaptchaService::PROVIDER_RECAPTCHA_V2,
+			CaptchaService::PROVIDER_RECAPTCHA_V3,
+		] as $provider) {
+			$policy = buildContentSecurityPolicy([
+				'recaptcha_enabled' => '1',
+				'captcha_provider' => $provider,
+			]);
+			$this->assertStringContainsString('https://www.google.com', $policy);
+			$this->assertStringContainsString('https://www.gstatic.com', $policy);
+			$this->assertStringNotContainsString('cloudflare.com', $policy);
+		}
 	}
 
 	public function testEveryProviderHasAVerificationEndpointAndLoader(): void

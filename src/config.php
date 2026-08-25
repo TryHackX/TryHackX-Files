@@ -17,6 +17,7 @@ $configLocalPath = PROJECT_ROOT . '/config/config.local.php';
 $hasLocalConfig = file_exists($configLocalPath);
 
 require_once APP_ROOT . '/includes/CanonicalUrl.php';
+require_once APP_ROOT . '/includes/ContentSecurityPolicy.php';
 
 // --- HTTP test harness (runda 10) ---
 // FH_TEST_MODE=1 points the whole served app at the throwaway test database and isolated
@@ -141,9 +142,10 @@ if ($db) {
 	Database::migrate();
 	$settings = Database::getAllSettings();
 
-	// PHP owns the CSP header for its own responses; .htaccess only covers what we skip
-	// (`Header setifempty` there — two CSP headers are enforced as their intersection,
-	// so the ad-domain relaxation below MUST be the only policy on the response).
+	// PHP owns the CSP header for every document it serves, and must be the ONLY policy on
+	// the response: a browser handed two enforces their intersection, which would quietly
+	// veto whatever this one admits on top (ad origins, the selected captcha provider).
+	// public/.htaccess is scoped to static file extensions for exactly that reason.
 	emitContentSecurityPolicy($settings);
 
 	define('APP_NAME', $settings['app_name'] ?? PRODUCT_NAME);
@@ -210,59 +212,7 @@ function emitContentSecurityPolicy(array $settings): void
 		return;
 	}
 
-	$strictScripts = defined('FILEHOST_CSP_STRICT_SCRIPTS')
-		&& FILEHOST_CSP_STRICT_SCRIPTS === true;
-	$script = "'self'" . ($strictScripts ? '' : " 'unsafe-inline'");
-	// blob: is same-origin object URLs only — the panel's banner cropper previews the
-	// picked file through URL.createObjectURL, which img-src would otherwise block.
-	$img = "'self' data: blob:";
-	$connect = "'self'";
-	$frame = "'self'";
-
-	// Captcha (2.79.0): only the selected provider's origins are admitted, and only while the
-	// captcha is switched on. Picking Turnstile must not leave Google's script hosts
-	// whitelisted, and switching the feature off must not leave anyone's.
-	foreach (CaptchaService::cspOrigins($settings) as $origin) {
-		$script .= ' ' . $origin;
-		$frame .= ' ' . $origin;
-		$connect .= ' ' . $origin;
-	}
-
-	$adsOn = ($settings['ads_enabled'] ?? '0') === '1';
-	if ($adsOn && ($settings['ads_adsense_active'] ?? '0') === '1') {
-		$script .= ' https://pagead2.googlesyndication.com https://googleads.g.doubleclick.net'
-			. ' https://tpc.googlesyndication.com https://www.googletagservices.com'
-			. ' https://ep2.adtrafficquality.google';
-		$img .= ' https://*.googlesyndication.com https://*.doubleclick.net https://*.google.com'
-			. ' https://*.google.pl https://ep1.adtrafficquality.google';
-		$connect .= ' https://pagead2.googlesyndication.com https://*.doubleclick.net'
-			. ' https://*.google.com https://ep1.adtrafficquality.google';
-		$frame .= ' https://googleads.g.doubleclick.net https://tpc.googlesyndication.com'
-			. ' https://*.doubleclick.net https://ep2.adtrafficquality.google';
-	}
-	if ($adsOn) {
-		// Operator-supplied origins for other networks. Stored pre-sanitised (see
-		// AdsController::sanitizeCspExtra), re-filtered here so a hand-edited DB row still
-		// cannot smuggle a directive into the header.
-		$extra = '';
-		foreach (preg_split('/\s+/', trim((string) ($settings['ads_csp_extra'] ?? ''))) ?: [] as $token) {
-			if ($token !== '' && preg_match('~^https://[a-z0-9*][a-z0-9.*-]*(:\d{1,5})?$~i', $token)) {
-				$extra .= ' ' . $token;
-			}
-		}
-		if ($extra !== '') {
-			$script .= $extra;
-			$img .= $extra;
-			$connect .= $extra;
-			$frame .= $extra;
-		}
-	}
-
-	header("Content-Security-Policy: default-src 'self'; script-src {$script}; "
-		. ($strictScripts ? "script-src-attr 'none'; " : '')
-		. "style-src 'self' 'unsafe-inline'; img-src {$img}; connect-src {$connect}; "
-		. "font-src 'self'; frame-src {$frame}; object-src 'none'; base-uri 'self'; "
-		. "form-action 'self'; frame-ancestors 'self'");
+	header('Content-Security-Policy: ' . buildContentSecurityPolicy($settings));
 }
 
 function formatSize($bytes): string
