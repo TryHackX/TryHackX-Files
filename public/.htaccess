@@ -53,29 +53,30 @@ Options -Indexes -MultiViews
 	Header always set X-Frame-Options "SAMEORIGIN"
 	Header always set Referrer-Policy "strict-origin-when-cross-origin"
 
-	# Content-Security-Policy. 'unsafe-inline' for scripts is required by the app's
-	# inline onclick handlers; the rest (object-src none, base-uri/form-action self,
-	# frame-ancestors self, connect/img self) still blocks many injection vectors.
-	# google.com/gstatic are allowed only for optional reCAPTCHA. Since 2.79.0 the captcha
-	# provider is selectable (reCAPTCHA v2/v3, Turnstile, hCaptcha) and a static header cannot
-	# know which one is on, so PHP emits the provider's origins itself (config.php,
-	# emitContentSecurityPolicy) and this fallback keeps only the Google pair. Every page that
-	# can render a challenge is a PHP page, so the fallback never has to serve one.
+	# Content-Security-Policy — the FALLBACK ONLY, and deliberately scoped to static files.
 	#
-	# frame-src must include 'self': the download page renders a PDF preview in an
-	# <iframe src="api.php?action=preview&…">, and without 'self' the browser blocked it
-	# (the frame stayed blank with a CSP violation) — that was the "PDF preview doesn't
-	# work" report. Uploads are served with Content-Disposition and a stored MIME type, and
-	# framing our own origin is already limited by frame-ancestors 'self'.
+	# PHP emits this header itself for every document it serves (config.php,
+	# emitContentSecurityPolicy) so the policy can follow the settings: which captcha provider
+	# is selected, and whether AdSense may render. That only works if PHP's header is the ONLY
+	# one on the response — a browser given two Content-Security-Policy headers enforces both,
+	# i.e. their intersection, so anything PHP admits that this line does not is still blocked.
 	#
-	# `setifempty`, NOT `always set` (Faza 8): PHP now emits this header itself so it can
-	# admit Google's ad domains only while AdSense is actually enabled (see config.php,
-	# emitContentSecurityPolicy). An `always set` here would land in Apache's separate
-	# "always" table and ship a SECOND CSP next to PHP's — and browsers enforce the
-	# intersection of both, so the PHP relaxation could never take effect. `setifempty`
-	# keeps this exact strict policy as the fallback for static assets and any response
-	# PHP did not stamp. Do not "fix" this back to `always set`.
-	Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self' https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+	# `setifempty` was supposed to prevent the duplicate and does not: with PHP-FPM behind
+	# mod_proxy_fcgi, mod_headers runs its fixup before the backend's headers are merged in, so
+	# the table it inspects is still empty and it adds a second policy anyway. Verified on the
+	# live server 2026-08-25 — every PHP page carried two CSP headers. That is why the header
+	# is now confined to the extensions Apache serves from disk itself: assets never get one
+	# from PHP, and documents never get one from here.
+	#
+	# Do not widen this back to every response, and do not switch it to `always set`.
+	#
+	# frame-src keeps 'self' for the same reason it always did: the download page renders a PDF
+	# preview in an <iframe src="api.php?action=preview&…">, and without it the frame stays
+	# blank with a CSP violation. Framing our own origin is already limited by
+	# frame-ancestors 'self'.
+	<FilesMatch "\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|eot|map|txt|json|webmanifest)$">
+		Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+	</FilesMatch>
 	Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
 </IfModule>
 

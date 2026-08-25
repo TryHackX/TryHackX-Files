@@ -33,9 +33,20 @@ in English for the first GitHub release.
 
 - The Content-Security-Policy now admits **only the selected provider's** origins, and only
   while the captcha is switched on. Choosing Turnstile no longer leaves Google's script hosts
-  whitelisted, and switching the captcha off leaves nobody's. The static `public/.htaccess`
-  policy stays as-is: it is the fallback for responses PHP did not stamp, and every page that
-  can render a challenge is a PHP page.
+  whitelisted, and switching the captcha off leaves nobody's.
+
+### Fixed
+
+- Every PHP page was being served **two** Content-Security-Policy headers — PHP's, and the
+  `Header setifempty` fallback from `public/.htaccess` — and a browser handed two of them
+  enforces both, so the effective policy was their intersection. `setifempty` was meant to
+  prevent exactly this and cannot: behind `mod_proxy_fcgi`, mod_headers runs its fixup before
+  the backend's headers are merged, so it inspects an empty table and adds its policy anyway.
+  Nothing had noticed because both policies happened to allow the same things; the moment the
+  captcha provider became selectable it would have blocked Turnstile and hCaptcha outright,
+  and it was already silently blocking the AdSense relaxation for anyone who enabled ads. The
+  fallback is now scoped with `<FilesMatch>` to the extensions Apache serves from disk itself,
+  so documents get exactly one policy — PHP's — and static assets still get one.
 - Captcha verification retries once. A single request was enough to lose a solved challenge to
   a timeout whenever the uplink was saturated, and the visitor was told the captcha had failed
   on a challenge they had just completed. Two attempts at 5 s connect / 8 s total.
