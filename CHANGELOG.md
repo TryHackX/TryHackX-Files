@@ -24,6 +24,11 @@ in English for the first GitHub release.
   the column that is read, and two tests pin the rule it got wrong: a guest resolves to the
   guest group's `limit_download`, a stale flat setting does not override it, and a missing
   guest group is an error rather than an unthrottled download.
+- The same smoke test now reports its own failures. It asserted with bare `test` under
+  `set -e` inside a CI container nobody can attach to, so a failing run produced one line:
+  "Process completed with exit code 1". Every comparison now names the label, the expected
+  value and the actual one, and an `ERR` trap reports the line and command behind any other
+  non-zero exit.
 
 ### Changed
 
