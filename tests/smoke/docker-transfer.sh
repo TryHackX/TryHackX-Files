@@ -131,9 +131,17 @@ test "${reuse_status}" = "403"
 
 # Slow downloads make concurrency and disconnect states observable without a race against
 # the unthrottled streaming path. Five seconds is used only by this isolated stack, never as a production default.
+#
+# The throttle lives on the guest *group*, not on the flat setting. `limit_download_guest` was
+# copied into `groups.limit_download` once, by the migration that introduced groups, and the
+# sidecar has read the group row ever since; the panel keeps the old key in sync only for
+# legacy readers. Writing just the setting left the throttle at zero, so every assertion below
+# that needs a transfer still in flight raced against a payload delivered in one burst.
+sql "UPDATE fh_groups SET limit_download=131072 WHERE slug='guest'"
 sql "INSERT INTO fh_settings (setting_key, setting_value) VALUES
   ('limit_download_guest','131072')
   ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)"
+test "$(sql "SELECT limit_download FROM fh_groups WHERE slug='guest'")" = "131072"
 reload_upload_server >/dev/null
 
 large_payload="${work_dir}/large.bin"

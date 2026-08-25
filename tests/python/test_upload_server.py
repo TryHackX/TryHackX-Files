@@ -1690,3 +1690,39 @@ class TestStreamingResponseFinalisation:
         assert status == [200]
         assert bytes(body) == b"firstsecond"
         assert finalised == [True]
+class TestGuestTransferLimits:
+    """Where a guest's throttle actually comes from.
+
+    `limit_download_guest` in the settings table looks like the knob and is not: the migration
+    that introduced groups copied it into the guest group's `limit_download` once, and the
+    download path has read the group row ever since. Writing the setting alone changes nothing,
+    which is what silently disabled throttling in the Docker transfer smoke.
+    """
+
+    GROUPS = {
+        7: {'slug': 'guest', 'limit_download': 131072, 'limit_upload': 0,
+            'concurrent_downloads': 2, 'transfer_quota_bytes': 0},
+        8: {'slug': 'user', 'limit_download': 999, 'limit_upload': 0,
+            'concurrent_downloads': 2, 'transfer_quota_bytes': 0},
+    }
+
+    def test_a_guest_resolves_to_the_guest_group_row(self, monkeypatch):
+        monkeypatch.setitem(us.settings_cache, 'groups', self.GROUPS)
+        # A stale flat setting must not win, in either direction.
+        monkeypatch.setitem(us.settings_cache, 'limit_download_guest', 4242)
+
+        limits = asyncio.run(us.get_user_group_limits(None))
+
+        assert limits['slug'] == 'guest'
+        assert limits['limit_download'] == 131072
+
+    def test_no_guest_group_is_an_error_not_an_unthrottled_download(self, monkeypatch):
+        monkeypatch.setitem(us.settings_cache, 'groups', {8: self.GROUPS[8]})
+        monkeypatch.setitem(us.settings_cache, 'limit_download_guest', 131072)
+
+        try:
+            asyncio.run(us.get_user_group_limits(None))
+        except us.HTTPException as exc:
+            assert exc.status_code == 503
+        else:
+            raise AssertionError('a missing guest group must not fall back to no limit')
