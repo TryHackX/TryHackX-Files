@@ -174,6 +174,47 @@ final class RememberTokenTest extends RepoTestCase
 		$this->assertSame([], RememberTokenRepository::devices($this->userId));
 	}
 
+	/**
+	 * The emergency button spares the device pressing it.
+	 *
+	 * Whoever clicks has lost a laptop and is holding a phone. Signing the phone out too would
+	 * cost a password prompt on the one device that is definitely not the problem, so the
+	 * current series survives and everything else goes.
+	 */
+	public function testSigningOtherDevicesOutKeepsTheOneAsking(): void
+	{
+		$here = RememberTokenRepository::issue($this->userId, 86400, '203.0.113.9', 'Phone/1.0');
+		RememberTokenRepository::issue($this->userId, 86400, '198.51.100.7', 'LostLaptop/1.0');
+		RememberTokenRepository::issue($this->userId, 86400, '198.51.100.8', 'OldTablet/1.0');
+
+		$listed = RememberTokenRepository::devices($this->userId, $here);
+		$this->assertCount(3, $listed);
+		$current = array_values(array_filter($listed, static fn(array $row): bool => $row['current']));
+		$this->assertCount(1, $current, 'exactly one row is this browser');
+		$this->assertSame('Phone/1.0', $current[0]['user_agent']);
+		foreach ($listed as $row) {
+			$this->assertArrayNotHasKey('series', $row, 'the list must not leak the series');
+		}
+
+		$this->assertSame(2, RememberTokenRepository::forgetOthers($this->userId, $here));
+
+		$left = $this->rows();
+		$this->assertCount(1, $left);
+		$this->assertSame('Phone/1.0', $left[0]['user_agent']);
+		[$userId] = RememberTokenRepository::consume($here, '203.0.113.9', 'Phone/1.0');
+		$this->assertSame($this->userId, $userId, 'and it still works');
+	}
+
+	/** A session-only sign-in has nothing to spare, so the button clears everything. */
+	public function testWithoutACurrentTokenEverythingIsRevoked(): void
+	{
+		RememberTokenRepository::issue($this->userId, 86400, '198.51.100.7', 'LostLaptop/1.0');
+		RememberTokenRepository::issue($this->userId, 86400, '198.51.100.8', 'OldTablet/1.0');
+
+		$this->assertSame(2, RememberTokenRepository::forgetOthers($this->userId, ''));
+		$this->assertSame([], $this->rows());
+	}
+
 	public function testTurningTheFeatureOffCanRevokeEveryOutstandingToken(): void
 	{
 		RememberTokenRepository::issue($this->userId, 86400, '203.0.113.9', 'Laptop/1.0');

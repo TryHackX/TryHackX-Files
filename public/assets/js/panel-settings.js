@@ -191,8 +191,13 @@
 					? new Date(device.last_used_at * 1000).toLocaleString()
 					: new Date(device.created_at * 1000).toLocaleString();
 				const until = new Date(device.expires_at * 1000).toLocaleString();
-				return '<div class="remember-device">'
-					+ '<strong>' + escapeText(device.user_agent || '?') + '</strong>'
+				// The browser reading this page is labelled, never hidden: a list that omits
+				// the device in your hand reads as "nothing is remembered".
+				const badge = device.current
+					? ' <span class="remember-current">' + escapeText(t('panel.acct.devices_this')) + '</span>'
+					: '';
+				return '<div class="remember-device' + (device.current ? ' is-current' : '') + '">'
+					+ '<strong>' + escapeText(device.user_agent || '?') + badge + '</strong>'
 					+ '<small>' + escapeText(device.last_ip || '?') + ' · '
 					+ escapeText(used) + ' → ' + escapeText(until) + '</small>'
 					+ '</div>';
@@ -213,6 +218,8 @@
 				if (data.success) {
 					showNotification(t('panel.acct.devices_revoked', { n: data.revoked }), 'success', btn);
 					loadRememberDevices();
+					// Signing the other devices out does not sign this one out, so nothing
+					// here needs to reload the page.
 				} else {
 					showNotification(data.error || t('api.invalid_request'), 'error', btn);
 				}

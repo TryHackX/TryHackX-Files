@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.77.0**, database schema **63**. A code-only
+This guide upgrades a running installation to **2.77.1**, database schema **63**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce

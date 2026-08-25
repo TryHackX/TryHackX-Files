@@ -7,6 +7,17 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.77.1] - 2026-08-25
+
+### Changed
+
+- The remembered-devices list marks the browser reading it instead of leaving it
+  indistinguishable, and "sign out other devices" now spares that one. Both follow from what
+  the button is for: someone has lost a device and is pressing it from a device that is
+  definitely not the problem, so signing themselves out too only costs a password prompt on the
+  wrong machine. A session-only sign-in has no current token, so there is nothing to spare and
+  everything still goes.
+
 ## [2.77.0] - 2026-08-25
 
 ### Added

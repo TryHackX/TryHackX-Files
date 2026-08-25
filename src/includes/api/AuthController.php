@@ -473,8 +473,12 @@ final class AuthController
 				'expires_at' => (int) $row['expires_at'],
 				'last_ip' => (string) ($row['last_ip'] ?? ''),
 				'user_agent' => (string) ($row['user_agent'] ?? ''),
+				'current' => (bool) ($row['current'] ?? false),
 			];
-		}, RememberTokenRepository::devices($userId));
+		}, RememberTokenRepository::devices(
+			$userId,
+			RememberTokenRepository::presentedCookie()
+		));
 
 		echo json_encode([
 			'success' => true,
@@ -484,12 +488,12 @@ final class AuthController
 	}
 
 	/**
-	 * Revoke every persistent sign-in for this account, this browser included.
+	 * Revoke every persistent sign-in for this account except the browser asking.
 	 *
-	 * Deliberately all of them and not "the others": the point of the button is that someone
-	 * has lost a device and cannot tell which entry it is. Leaving the current one alive would
-	 * also mean trusting that whoever clicked is the owner, which is what the password check
-	 * in front of it establishes rather than assumes.
+	 * The button exists for someone who has lost a device and cannot tell which row it is, and
+	 * they are clicking it from a device that is definitely not the problem. Signing that one
+	 * out too would only cost them a password prompt. A session-only sign-in has no current
+	 * token, so there is nothing to spare and everything goes.
 	 */
 	public static function handleUserRememberRevoke()
 	{
@@ -511,15 +515,22 @@ final class AuthController
 		}
 		$_SESSION['recent_auth_at'] = time();
 
-		$revoked = RememberTokenRepository::forgetUser($userId);
-		RememberTokenRepository::sendCookie('', 0);
+		$current = RememberTokenRepository::presentedCookie();
+		$revoked = RememberTokenRepository::forgetOthers($userId, $current);
+		if ($current === '') {
+			RememberTokenRepository::sendCookie('', 0);
+		}
 		Database::logAudit(
 			'remember_tokens_revoked',
-			"user revoked {$revoked} persistent sign-in(s)",
+			"user revoked {$revoked} persistent sign-in(s) from other devices",
 			$userId,
 			(string) ($_SESSION['user_name'] ?? '')
 		);
-		echo json_encode(['success' => true, 'revoked' => $revoked]);
+		echo json_encode([
+			'success' => true,
+			'revoked' => $revoked,
+			'kept_current' => $current !== '',
+		]);
 	}
 
 	public static function handleUserLogout()

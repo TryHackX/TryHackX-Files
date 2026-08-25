@@ -593,6 +593,20 @@ textarea:autofill {
     margin-top: 3px;
     font-size: 0.8rem;
 }
+.remember-device.is-current {
+    border-color: var(--accent);
+}
+.remember-current {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.18);
+    color: var(--accent);
+    font-size: 0.72rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
 
 /* Per-section search above a chip list (owner / IP / extension). Kept visually lighter than a
    form field so it reads as a filter on the chips below, not another criterion. */

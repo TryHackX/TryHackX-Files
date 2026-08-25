@@ -251,25 +251,73 @@ final class RememberTokenRepository
 	/**
 	 * The devices currently able to restore this account, newest use first.
 	 *
+	 * The browser asking is marked rather than hidden: a list that silently omits the device
+	 * you are holding reads as "nothing is remembered", which is exactly the wrong impression
+	 * when something is.
+	 *
 	 * @return list<array<string,mixed>>
 	 */
-	public static function devices(int $userId): array
+	public static function devices(int $userId, string $currentCookie = ''): array
 	{
+		$currentSeries = '';
+		$series = explode(':', $currentCookie, 2)[0] ?? '';
+		if (preg_match('/\A[a-f0-9]{64}\z/D', $series) === 1) {
+			$currentSeries = hash('sha256', $series);
+		}
 		$pdo = Database::getInstance();
 		if (!$pdo || $userId < 1) {
 			return [];
 		}
 		try {
 			$statement = $pdo->prepare(
-				"SELECT `id`,`created_at`,`last_used_at`,`expires_at`,`last_ip`,`user_agent`
+				"SELECT `id`,`series`,`created_at`,`last_used_at`,`expires_at`,`last_ip`,`user_agent`
 				 FROM `" . Database::table('remember_tokens') . "`
 				 WHERE `user_id` = ? AND `expires_at` > ?
 				 ORDER BY COALESCE(`last_used_at`, `created_at`) DESC, `id` DESC"
 			);
 			$statement->execute([$userId, time()]);
-			return $statement->fetchAll(PDO::FETCH_ASSOC);
+			$rows = [];
+			foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+				$row['current'] = $currentSeries !== ''
+					&& hash_equals((string) $row['series'], $currentSeries);
+				unset($row['series']);
+				$rows[] = $row;
+			}
+			return $rows;
 		} catch (Throwable $e) {
 			return [];
+		}
+	}
+
+	/**
+	 * Drop every device for one account except the one asking.
+	 *
+	 * This is the emergency button, and sparing the current browser is what makes it usable:
+	 * the person clicking it has lost a laptop and is on their phone. Signing the phone out
+	 * too would only mean typing the password again on the one device that is definitely not
+	 * the problem. With no current token — a session-only sign-in — it removes everything,
+	 * which is the same thing.
+	 */
+	public static function forgetOthers(int $userId, string $currentCookie): int
+	{
+		$series = explode(':', $currentCookie, 2)[0] ?? '';
+		if (preg_match('/\A[a-f0-9]{64}\z/D', $series) !== 1) {
+			return self::forgetUser($userId);
+		}
+		$pdo = Database::getInstance();
+		if (!$pdo || $userId < 1) {
+			return 0;
+		}
+		try {
+			$statement = $pdo->prepare(
+				"DELETE FROM `" . Database::table('remember_tokens') . "`
+				 WHERE `user_id` = ? AND `series` <> ?"
+			);
+			$statement->execute([$userId, hash('sha256', $series)]);
+			return $statement->rowCount();
+		} catch (Throwable $e) {
+			error_log('Persistent sign-in could not be revoked: ' . $e->getMessage());
+			return 0;
 		}
 	}
 
