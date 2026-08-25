@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.76.12**, database schema **62**. A code-only
+This guide upgrades a running installation to **2.77.0**, database schema **63**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce
@@ -15,7 +15,7 @@ rollback is not assumed to be compatible with a newer schema.
 - a virtual host whose `DocumentRoot` is exactly `public/`;
 - one stable `APP_SECRET_KEY` available to PHP and CLI workers.
 
-The Python server refuses readiness unless the database schema is exactly 62. An old process
+The Python server refuses readiness unless the database schema is exactly 63. An old process
 therefore cannot transfer files against a partial or unsupported migration.
 
 ## 2. Back up and prove recovery
@@ -104,12 +104,17 @@ The virtual host serves `/var/www/filehost/public`, never the project root.
 2. Switch PHP to the new release.
 3. Make one PHP request. `Database::migrate()` takes an advisory lock, marks the schema not
    ready, journals each step, repairs safe partially applied structures, verifies contracts
-   2–62 and publishes `schema_ready=1` only after success.
-4. Verify schema 62 and readiness.
+   2–63 and publishes `schema_ready=1` only after success.
+4. Verify schema 63 and readiness.
 5. Promote `venv.new` to `venv`, then start the Python and mail services.
 
 An unsupported newer schema is rejected and never downgraded automatically. Do not manually
 change `schema_version` after a failure; fix the journaled cause or restore the backup.
+
+2.77.0 adds table `remember_tokens` (schema 63) and the Python sidecar refuses readiness on
+anything else, so the two halves must move together. Follow the order above exactly: the old
+sidecar answering `/ready` against a migrated database is a stopped file service, not a
+degraded one. Existing sessions are unaffected; nobody is signed out by the upgrade.
 
 Upgrading to 2.76.9 on a host that runs its own MTA: reinstall the systemd unit (it gained a
 watchdog and stricter sandboxing) and change **Settings → E-mail → Sending method** from
@@ -127,7 +132,7 @@ php scripts/check-storage-integrity.php --json
 php scripts/mail-worker.php --limit=1
 ```
 
-`/ready` must return HTTP 200 with `"schema_version":62`. `/live` checks process liveness only.
+`/ready` must return HTTP 200 with `"schema_version":63`. `/live` checks process liveness only.
 The database-integrity response must contain `success: true` and zero orphan counts.
 
 Optional SQL verification, using the real prefix:
@@ -197,7 +202,7 @@ Only remove the old Python environment after the smoke test and rollback window.
 
 ## 9. Rollback
 
-Do not combine old code with schema 62 unless that release explicitly supports it. Restore one
+Do not combine old code with schema 63 unless that release explicitly supports it. Restore one
 consistent point in time:
 
 1. stop PHP traffic, Python and cleanup;

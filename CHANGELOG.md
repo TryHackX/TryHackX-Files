@@ -7,6 +7,44 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.77.0] - 2026-08-25
+
+### Added
+
+- Persistent sign-in. The sign-in form can offer a duration — this browser session, 30 minutes,
+  1 hour, 3 hours, 1 day, 7 days, 30 days, or as long as the administrator allows — and anything
+  beyond the session is backed by a credential of its own, because a PHP session cannot outlive
+  the browser. Each device gets a *series* and a *secret*; only their hashes are stored, so a
+  leaked database yields nothing that can be presented back, and the secret is replaced on every
+  single use. A valid series arriving with a stale secret means two parties hold the same
+  cookie: which one is the owner is unknowable, so every token for that account is destroyed and
+  an audit line is written. A silent theft becomes a visible logout.
+  There is no "forever" option — an unbounded credential cannot be issued safely, so "as long as
+  allowed" resolves to the configured ceiling.
+- **Account → Remembered devices** lists what can currently sign the account in without a
+  password — browser, address, when it was trusted, when it was last used, when it stops working
+  — and revokes all of them behind a password check. A credential the owner cannot see is one
+  they cannot manage.
+- A second gate in front of the panel. Being signed in says a browser authenticated once; it
+  does not say the account owner is at the keyboard now, which is exactly the gap a shared
+  machine, an abandoned tab or a month-old device cookie opens. Administrators and moderators
+  are asked for their password again after an idle period, configurable in
+  **Settings → Security → Sessions and sign-in** along with the scope and the persistent
+  sign-in ceiling. Working in the panel keeps the window open; walking away closes it. Setting
+  the window to 0 turns the gate off entirely.
+
+### Changed
+
+- Database schema 63: new table `remember_tokens`, with a `CASCADE` foreign key so a deleted
+  account cannot leave a live credential behind. The Python sidecar refuses readiness on any
+  other schema, so both halves must be deployed together — see [MIGRATION.md](docs/MIGRATION.md).
+- Restoring a session from a cookie is deliberately not a credential check. `recent_auth_at`
+  stays unset, so the panel and every destructive account action still ask for the password,
+  exactly as they would after the session had simply expired.
+- `revokeAuthenticationArtifacts()` now includes `remember_tokens`, so a password change, a 2FA
+  change or a deactivated account takes every device's copy with it. Turning persistent sign-in
+  off in the panel revokes the outstanding ones too, rather than only stopping new ones.
+
 ## [2.76.12] - 2026-08-25
 
 ### Added
