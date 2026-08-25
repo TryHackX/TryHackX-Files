@@ -93,7 +93,7 @@ if (!defined('APP_ROOT')) {
 			<div class="error"><?= htmlspecialchars($reauthError, ENT_QUOTES, 'UTF-8') ?></div>
 		<?php endif; ?>
 		<form method="post" autocomplete="off">
-			<input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
+			<input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
 			<input type="hidden" name="action" value="panel_reauth">
 			<label for="reauthPassword"><?= _h('panel.reauth.password') ?></label>
 			<input type="password" id="reauthPassword" name="password" required autofocus

@@ -708,6 +708,76 @@ final class HttpApiTest extends TestCase
 		$this->assertTrue($users['success'] ?? false, 'admin listing should answer the admin');
 	}
 
+	/**
+	 * Coming back on a "stay signed in" cookie restores the session but not the password.
+	 *
+	 * This is the interaction the whole feature rests on, and it cannot be proved by a unit
+	 * test: the browser is closed (its session cookie dropped) and only the device credential
+	 * remains. The panel must recognise the account and still refuse to open, because
+	 * possession of a device is not knowledge of a password.
+	 */
+	public function testADeviceCookieRestoresTheSessionButNotThePanel(): void
+	{
+		Database::setSetting('login_remember_enabled', '1');
+		Database::setSetting('panel_reauth_minutes', 30);
+		Database::setSetting('panel_reauth_scope', 'staff');
+
+		self::$cookies = [];
+		self::$csrf = '';
+		self::refreshCsrf();
+		$signedIn = self::postJson('/api.php?action=user_login', [
+			'username' => 'httpadmin',
+			'password' => 'HttpAdmin1!',
+			'remember' => 3600,
+		]);
+		$this->assertTrue($signedIn['success'] ?? false, json_encode($signedIn));
+		$this->assertArrayHasKey('fh_remember', self::$cookies, 'a duration must issue a cookie');
+		$this->assertStringContainsString(
+			'id="dashFiles"',
+			self::rawRequest('GET', '/panel.php?tab=dashboard')['body'],
+			'a fresh password opens the panel'
+		);
+
+		// Close the browser: the session cookie goes, the device credential stays.
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+
+		$restored = self::rawRequest('GET', '/panel.php?tab=dashboard');
+		$this->assertSame(200, $restored['status'], 'the cookie should restore the session');
+		$this->assertStringNotContainsString('id="dashFiles"', $restored['body'], 'but not open the panel');
+		$this->assertStringContainsString('value="panel_reauth"', $restored['body']);
+
+		self::refreshCsrf();
+		$wrong = self::rawRequest(
+			'POST',
+			'/panel.php',
+			http_build_query([
+				'action' => 'panel_reauth',
+				'_csrf' => self::$csrf,
+				'password' => 'NotThePassword1!',
+			]),
+			['Content-Type: application/x-www-form-urlencoded']
+		);
+		$this->assertStringContainsString('value="panel_reauth"', $wrong['body'], 'a wrong password opens nothing');
+
+		$right = self::rawRequest(
+			'POST',
+			'/panel.php',
+			http_build_query([
+				'action' => 'panel_reauth',
+				'_csrf' => self::$csrf,
+				'password' => 'HttpAdmin1!',
+			]),
+			['Content-Type: application/x-www-form-urlencoded']
+		);
+		// The stream wrapper follows the redirect, so success looks like the panel itself.
+		$this->assertSame(200, $right['status']);
+		$this->assertStringContainsString('id="dashFiles"', $right['body'], 'the right password opens it');
+		$this->assertStringContainsString(
+			'id="dashFiles"',
+			self::rawRequest('GET', '/panel.php?tab=dashboard')['body']
+		);
+	}
+
 	public function testAdminPanelViewsRenderAfterTemplateSplit(): void
 	{
 		$views = [
