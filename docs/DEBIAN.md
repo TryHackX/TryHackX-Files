@@ -152,6 +152,33 @@ The unit reports liveness to systemd every few seconds (`WatchdogSec=120`). A de
 blocks anyway is killed and restarted instead of stalling the queue, and `systemctl status` shows
 the current queue depth.
 
+### Choosing the worker's sandbox
+
+`NoNewPrivileges=true` stops this service — and anything it spawns — from gaining privileges
+through a setuid or setgid program, a file capability or an SELinux transition. It is the reason
+a hypothetical foothold in the worker cannot reach for a local privilege-escalation helper. It
+also applies to nothing else on the machine: Postfix, Dovecot, Apache and any other unit keep
+their own settings, and the only interaction is that `sendmail` and `postdrop`, being children of
+the worker, inherit it.
+
+That is the whole trade. Keep it, and use a socket transport; or drop it, and `PHP mail()` may
+use `postdrop` again:
+
+```bash
+sudo bash scripts/mail-worker-hardening.sh status
+```
+
+Run it from the application directory. `relaxed` writes a drop-in that clears the flag, `strict`
+removes it again, and both reload and restart the service themselves — there is nothing else to
+restart. `status` prints the configured flag and the one the running process actually has, which
+are not the same thing after an edit that was never applied.
+
+This cannot be a control in the panel. `no_new_privs` is one-way for the life of a process, so
+only systemd can decide it, at exec time, from a unit file root owns; giving the web user the
+ability to rewrite that file and restart the service would turn a panel compromise into control
+of a root-owned unit. **Settings → E-mail** therefore reports the current state and prints the
+command, and root runs it.
+
 If a long-running worker is not desired, disable it and create
 `/etc/cron.d/filehost-mail-worker` with exactly this system-cron entry instead:
 

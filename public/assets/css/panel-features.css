@@ -546,6 +546,33 @@ textarea:autofill {
     border-bottom-color: var(--accent);
 }
 
+/* The three commands that switch the mail worker's sandbox. They are shell lines an operator
+   copies, so they get room to breathe and never wrap mid-command; the trailing note explains
+   each one without turning the block into prose. */
+.mail-worker-commands {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+}
+.mail-worker-commands li {
+    margin-bottom: 6px;
+}
+.mail-worker-commands code {
+    display: inline-block;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-size: 0.85rem;
+    overflow-x: auto;
+    max-width: 100%;
+}
+.mail-worker-commands small {
+    display: block;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
 /* Per-section search above a chip list (owner / IP / extension). Kept visually lighter than a
    form field so it reads as a filter on the chips below, not another criterion. */
 .chip-search {

@@ -196,10 +196,28 @@ queued application e-mail.
 Prefer **Local mail server** over `mail()` wherever an MTA runs on the same host. `mail()` reaches
 Postfix through the setgid `postdrop` helper, and the hardened `filehost-mail-worker` unit sets
 `NoNewPrivileges=true`, which strips that bit on exec: `postdrop` then warns about an unwritable
-maildrop and sleeps ten seconds in a loop that never ends, so `mail()` never returns. The worker
-warns about that combination in the journal, restarts itself through the systemd watchdog when a
-delivery blocks anyway, and `FILEHOST_LOCAL_MTA=host:port` moves the local submission endpoint
-when the MTA is not on this host's port 25.
+maildrop and sleeps ten seconds in a loop that never ends, so `mail()` never returns.
+`FILEHOST_LOCAL_MTA=host:port` moves the local submission endpoint when the MTA is not on this
+host's port 25.
+
+Settings → E-mail shows what the worker actually reports — its last pass, its PHP version and
+whether its sandbox is strict or relaxed — because the panel process cannot read that itself:
+`no_new_privs` belongs to one process tree and PHP-FPM is not that tree. When `PHP mail()` is
+selected, a safeguard decides what happens on a host where it cannot work: report an error
+(default), divert to the local mail server, or call `mail()` anyway for an agent that needs no
+setgid helper.
+
+To use `PHP mail()` with a setgid helper the sandbox has to go, and only root can do that — the
+kernel flag is one-way for the life of a process and the unit belongs to root, so a panel button
+would mean letting the web user rewrite a root-owned unit. Run this from the application
+directory instead; it rewrites the drop-in, reloads and restarts the service by itself:
+
+```bash
+sudo bash scripts/mail-worker-hardening.sh status
+```
+
+`relaxed` drops `NoNewPrivileges`, `strict` restores the shipped hardening, and `status` reports
+both the configured flag and the one the running worker actually has.
 
 The preferred Debian setup is the long-running `filehost-mail-worker` systemd service installed
 by `scripts/install-debian.sh`. As an alternative, disable that service and place this entry in

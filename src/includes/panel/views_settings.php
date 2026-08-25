@@ -1081,8 +1081,16 @@ if (!defined('APP_ROOT')) {
 								<strong><?= _h(!empty($mailRuntime['no_new_privs']) ? 'panel.set.mail_worker_strict' : 'panel.set.mail_worker_relaxed') ?></strong>
 								<br>
 								<?= _h(!empty($mailRuntime['no_new_privs']) ? 'panel.set.mail_worker_switch' : 'panel.set.mail_worker_switch_back') ?>
-								<code>sudo bash scripts/mail-worker-hardening.sh <?= !empty($mailRuntime['no_new_privs']) ? 'relaxed' : 'strict' ?></code>
+								<br><?= _h('panel.set.mail_worker_run_in_app_dir') ?>
 							</small>
+							<ul class="mail-worker-commands">
+								<li><code>sudo bash scripts/mail-worker-hardening.sh status</code>
+									<small><?= _h('panel.set.mail_worker_cmd_status') ?></small></li>
+								<li><code>sudo bash scripts/mail-worker-hardening.sh relaxed</code>
+									<small><?= _h('panel.set.mail_worker_cmd_relaxed') ?></small></li>
+								<li><code>sudo bash scripts/mail-worker-hardening.sh strict</code>
+									<small><?= _h('panel.set.mail_worker_cmd_strict') ?></small></li>
+							</ul>
 						<?php endif; ?>
 					</div>
 					<div class="form-group">
