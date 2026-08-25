@@ -7,6 +7,24 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.76.11] - 2026-08-25
+
+### Added
+
+- **Settings -> E-mail** gains a safeguard for `PHP mail()`, because that method cannot be made
+  to work everywhere and cannot simply be forbidden either. `mail()` hands the message to
+  whatever `sendmail_path` points at; with Postfix that is a setgid `postdrop`, which
+  `NoNewPrivileges` disarms, after which the helper retries an unwritable maildrop every ten
+  seconds and `mail()` never returns. Other agents - msmtp, ssmtp, an exim that needs no
+  privilege transition - are perfectly happy under the same flag. The administrator therefore
+  chooses what happens in that one combination: report an error instead of sending (the
+  default, so a queue can never be swallowed by a blocking call), divert to the local mail
+  server, or call `mail()` anyway. It has no effect on any other host or transport, and none at
+  all outside a hardened service, where the flag is not set.
+- The worker warns once an hour, and only for the combination nothing can rescue: `mail()`
+  under `NoNewPrivileges` with the safeguard switched off. The other cases either work or fail
+  with their own message, so they no longer produce a second, redundant line.
+
 ## [2.76.10] - 2026-08-25
 
 ### Fixed
