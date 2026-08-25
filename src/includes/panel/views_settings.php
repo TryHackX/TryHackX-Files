@@ -1062,6 +1062,29 @@ if (!defined('APP_ROOT')) {
 			<?php elseif ($subTab === 'email'): ?>
 				<div class="settings-section">
 					<h3><i class="fa-solid fa-envelope"></i> <?= _h('panel.set.mail_config') ?></h3>
+					<?php
+					// What the worker itself reports. This process cannot read it directly:
+					// NoNewPrivileges belongs to one process tree, and PHP-FPM is not that tree,
+					// so it always answers "no" here no matter how the worker is running.
+					$mailRuntime = MailService::runtime();
+					?>
+					<div class="form-group">
+						<?php if ($mailRuntime === null): ?>
+							<small><i class="fa-solid fa-circle-question"></i> <?= _h('panel.set.mail_worker_unknown') ?></small>
+						<?php else: ?>
+							<small>
+								<i class="fa-solid fa-<?= !empty($mailRuntime['stale']) ? 'triangle-exclamation' : 'circle-check' ?>"></i>
+								<?= _h(!empty($mailRuntime['stale']) ? 'panel.set.mail_worker_stale' : 'panel.set.mail_worker_live') ?>
+								<?= htmlspecialchars(gmdate('Y-m-d H:i:s', (int) $mailRuntime['at']), ENT_QUOTES, 'UTF-8') ?> UTC
+								&middot; PHP <?= htmlspecialchars((string) ($mailRuntime['php'] ?? '?'), ENT_QUOTES, 'UTF-8') ?>
+								&middot; <?= _h('panel.set.mail_worker_hardening') ?>:
+								<strong><?= _h(!empty($mailRuntime['no_new_privs']) ? 'panel.set.mail_worker_strict' : 'panel.set.mail_worker_relaxed') ?></strong>
+								<br>
+								<?= _h(!empty($mailRuntime['no_new_privs']) ? 'panel.set.mail_worker_switch' : 'panel.set.mail_worker_switch_back') ?>
+								<code>sudo bash scripts/mail-worker-hardening.sh <?= !empty($mailRuntime['no_new_privs']) ? 'relaxed' : 'strict' ?></code>
+							</small>
+						<?php endif; ?>
+					</div>
 					<div class="form-group">
 						<label><?= _h('panel.set.mail_method') ?></label>
 						<select name="email_method" id="emailMethod" data-fh-change="toggleEmailFields()" class="input">

@@ -24,6 +24,12 @@ final class MailService
 	/** Resolved once per process; the kernel flag cannot be cleared once set. */
 	private static ?bool $noNewPrivileges = null;
 
+	/** How long a published worker snapshot is still evidence that the worker is alive. */
+	public const RUNTIME_FRESH_SECONDS = 120;
+
+	private static string $runtimeFingerprint = '';
+	private static int $runtimeWrittenAt = 0;
+
 	/**
 	 * Render and enqueue an e-mail.
 	 *
@@ -629,6 +635,86 @@ final class MailService
 			. 'there and mail() would block instead of failing. Choose the local mail server in '
 			. 'Settings -> E-mail, or change the safeguard for PHP mail() if this host uses a '
 			. 'mail agent that needs no privilege transition.'];
+	}
+
+	/**
+	 * Where the worker leaves a snapshot of what it is actually doing.
+	 *
+	 * The panel cannot read this from its own process: `NoNewPrivileges` is a property of one
+	 * process tree, and PHP-FPM answers `0` while the worker answers `1`. Neither can it ask
+	 * the worker, which has no socket. So the worker writes what it sees into the data
+	 * directory it already owns, and the panel reads that file.
+	 */
+	private static function runtimePath(): string
+	{
+		$directory = defined('DATA_DIR') ? DATA_DIR : dirname(__DIR__, 3) . '/data';
+		return $directory . DIRECTORY_SEPARATOR . 'mail-worker.json';
+	}
+
+	/**
+	 * Publish what this worker sees, atomically and only when it is worth writing.
+	 *
+	 * @param array<string,mixed> $queue
+	 */
+	public static function publishRuntime(array $queue, int $minimumIntervalSeconds = 30): void
+	{
+		$now = time();
+		$snapshot = [
+			'at' => $now,
+			'pid' => getmypid(),
+			'host' => gethostname() ?: '',
+			'php' => PHP_VERSION,
+			'version' => defined('APP_VERSION') ? APP_VERSION : '',
+			'no_new_privs' => self::noNewPrivileges(),
+			'supervised' => (string) (getenv('NOTIFY_SOCKET') ?: '') !== '',
+			'method' => self::method(),
+			'guard' => self::phpMailGuard(),
+			'queue' => $queue,
+		];
+		$fingerprint = $snapshot;
+		unset($fingerprint['at'], $fingerprint['queue']);
+		$fingerprint = md5((string) json_encode($fingerprint));
+		if (self::$runtimeFingerprint === $fingerprint
+			&& $now - self::$runtimeWrittenAt < max(5, $minimumIntervalSeconds)) {
+			return;
+		}
+
+		$path = self::runtimePath();
+		$temporary = $path . '.' . getmypid() . '.tmp';
+		$encoded = json_encode($snapshot, JSON_UNESCAPED_SLASHES);
+		if ($encoded === false || @file_put_contents($temporary, $encoded, LOCK_EX) === false) {
+			return;
+		}
+		if (!@rename($temporary, $path)) {
+			@unlink($temporary);
+			return;
+		}
+		@chmod($path, 0640);
+		self::$runtimeFingerprint = $fingerprint;
+		self::$runtimeWrittenAt = $now;
+	}
+
+	/**
+	 * The worker's last published snapshot, or null when there is none to read.
+	 *
+	 * @return array<string,mixed>|null
+	 */
+	public static function runtime(): ?array
+	{
+		$path = self::runtimePath();
+		if (!is_file($path) || !is_readable($path)) {
+			return null;
+		}
+		$raw = @file_get_contents($path);
+		if ($raw === false) {
+			return null;
+		}
+		$decoded = json_decode($raw, true);
+		if (!is_array($decoded) || !isset($decoded['at'])) {
+			return null;
+		}
+		$decoded['stale'] = (time() - (int) $decoded['at']) > self::RUNTIME_FRESH_SECONDS;
+		return $decoded;
 	}
 
 	/** What to do when `php` is configured on a host where `mail()` cannot work. */

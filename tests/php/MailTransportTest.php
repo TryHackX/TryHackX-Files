@@ -213,6 +213,40 @@ final class MailTransportTest extends RepoTestCase
 		$this->assertSame('off', MailService::phpMailGuard());
 	}
 
+	/**
+	 * The panel cannot read the worker's sandbox, so the worker has to write it down.
+	 *
+	 * NoNewPrivileges belongs to one process tree: PHP-FPM answers "no" however the worker is
+	 * running, and there is no socket to ask over. The snapshot in the data directory is the
+	 * only honest source, which also means a worker that stopped must read as stale rather
+	 * than as good news.
+	 */
+	public function testTheWorkerSnapshotIsReadableAndGoesStale(): void
+	{
+		$path = DATA_DIR . '/mail-worker.json';
+		$this->scratch[] = $path;
+		$this->assertNull(MailService::runtime(), 'no worker has reported yet');
+
+		MailService::publishRuntime(['pending' => 3, 'sending' => 1, 'dead' => 0]);
+
+		$runtime = MailService::runtime();
+		$this->assertIsArray($runtime);
+		$this->assertFalse($runtime['stale']);
+		$this->assertSame(getmypid(), $runtime['pid']);
+		$this->assertSame(PHP_VERSION, $runtime['php']);
+		$this->assertSame('local', $runtime['method']);
+		$this->assertSame(3, $runtime['queue']['pending']);
+		$this->assertIsBool($runtime['no_new_privs']);
+
+		$aged = json_decode((string) file_get_contents($path), true);
+		$aged['at'] = time() - MailService::RUNTIME_FRESH_SECONDS - 1;
+		file_put_contents($path, json_encode($aged));
+		$this->assertTrue(MailService::runtime()['stale']);
+
+		file_put_contents($path, 'not json at all');
+		$this->assertNull(MailService::runtime(), 'a damaged snapshot is no snapshot');
+	}
+
 	/** Start the stub, point the local transport at it, and return its transcript path. */
 	private function startStubServer(string $rcptReply = '250 2.1.5 Ok'): string
 	{

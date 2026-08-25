@@ -132,6 +132,12 @@ do {
 		$result['queue']['dead']
 	));
 
+	// systemd sees the status line; the panel cannot. NoNewPrivileges is a property of one
+	// process tree, so PHP-FPM answers 0 while this process answers 1, and there is no socket
+	// to ask over. Leaving a snapshot in the data directory is how Settings -> E-mail can show
+	// what is actually in force instead of guessing.
+	MailService::publishRuntime($result['queue']);
+
 	// Failures are reported once, not once per attempt: the transport outage in August 2026
 	// produced a warning every ten seconds for four days and left a 3.4 GB journal behind.
 	// A dead letter is different — each message reaches that state exactly once, and losing
