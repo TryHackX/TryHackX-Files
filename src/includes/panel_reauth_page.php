@@ -7,11 +7,17 @@
  * perfectly valid session with no recent evidence that the person at the keyboard is the
  * account owner. The public site is content with that; the panel is not.
  *
+ * The page dresses itself out of the site's own stylesheet rather than a private copy of the
+ * palette: same background layer, same card, same input and button classes as the sign-in
+ * modal, and the same cookie-driven light theme the panel itself uses. A gate that looks
+ * like a different product is a gate people hesitate to type their password into.
+ *
  * Expects: $reauthError (string), $reauthUsername (string), $appUrl (string).
  */
 if (!defined('APP_ROOT')) {
 	exit;
 }
+$reauthTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
 ?>
 <!DOCTYPE html>
 <html lang="<?= class_exists('Lang') ? Lang::current() : 'pl' ?>">
@@ -21,87 +27,82 @@ if (!defined('APP_ROOT')) {
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta name="robots" content="noindex, nofollow">
 	<title><?= _h('panel.reauth.title') ?> - <?= htmlspecialchars(defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files'), ENT_QUOTES, 'UTF-8') ?></title>
+	<link rel="stylesheet" href="<?= htmlspecialchars($appUrl, ENT_QUOTES, 'UTF-8') ?>/assets/css/index.css?v=<?= APP_VERSION ?>">
 	<style>
-		:root { color-scheme: dark; }
-		* { margin: 0; padding: 0; box-sizing: border-box; }
-		body {
-			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-			background: #0b0c10;
-			color: #e6e8ef;
+		/*
+		 * Everything visual comes from index.css. What is left here is the one thing that
+		 * file cannot provide: this card is a whole page, not an overlay, so it needs its own
+		 * shell. The offsets copy .auth-modal deliberately — raised toward the top on
+		 * desktop, centred on phones — so the gate sits exactly where the sign-in box does.
+		 */
+		.reauth-shell {
 			min-height: 100vh;
 			display: flex;
-			align-items: center;
+			align-items: flex-start;
 			justify-content: center;
-			padding: 24px;
+			padding: 6vh 16px 24px;
 		}
-		.box {
-			background: #15171f;
-			border: 1px solid rgba(255, 255, 255, .08);
-			border-radius: 18px;
-			padding: 36px;
-			max-width: 420px;
-			width: 100%;
-			box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+
+		.reauth-box {
+			max-width: 440px;
 		}
-		h1 { font-size: 20px; margin-bottom: 8px; }
-		p { color: #9aa1b1; font-size: 14px; line-height: 1.55; margin-bottom: 20px; }
-		label { display: block; font-size: 13px; color: #9aa1b1; margin-bottom: 6px; }
-		input[type=password] {
-			width: 100%;
-			padding: 12px 14px;
-			border-radius: 10px;
-			border: 1px solid rgba(255, 255, 255, .12);
-			background: #0f1118;
-			color: #e6e8ef;
-			font-size: 15px;
-		}
-		input[type=password]:focus { outline: 2px solid #6366f1; outline-offset: 1px; }
-		button {
-			width: 100%;
-			margin-top: 16px;
-			padding: 12px 14px;
-			border: 0;
-			border-radius: 10px;
-			background: #6366f1;
-			color: #fff;
-			font-size: 15px;
+
+		.reauth-who {
+			color: var(--text);
 			font-weight: 600;
-			cursor: pointer;
 		}
-		button:hover { background: #4f52e0; }
-		.error {
-			background: rgba(239, 68, 68, .12);
-			border: 1px solid rgba(239, 68, 68, .35);
-			color: #fca5a5;
-			padding: 10px 12px;
-			border-radius: 10px;
-			font-size: 14px;
-			margin-bottom: 16px;
+
+		.reauth-back {
+			display: block;
+			text-align: center;
+			margin-top: 18px;
+			font-size: 0.85rem;
+			color: var(--text-secondary);
+			text-decoration: none;
+			transition: color 0.2s;
 		}
-		.who { color: #e6e8ef; font-weight: 600; }
-		.back { display: block; text-align: center; margin-top: 18px; font-size: 13px; color: #9aa1b1; text-decoration: none; }
-		.back:hover { color: #e6e8ef; }
+
+		.reauth-back:hover {
+			color: var(--text);
+		}
+
+		@media (max-width: 600px) {
+			.reauth-shell {
+				align-items: center;
+				padding: 16px;
+			}
+		}
 	</style>
 </head>
 
-<body>
-	<div class="box">
-		<h1><?= _h('panel.reauth.title') ?></h1>
-		<p><?= _h('panel.reauth.intro') ?>
-			<span class="who"><?= htmlspecialchars($reauthUsername, ENT_QUOTES, 'UTF-8') ?></span></p>
-		<?php if ($reauthError !== ''): ?>
-			<div class="error"><?= htmlspecialchars($reauthError, ENT_QUOTES, 'UTF-8') ?></div>
-		<?php endif; ?>
-		<form method="post" autocomplete="off">
-			<input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
-			<input type="hidden" name="action" value="panel_reauth">
-			<label for="reauthPassword"><?= _h('panel.reauth.password') ?></label>
-			<input type="password" id="reauthPassword" name="password" required autofocus
-				autocomplete="current-password" maxlength="<?= (int) InputLimits::accountPasswordMax() ?>">
-			<button type="submit"><?= _h('panel.reauth.submit') ?></button>
-		</form>
-		<a class="back" href="<?= htmlspecialchars($appUrl, ENT_QUOTES, 'UTF-8') ?>/"><?= _h('panel.reauth.back') ?></a>
-	</div>
+<body class="<?= $reauthTheme ?>">
+	<?php require __DIR__ . '/bg_decoration.php'; ?>
+
+	<main class="reauth-shell">
+		<div class="auth-box reauth-box">
+			<h3><?= _h('panel.reauth.title') ?></h3>
+			<p><?= _h('panel.reauth.intro') ?>
+				<span class="reauth-who"><?= htmlspecialchars($reauthUsername, ENT_QUOTES, 'UTF-8') ?></span></p>
+
+			<?php if ($reauthError !== ''): ?>
+				<div class="auth-message error show"><?= htmlspecialchars($reauthError, ENT_QUOTES, 'UTF-8') ?></div>
+			<?php endif; ?>
+
+			<form method="post" autocomplete="off">
+				<input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
+				<input type="hidden" name="action" value="panel_reauth">
+				<div class="form-group">
+					<label for="reauthPassword"><?= _h('panel.reauth.password') ?></label>
+					<input class="auth-input" type="password" id="reauthPassword" name="password" required autofocus
+						autocomplete="current-password" maxlength="<?= (int) InputLimits::accountPasswordMax() ?>">
+				</div>
+				<button class="auth-submit" type="submit"><?= _h('panel.reauth.submit') ?></button>
+			</form>
+
+			<a class="reauth-back"
+				href="<?= htmlspecialchars($appUrl, ENT_QUOTES, 'UTF-8') ?>/"><?= _h('panel.reauth.back') ?></a>
+		</div>
+	</main>
 </body>
 
 </html>

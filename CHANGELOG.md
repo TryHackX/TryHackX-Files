@@ -7,6 +7,23 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.79.1] - 2026-08-25
+
+### Changed
+
+- The panel's re-authentication gate now looks like the rest of the product. It was a
+  standalone page carrying its own private copy of the palette — hand-picked hex values, a
+  different font stack, a card perfectly centred in the viewport — so the one screen that asks
+  for a password was the one screen that did not look like the site. It now loads the site's
+  own stylesheet and reuses the sign-in modal's card, input and button classes, renders the
+  same drifting-orb background as the public pages, and follows the same placement rule the
+  modal documents: raised toward the top on desktop, centred on phones.
+- The gate also honours the `theme` cookie the panel already sets, so someone working in the
+  light theme is no longer thrown onto a dark page halfway through.
+- The background layer moved into `src/includes/bg_decoration.php`. It was markup duplicated
+  between the site header and nothing else; now the gate renders the identical element instead
+  of an approximation that would drift the first time the palette changed.
+
 ## [2.79.0] - 2026-08-25
 
 ### Added

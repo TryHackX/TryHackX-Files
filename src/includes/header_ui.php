@@ -1,9 +1,4 @@
-<div class="bg-wrap">
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-    <div class="orb orb-3"></div>
-    <div class="bg-grid"></div>
-</div>
+<?php require __DIR__ . '/bg_decoration.php'; ?>
 <header>
     <a href="<?= $appUrl ?>/" class="logo">
         <div class="logo-icon">

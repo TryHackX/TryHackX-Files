@@ -746,6 +746,20 @@ final class HttpApiTest extends TestCase
 		$this->assertStringNotContainsString('id="dashFiles"', $restored['body'], 'but not open the panel');
 		$this->assertStringContainsString('value="panel_reauth"', $restored['body']);
 
+		// The gate is the one page a visitor is asked to type a password into, so it has to
+		// look like the rest of the product: the site's own stylesheet and background layer,
+		// the sign-in modal's card and controls, and the same raised-not-centred placement.
+		$this->assertStringContainsString('/assets/css/index.css', $restored['body']);
+		$this->assertStringContainsString('class="bg-wrap"', $restored['body']);
+		$this->assertStringContainsString('class="auth-box reauth-box"', $restored['body']);
+		$this->assertStringContainsString('class="auth-input"', $restored['body']);
+		$this->assertStringContainsString('class="auth-submit"', $restored['body']);
+		$this->assertMatchesRegularExpression(
+			'/\.reauth-shell\s*\{[^}]*align-items:\s*flex-start/',
+			$restored['body'],
+			'the card sits below the top edge, not dead centre'
+		);
+
 		self::refreshCsrf();
 		$wrong = self::rawRequest(
 			'POST',
