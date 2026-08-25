@@ -464,8 +464,17 @@ return [
 	'mail.change_intro' => 'Poproszono o zmianę Twojego adresu e-mail na <b>:email</b>.',
 	'mail.change_click' => 'Kliknij w poniższy link, aby potwierdzić zmianę:',
 	'mail.change_ignore' => 'Jeśli to nie Ty, zignoruj tę wiadomość.',
-	'mail.change_sent' => 'Wiadomość potwierdzająca została wysłana na nowy adres',
+	'mail.change_sent' => 'Wiadomość z potwierdzeniem wysłana na obecny adres',
 	'mail.change_send_failed' => 'Nie udało się wysłać wiadomości potwierdzającej',
+	'mail.change_verify_old_subject' => 'Zatwierdź zmianę adresu e-mail - :app',
+	'mail.change_verify_old_intro' => 'Ktoś poprosił o przeniesienie tego konta na <b>:email</b>. Nic jeszcze nie zostało zmienione.',
+	'mail.change_verify_old_warning' => 'Jeżeli to nie Ty, zignoruj tę wiadomość i zmień hasło: osoba, która o to poprosiła, już je zna.',
+	'mail.change_done_subject' => 'Adres e-mail zmieniony - :app',
+	'mail.change_done_intro' => 'Adres tego konta został zmieniony z <b>:old</b> na <b>:new</b>.',
+	'mail.change_done_warning' => 'Jeżeli to nie Ty, natychmiast skontaktuj się z administratorem. W ramach zmiany wylogowano wszystkie sesje i unieważniono klucze API.',
+	'api.email_change_stage_two' => 'Zatwierdzone. Drugi link czeka w nowej skrzynce.',
+	'api.email_change_same' => 'To już jest adres tego konta.',
+	'panel.acct.email_stage_two' => 'Zatwierdzone z obecnego adresu. Otwórz link wysłany na nowy adres, aby dokończyć.',
 
 	/* ================================================================
 	 * PANEL (admin / moderator / użytkownik)

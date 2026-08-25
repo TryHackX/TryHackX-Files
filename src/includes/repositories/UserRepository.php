@@ -240,7 +240,9 @@ final class UserRepository
 				$activLink = APP_URL . '/api.php?action=verify_email&token=' . $activationToken;
 
 				$subject = __('mail.activation_subject', ['app' => $appName]);
-				$body = "<p style='margin-bottom: 24px;'>" . __('mail.hello', ['name' => $username]) . "</p>";
+				$body = "<p style='margin-bottom: 24px;'>" . __('mail.hello', [
+					'name' => htmlspecialchars($username, ENT_QUOTES, 'UTF-8'),
+				]) . "</p>";
 				$body .= "<p style='margin-bottom: 24px;'>" . __('mail.activation_intro', ['app' => $appName]) . "</p>";
 				$body .= "<div style='text-align: center; margin: 32px 0;'>";
 				$body .= "<a href='$activLink' style='display: inline-block; padding: 12px 32px; background-color: #3182ce; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; font-size: 16px; box-shadow: 0 2px 4px rgba(49,130,206,0.3);'>" . __('mail.activate_button') . "</a>";
@@ -248,7 +250,7 @@ final class UserRepository
 				$body .= "<p style='color: #718096; font-size: 14px;'>" . __('mail.link_valid_hours', ['hours' => Database::getSetting('email_verification_lifetime', '24')]) . "</p>";
 				$body .= "<p style='margin-top: 32px; font-size: 12px; color: #a0aec0;'>" . __('mail.button_fallback') . "<br><a href='$activLink' style='word-break: break-all; overflow-wrap: break-word; color: #3182ce;'>$activLink</a></p>";
 
-				if (Database::sendEmail(
+				if (Database::sendHtmlEmail(
 					$email,
 					$subject,
 					$body,
@@ -364,7 +366,7 @@ final class UserRepository
 		try {
 			$pdo->beginTransaction();
 			$userQuery = $pdo->prepare(
-				"SELECT `last_email_change_at` FROM `{$table}` WHERE `id` = ? FOR UPDATE"
+				"SELECT `email`, `last_email_change_at` FROM `{$table}` WHERE `id` = ? FOR UPDATE"
 			);
 			$userQuery->execute([$userId]);
 			$user = $userQuery->fetch(PDO::FETCH_ASSOC);
@@ -386,11 +388,22 @@ final class UserRepository
 				return ['success' => false, 'error' => __('api.email_taken')];
 			}
 
+			$currentEmail = (string) $user['email'];
+			if (!filter_var($currentEmail, FILTER_VALIDATE_EMAIL)) {
+				$pdo->rollBack();
+				return ['success' => false, 'error' => __('api.user_not_found')];
+			}
+			if (strcasecmp($currentEmail, $newEmail) === 0) {
+				$pdo->rollBack();
+				return ['success' => false, 'error' => __('api.email_change_same')];
+			}
+
 			$save = $pdo->prepare(
 				"UPDATE `{$table}`
 				 SET `pending_email` = ?,
 				     `email_change_token` = ?,
-				     `email_change_expires_at` = ?
+				     `email_change_expires_at` = ?,
+				     `email_change_stage` = 'old'
 				 WHERE `id` = ?"
 			);
 			$save->execute([$newEmail, $tokenHash, $expiresAt, $userId]);
@@ -406,26 +419,30 @@ final class UserRepository
 			return ['success' => false, 'error' => __('api.db_error')];
 		}
 
+		// Stage one goes to the address on file, never to the new one. That is the whole point:
+		// whoever is asking has to prove they can read the mailbox the account already uses, and
+		// the owner hears about the attempt even if the answer is no.
 		$link = APP_URL . '/api.php?action=user_verify_email_change&token=' . $token;
 		$appName = defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files');
-		$subject = __('mail.change_subject', ['app' => $appName]);
-		$body = '<p>' . __('mail.change_intro', ['email' => $newEmail]) . '</p>';
+		$subject = __('mail.change_verify_old_subject', ['app' => $appName]);
+		$body = '<p>' . __('mail.change_verify_old_intro', ['email' => $newEmail]) . '</p>';
 		$body .= '<p>' . __('mail.change_click') . '</p>';
 		$body .= "<p><a href='" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "'>"
 			. htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>';
-		$body .= '<p>' . __('mail.change_ignore') . '</p>';
+		$body .= '<p>' . __('mail.change_verify_old_warning') . '</p>';
 
-		if (!Database::sendEmail(
-			$newEmail,
+		if (!Database::sendHtmlEmail(
+			$currentEmail,
 			$subject,
 			$body,
-			'email-change:' . $tokenHash
+			'email-change-old:' . $tokenHash
 		)) {
 			$clear = $pdo->prepare(
 				"UPDATE `{$table}`
 				 SET `pending_email` = NULL,
 				     `email_change_token` = NULL,
-				     `email_change_expires_at` = NULL
+				     `email_change_expires_at` = NULL,
+				     `email_change_stage` = NULL
 				 WHERE `id` = ? AND `email_change_token` = ?"
 			);
 			$clear->execute([$userId, $tokenHash]);
@@ -442,10 +459,11 @@ final class UserRepository
 		}
 		$table = Database::table('users');
 		$tokenHash = hash('sha256', $token);
+		$lifetime = max(1, (int) Database::getSetting('email_change_token_lifetime', '15')) * 60;
 		try {
 			$pdo->beginTransaction();
 			$stmt = $pdo->prepare(
-				"SELECT `id`, `email`, `pending_email`
+				"SELECT `id`, `email`, `pending_email`, `email_change_stage`
 				 FROM `{$table}`
 				 WHERE `email_change_token` = ?
 				   AND `email_change_expires_at` > ?
@@ -458,12 +476,53 @@ final class UserRepository
 				return ['success' => false, 'error' => __('api.link_expired')];
 			}
 
+			// Stage one: the address on file has agreed. Nothing changes yet — a second link
+			// goes to the new address, because agreeing to hand the account over is not the
+			// same as proving the new mailbox exists and is readable.
+			if ((string) $user['email_change_stage'] === 'old') {
+				$nextToken = bin2hex(random_bytes(32));
+				$advance = $pdo->prepare(
+					"UPDATE `{$table}`
+					 SET `email_change_token` = ?,
+					     `email_change_expires_at` = ?,
+					     `email_change_stage` = 'new'
+					 WHERE `id` = ? AND `email_change_token` = ?"
+				);
+				$advance->execute([
+					hash('sha256', $nextToken),
+					time() + $lifetime,
+					$user['id'],
+					$tokenHash,
+				]);
+				if ($advance->rowCount() !== 1) {
+					$pdo->rollBack();
+					return ['success' => false, 'error' => __('api.link_expired')];
+				}
+				$pdo->commit();
+
+				if (!self::sendEmailChangeStageTwo(
+					(string) $user['pending_email'],
+					$nextToken
+				)) {
+					self::cancelEmailChange((int) $user['id']);
+					return ['success' => false, 'error' => __('mail.change_send_failed')];
+				}
+				return [
+					'success' => true,
+					'stage' => 'new',
+					'message' => __('api.email_change_stage_two'),
+					'user_id' => (int) $user['id'],
+					'email' => (string) $user['pending_email'],
+				];
+			}
+
 			$claim = $pdo->prepare(
 				"UPDATE `{$table}`
 				 SET `email` = ?,
 				     `pending_email` = NULL,
 				     `email_change_token` = NULL,
 				     `email_change_expires_at` = NULL,
+				     `email_change_stage` = NULL,
 				     `last_email_change_at` = ?
 				 WHERE `id` = ? AND `email_change_token` = ?"
 			);
@@ -475,17 +534,89 @@ final class UserRepository
 			}
 			$pdo->commit();
 			RegistrationGuard::reserve((string) $user['email'], (int) $user['id']);
+			self::announceEmailChange(
+				(string) $user['email'],
+				(string) $user['pending_email'],
+				$tokenHash
+			);
 			return [
 				'success' => true,
+				'stage' => 'done',
 				'message' => __('api.email_change_success'),
 				'user_id' => (int) $user['id'],
 				'email' => (string) $user['pending_email'],
+				'previous_email' => (string) $user['email'],
 			];
 		} catch (Throwable $e) {
 			if ($pdo->inTransaction()) {
 				$pdo->rollBack();
 			}
 			return ['success' => false, 'error' => __('api.db_error')];
+		}
+	}
+
+	/** Stage two: prove the new mailbox is real and reachable. */
+	private static function sendEmailChangeStageTwo(string $newEmail, string $token): bool
+	{
+		$link = APP_URL . '/api.php?action=user_verify_email_change&token=' . $token;
+		$appName = defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files');
+		$body = '<p>' . __('mail.change_intro', ['email' => $newEmail]) . '</p>';
+		$body .= '<p>' . __('mail.change_click') . '</p>';
+		$body .= "<p><a href='" . htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . "'>"
+			. htmlspecialchars($link, ENT_QUOTES, 'UTF-8') . '</a></p>';
+		$body .= '<p>' . __('mail.change_ignore') . '</p>';
+
+		return Database::sendHtmlEmail(
+			$newEmail,
+			__('mail.change_subject', ['app' => $appName]),
+			$body,
+			'email-change-new:' . hash('sha256', $token)
+		);
+	}
+
+	/**
+	 * Tell both addresses that the move happened.
+	 *
+	 * The old one matters most: it is the last message that mailbox will ever receive from this
+	 * account, and it is what turns a successful takeover from something the owner discovers
+	 * weeks later into something they read the same minute.
+	 */
+	private static function announceEmailChange(
+		string $oldEmail,
+		string $newEmail,
+		string $reference
+	): void {
+		$appName = defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files');
+		$subject = __('mail.change_done_subject', ['app' => $appName]);
+		$body = '<p>' . __('mail.change_done_intro', [
+			'old' => htmlspecialchars($oldEmail, ENT_QUOTES, 'UTF-8'),
+			'new' => htmlspecialchars($newEmail, ENT_QUOTES, 'UTF-8'),
+		]) . '</p>';
+		$body .= '<p>' . __('mail.change_done_warning') . '</p>';
+
+		foreach (['old' => $oldEmail, 'new' => $newEmail] as $which => $recipient) {
+			Database::sendHtmlEmail($recipient, $subject, $body, 'email-change-done:' . $which . ':' . $reference);
+		}
+	}
+
+	/** Drop a half-finished change so the account is not left mid-move. */
+	private static function cancelEmailChange(int $userId): void
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return;
+		}
+		try {
+			$pdo->prepare(
+				"UPDATE `" . Database::table('users') . "`
+				 SET `pending_email` = NULL,
+				     `email_change_token` = NULL,
+				     `email_change_expires_at` = NULL,
+				     `email_change_stage` = NULL
+				 WHERE `id` = ?"
+			)->execute([$userId]);
+		} catch (Throwable $e) {
+			error_log('Could not cancel a pending e-mail change: ' . $e->getMessage());
 		}
 	}
 

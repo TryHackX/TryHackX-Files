@@ -784,21 +784,27 @@ final class AuthController
 		$token = $_GET['token'] ?? '';
 		$result = Database::confirmEmailChange($token);
 
-		// Redirect to panel or show message
-		if ($result['success']) {
-			// Confirmed from the *new* address, so the account holder should see it in the app
-			// too — the old address is no longer where anything arrives.
-			if (isset($_SESSION['user_id'])) {
-				Notifications::send((int) $_SESSION['user_id'], 'security.email', [
-					'subject' => (string) ($result['email'] ?? ''),
-					'link' => APP_URL . '/panel.php?tab=user',
-				]);
-			}
-			// Ideally redirect to panel with success message
-			header('Location: panel.php?tab=user&msg=email_changed');
-		} else {
+		if (!$result['success']) {
 			header('Location: panel.php?tab=user&err=' . urlencode($result['error']));
+			exit;
 		}
+
+		// Halfway: the address on file agreed, and a link is now waiting in the new mailbox.
+		// Nothing has moved yet, so nothing is announced yet either.
+		if (($result['stage'] ?? 'done') === 'new') {
+			header('Location: panel.php?tab=user&msg=email_change_stage_two');
+			exit;
+		}
+
+		// Confirmed from the new address, so the account holder should see it in the app
+		// too — the old address is no longer where anything arrives.
+		if (isset($_SESSION['user_id'])) {
+			Notifications::send((int) $_SESSION['user_id'], 'security.email', [
+				'subject' => (string) ($result['email'] ?? ''),
+				'link' => APP_URL . '/panel.php?tab=user',
+			]);
+		}
+		header('Location: panel.php?tab=user&msg=email_changed');
 		exit;
 	}
 
@@ -941,7 +947,7 @@ final class AuthController
 		$body .= '<p>' . $translate('mail.link_valid_minutes', ['minutes' => 15]) . '</p>';
 		$body .= '<p><small>' . $translate('mail.change_ignore') . '</small></p>';
 
-		if (Database::sendEmail(
+		if (Database::sendHtmlEmail(
 			$user['email'],
 			$subject,
 			$body,

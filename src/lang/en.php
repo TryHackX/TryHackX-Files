@@ -462,8 +462,17 @@ return [
 	'mail.change_intro' => 'You requested to change your email to <b>:email</b>.',
 	'mail.change_click' => 'Click the link below to confirm this change:',
 	'mail.change_ignore' => 'If you did not request this, please ignore this email.',
-	'mail.change_sent' => 'Confirmation email sent to the new address',
+	'mail.change_sent' => 'Confirmation email sent to your current address',
 	'mail.change_send_failed' => 'Failed to send the confirmation email',
+	'mail.change_verify_old_subject' => 'Approve an email change - :app',
+	'mail.change_verify_old_intro' => 'Someone asked to move this account to <b>:email</b>. Nothing has changed yet.',
+	'mail.change_verify_old_warning' => 'If this was not you, ignore this message and change your password: whoever asked already knows it.',
+	'mail.change_done_subject' => 'Email address changed - :app',
+	'mail.change_done_intro' => 'The address on this account was changed from <b>:old</b> to <b>:new</b>.',
+	'mail.change_done_warning' => 'If this was not you, contact the administrator immediately. Every session and API key was signed out as part of the change.',
+	'api.email_change_stage_two' => 'Approved. A second link is waiting in the new mailbox.',
+	'api.email_change_same' => 'That is already the address on this account.',
+	'panel.acct.email_stage_two' => 'Approved from your current address. Open the link sent to the new address to finish.',
 
 	/* ================================================================
 	 * PANEL (admin / moderator / user)

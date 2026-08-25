@@ -111,7 +111,7 @@ UPLOADS_DIR = _storage_root("UPLOADS_PATH", APP_DIR / "uploads")
 DATA_DIR = _storage_root("DATA_PATH", APP_DIR / "data")
 STAGING_DIR = UPLOADS_DIR / ".staging"
 STORAGE_MANIFEST_NAME = ".filehost-storage-v1.json"
-SUPPORTED_SCHEMA_VERSION = 63
+SUPPORTED_SCHEMA_VERSION = 64
 try:
     DOWNLOAD_LEASE_SECONDS = max(
         5,

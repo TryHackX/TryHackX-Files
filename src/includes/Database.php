@@ -47,7 +47,7 @@ require_once __DIR__ . '/Permissions.php';
 
 class Database
 {
-	public const CURRENT_SCHEMA_VERSION = 63;
+	public const CURRENT_SCHEMA_VERSION = 64;
 	private const SCHEMA_CONTRACT_CACHE_SECONDS = 300;
 	private static bool $migrationJournalActive = false;
 	private static string $migrationJournalPrefix = '';
@@ -225,6 +225,7 @@ class Database
 				`pending_email` VARCHAR(255) DEFAULT NULL,
 				`email_change_token` VARCHAR(64) DEFAULT NULL,
 				`email_change_expires_at` INT UNSIGNED DEFAULT NULL,
+				`email_change_stage` VARCHAR(8) DEFAULT NULL,
 				`last_email_change_at` INT UNSIGNED DEFAULT 0,
 				`activation_token` VARCHAR(64) DEFAULT NULL,
 				`activation_expires_at` INT UNSIGNED DEFAULT NULL,
@@ -1437,6 +1438,9 @@ class Database
 						'idx_remember_expires' => ['expires_at'],
 					],
 				],
+			],
+			64 => [
+				'columns' => ['users' => ['email_change_stage']],
 			],
 		];
 	}
@@ -4633,6 +4637,50 @@ class Database
 			}
 		}
 
+		// --- v64: e-mail changes are confirmed from both addresses, so they need a stage ---
+		if ($runStep(64)) {
+			$migrated = false;
+			try {
+				// Changing the address used to be confirmed from the new one alone, which meant
+				// a stolen session could move an account away without the owner ever hearing
+				// about it. The old address now has to agree first, and one column is enough to
+				// say which half of that is outstanding.
+				$columns = $pdo->query("SHOW COLUMNS FROM `{$prefix}users`")
+					->fetchAll(PDO::FETCH_COLUMN);
+				if (!in_array('email_change_stage', $columns, true)) {
+					$pdo->exec(
+						"ALTER TABLE `{$prefix}users`
+						 ADD COLUMN `email_change_stage` VARCHAR(8) DEFAULT NULL
+						 AFTER `email_change_expires_at`"
+					);
+				}
+				// A change already in flight was issued under the old, one-sided rule. Finishing
+				// it would skip the confirmation the new rule exists to require, so the pending
+				// ones are dropped and have to be requested again.
+				$pdo->exec(
+					"UPDATE `{$prefix}users`
+					 SET `pending_email` = NULL,
+					     `email_change_token` = NULL,
+					     `email_change_expires_at` = NULL,
+					     `email_change_stage` = NULL
+					 WHERE `email_change_token` IS NOT NULL"
+				);
+
+				self::persistMigrationVersion(64);
+				$version = max($version, 64);
+				$migrated = true;
+			} catch (\Throwable $e) {
+				error_log('Database migration v64 failed: ' . $e->getMessage());
+				self::failMigrationJournalStep(64, $e);
+				throw $e;
+			}
+			if (!$migrated) {
+				self::$migrationJournalActive = false;
+				$releaseMigrationLock();
+				return;
+			}
+		}
+
 			self::assertSupportedSchema($pdo, $prefix);
 			self::publishSchemaVerification(time());
 			self::completeMigrationJournalStep($version);
@@ -4667,7 +4715,8 @@ class Database
 			'users' => [
 				'id', 'is_active', 'session_version', 'group_id', 'staff_group_id', 'storage_limit',
 				'totp_enabled', 'totp_secret', 'activation_token', 'activation_expires_at',
-				'email_change_token', 'email_change_expires_at', 'group_payment_ext_order_id',
+				'email_change_token', 'email_change_expires_at', 'email_change_stage',
+				'group_payment_ext_order_id',
 			],
 			'recovery_tokens' => ['token', 'user_id', 'created_at', 'expires_at'],
 			'upload_tokens' => ['token', 'user_id', 'ip_address', 'files_count', 'created_at'],
@@ -5580,6 +5629,16 @@ class Database
 	): bool
 	{
 		return MailService::send($to, $subject, $message, $idempotencyKey);
+	}
+
+	/** An HTML body this project wrote itself; see MailService::sendTemplate(). */
+	public static function sendHtmlEmail(
+		string $to,
+		string $subject,
+		string $html,
+		?string $idempotencyKey = null
+	): bool {
+		return MailService::sendTemplate($to, $subject, $html, $idempotencyKey);
 	}
 	// --- Password Recovery Methods ---
 

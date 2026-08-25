@@ -3,7 +3,28 @@
 if (!defined('APP_ROOT')) {
 	exit;
 }
+
+// The e-mail-change links land back here with a result in the query string. Until now nothing
+// rendered it, so confirming a change looked like it had done nothing at all — and the
+// two-stage flow makes that worse, because the halfway point is exactly when the user needs
+// telling that a second link is waiting in the other mailbox.
+$accountNotice = '';
+$accountNoticeKind = 'success';
+$accountMessage = (string) ($_GET['msg'] ?? '');
+if ($accountMessage === 'email_changed') {
+	$accountNotice = __('api.email_change_success');
+} elseif ($accountMessage === 'email_change_stage_two') {
+	$accountNotice = __('panel.acct.email_stage_two');
+} elseif (isset($_GET['err']) && is_string($_GET['err'])) {
+	$accountNotice = mb_substr((string) $_GET['err'], 0, 300);
+	$accountNoticeKind = 'error';
+}
 ?>
+	<?php if ($accountNotice !== ''): ?>
+		<div class="auth-message <?= $accountNoticeKind === 'error' ? 'error' : 'success' ?>" style="display:block; margin-bottom:18px;">
+			<?= htmlspecialchars($accountNotice, ENT_QUOTES, 'UTF-8') ?>
+		</div>
+	<?php endif; ?>
 	<div class="stats" id="userStatsContainer">
 		<div class="stat"><h3 id="uStatFiles"><?= (int) $userStats['files_count'] ?></h3><p><?= _h('panel.my.total_files') ?></p></div>
 		<div class="stat"><h3 id="uStatStorage"><?= formatSize((int) $userStats['total_size']) ?></h3><p><?= _h('panel.dash.storage') ?></p></div>

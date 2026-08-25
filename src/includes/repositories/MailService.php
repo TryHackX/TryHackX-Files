@@ -49,6 +49,30 @@ final class MailService
 	}
 
 	/**
+	 * Enqueue an application-authored HTML message.
+	 *
+	 * `send()` escapes its argument, which is right for anything that might carry user text but
+	 * wrong for the templates this project writes itself: an activation or password-reset mail
+	 * built as markup came out with its tags visible and its link not clickable. Those bodies
+	 * are ours, and every value interpolated into them is escaped where it is interpolated, so
+	 * they go out as the HTML they already are.
+	 *
+	 * Not to be used for anything an account holder typed — that is what `sendHtml()`, with its
+	 * sanitizer, exists for.
+	 */
+	public static function sendTemplate(
+		string $to,
+		string $subject,
+		string $html,
+		?string $idempotencyKey = null
+	): bool {
+		return self::enqueue(
+			self::renderEnvelope($to, $subject, $html, true),
+			$idempotencyKey
+		);
+	}
+
+	/**
 	 * Enqueue an administrator-authored HTML message.
 	 *
 	 * The fragment is sanitized before it is frozen in the outbox. Scripts, remote images,
