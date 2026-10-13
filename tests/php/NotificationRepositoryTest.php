@@ -231,6 +231,27 @@ final class NotificationRepositoryTest extends RepoTestCase
 		$this->assertSame(1, (int) $res['items'][0]['count']);
 	}
 
+	public function testBroadcastRespectsMutesAndIgnoresARetry(): void
+	{
+		$muted = $this->makeUser();
+		Notifications::saveUserPrefs($muted, ['system.announcement' => ['app' => false]]);
+		$count = function (int $userId): int {
+			$stmt = Database::getInstance()->prepare(
+				"SELECT COUNT(*) FROM `" . Database::table('notifications') . "` WHERE `user_id` = ? AND `type` = 'system.announcement'"
+			);
+			$stmt->execute([$userId]);
+			return (int) $stmt->fetchColumn();
+		};
+
+		$first = Notifications::broadcastApp('Maintenance tonight', '/panel', 'broadcast:test:1');
+		$this->assertGreaterThanOrEqual(1, $first);
+		$this->assertSame(1, $count($this->userId));
+		$this->assertSame(0, $count($muted), 'a muted account stays muted');
+
+		$this->assertSame(0, Notifications::broadcastApp('Maintenance tonight', '/panel', 'broadcast:test:1'));
+		$this->assertSame(1, $count($this->userId), 'a retried broadcast adds nothing');
+	}
+
 	/**
 	 * The shape a row is rendered into. The sentence itself is not asserted: this suite runs
 	 * without the i18n layer (bootstrap stubs `__()` to return the key), which is deliberate —

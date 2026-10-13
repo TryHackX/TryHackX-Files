@@ -285,6 +285,26 @@ final class Notifications
 		return $sent;
 	}
 
+	/**
+	 * An administrator's announcement in every active account's bell.
+	 *
+	 * Same rules as send() — an account that muted announcements stays muted, a vetoed type
+	 * goes nowhere — but decided for everyone from one preference query and written in a few
+	 * multi-row statements, so a large installation does not run several queries per account
+	 * inside one request. $broadcastKey makes a retried request a no-op for accounts that
+	 * already have the notice.
+	 *
+	 * @return int accounts told
+	 */
+	public static function broadcastApp(string $text, string $link, string $broadcastKey): int
+	{
+		$type = 'system.announcement';
+		$ids = NotificationRepository::allUserIds();
+		NotificationRepository::warmPrefs($ids);
+		$recipients = array_values(array_filter($ids, static fn(int $id): bool => self::allows($id, $type, 'app')));
+		return NotificationRepository::pushMany($recipients, $type, $text, $link, $broadcastKey);
+	}
+
 	/** Everyone who should hear about moderation work. */
 	public static function staffIds(): array
 	{

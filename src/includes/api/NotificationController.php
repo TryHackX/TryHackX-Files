@@ -223,41 +223,42 @@ final class NotificationController
 			return;
 		}
 
+		// The same message sent again within ten minutes is treated as a retry of the first
+		// (a double click, a timed-out request): accounts that already have it get nothing new.
+		$window = intdiv(time(), 600);
 		$appSent = 0;
 		if (in_array($channel, ['app', 'both'], true)) {
-			$appSent = Notifications::sendMany(
-				NotificationRepository::allUserIds(),
-				'system.announcement',
-				[
-					'subject' => $text,
-					'link' => APP_URL . '/panel.php?tab=notifications',
-					'channels' => ['app'],
-				]
+			$appSent = Notifications::broadcastApp(
+				$text,
+				APP_URL . '/panel.php?tab=notifications',
+				'broadcast:' . sha1($text) . ':' . $window
 			);
 		}
 
 		$emailQueued = 0;
 		if (in_array($channel, ['email', 'both'], true)) {
-			$batchId = bin2hex(random_bytes(16));
-			foreach (NotificationRepository::activeRecipients() as $recipient) {
-				if (!Notifications::allows($recipient['id'], 'system.announcement', 'mail')) {
-					continue;
+			$batchId = sha1($format . "\0" . $subject . "\0" . $emailBody) . ':' . $window;
+			$recipients = NotificationRepository::activeRecipients();
+			NotificationRepository::warmPrefs(array_column($recipients, 'id'));
+			$pdo = Database::getInstance();
+			// Queued in transactions of a few hundred: one commit per message made a large
+			// broadcast slow enough to run into the request time limit half-way.
+			foreach (array_chunk($recipients, 200) as $chunk) {
+				$pdo?->beginTransaction();
+				foreach ($chunk as $recipient) {
+					if (!Notifications::allows($recipient['id'], 'system.announcement', 'mail')) {
+						continue;
+					}
+					$key = 'broadcast:' . $batchId . ':' . $recipient['id'];
+					$queued = $format === 'html'
+						? MailService::sendHtml($recipient['email'], $subject, $emailBody, $key)
+						: MailService::send($recipient['email'], $subject, $emailBody, $key);
+					if ($queued) {
+						$emailQueued++;
+					}
 				}
-				$queued = $format === 'html'
-					? MailService::sendHtml(
-						$recipient['email'],
-						$subject,
-						$emailBody,
-						'broadcast:' . $batchId . ':' . $recipient['id']
-					)
-					: MailService::send(
-						$recipient['email'],
-						$subject,
-						$emailBody,
-						'broadcast:' . $batchId . ':' . $recipient['id']
-					);
-				if ($queued) {
-					$emailQueued++;
+				if ($pdo?->inTransaction()) {
+					$pdo->commit();
 				}
 			}
 		}

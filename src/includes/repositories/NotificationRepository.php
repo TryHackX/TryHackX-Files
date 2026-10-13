@@ -175,6 +175,67 @@ final class NotificationRepository
 		}
 	}
 
+	/**
+	 * The same one-off notice for many accounts, in a few multi-row statements instead of a
+	 * handful of queries per account — the broadcast path. Rows carry $dedupeKey, so a retried
+	 * request adds nothing for accounts that already have it.
+	 *
+	 * @param list<int> $userIds
+	 * @return int rows written
+	 */
+	public static function pushMany(array $userIds, string $type, string $subject, string $link, string $dedupeKey): int
+	{
+		$pdo = Database::getInstance();
+		$userIds = array_values(array_unique(array_filter(array_map('intval', $userIds), fn($id) => $id > 0)));
+		if (!$pdo || $userIds === [] || $dedupeKey === '') {
+			return 0;
+		}
+		$table = self::table();
+		$now = time();
+		$written = 0;
+		try {
+			foreach (array_chunk($userIds, 500) as $chunk) {
+				$rows = [];
+				$params = [];
+				foreach ($chunk as $userId) {
+					$rows[] = '(?, ?, \'\', NULL, ?, ?, ?, NULL, 1, ?, ?, NULL)';
+					array_push(
+						$params,
+						$userId,
+						mb_substr($type, 0, 40),
+						mb_substr($dedupeKey, 0, 80),
+						mb_substr($subject, 0, 255),
+						mb_substr($link, 0, 255),
+						$now,
+						$now
+					);
+				}
+				$stmt = $pdo->prepare(
+					"INSERT IGNORE INTO `{$table}`
+					 (`user_id`, `type`, `group_key`, `open_stack_key`, `dedupe_key`,
+					  `subject`, `link`, `data`, `count`, `created_at`, `updated_at`, `read_at`)
+					 VALUES " . implode(', ', $rows)
+				);
+				$stmt->execute($params);
+				$written += $stmt->rowCount();
+
+				// Keep the per-account cap: trim only the accounts this pushed over it.
+				$in = implode(',', array_fill(0, count($chunk), '?'));
+				$over = $pdo->prepare(
+					"SELECT `user_id` FROM `{$table}` WHERE `user_id` IN ({$in})
+					 GROUP BY `user_id` HAVING COUNT(*) > " . self::MAX_PER_USER
+				);
+				$over->execute($chunk);
+				foreach ($over->fetchAll(PDO::FETCH_COLUMN) as $userId) {
+					self::trim((int) $userId);
+				}
+			}
+		} catch (PDOException $e) {
+			error_log('Bulk notification failed: ' . $e->getMessage());
+		}
+		return $written;
+	}
+
 	/** Drop the oldest rows once an account is past the cap. Read ones go first. */
 	private static function trim(int $userId): void
 	{
@@ -401,6 +462,41 @@ final class NotificationRepository
 		} catch (PDOException $e) {
 		}
 		return self::$prefsCache[$userId];
+	}
+
+	/**
+	 * Load many accounts' preference maps in one query into the per-request cache, so a
+	 * broadcast's allows() checks cost nothing per account.
+	 *
+	 * @param list<int> $userIds
+	 */
+	public static function warmPrefs(array $userIds): void
+	{
+		$pdo = Database::getInstance();
+		$missing = array_values(array_filter(
+			array_unique(array_map('intval', $userIds)),
+			fn($id) => $id > 0 && !array_key_exists($id, self::$prefsCache)
+		));
+		if (!$pdo || $missing === []) {
+			return;
+		}
+		try {
+			foreach (array_chunk($missing, 1000) as $chunk) {
+				$in = implode(',', array_fill(0, count($chunk), '?'));
+				$stmt = $pdo->prepare(
+					"SELECT `user_id`, `prefs` FROM `" . Database::table('notification_prefs') . "` WHERE `user_id` IN ({$in})"
+				);
+				$stmt->execute($chunk);
+				$loaded = array_fill_keys($chunk, []);
+				foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+					$decoded = json_decode((string) $row['prefs'], true);
+					$loaded[(int) $row['user_id']] = is_array($decoded) ? $decoded : [];
+				}
+				self::$prefsCache = $loaded + self::$prefsCache;
+			}
+		} catch (PDOException $e) {
+			// prefs() falls back to one query per account for whatever is not cached.
+		}
 	}
 
 	/** Replace an account's preference map. */
