@@ -13,7 +13,7 @@ into memory.
 
 ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4?logo=php&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL%20%2F%20MariaDB-8.x-4479A1?logo=mysql&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL%208.0.1%2B%20%7C%20MariaDB%2010.6%2B-4479A1?logo=mysql&logoColor=white)
 ![Platform](https://img.shields.io/badge/Windows%20%7C%20Debian-informational)
 ![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)
 
@@ -63,7 +63,7 @@ Browser
 |---|---|
 | Web backend | PHP 8.1+, PDO and sessions |
 | Transfer server | Python 3.11+, FastAPI, uvicorn, aiofiles and aiomysql |
-| Database | MySQL 8 or MariaDB 10.4+ |
+| Database | MySQL 8.0.1+ or MariaDB 10.6+ |
 | HTTP server | Apache 2.4 with `mod_proxy`, `mod_proxy_http`, `mod_rewrite`, `headers` |
 
 The database prefix is configurable (default `fh_`). Migrations run under a global lock and
@@ -74,8 +74,10 @@ against the exact supported schema version.
 
 ### Requirements
 
-- PHP 8.1+ with `pdo_mysql`, `curl`, `mbstring`, `openssl` and preferably `fileinfo`;
-- MySQL 8 or MariaDB 10.4+;
+- PHP 8.1+ with `pdo_mysql`, `curl`, `mbstring`, `openssl`, preferably `fileinfo`, and `gd`
+  (with WebP) for advertisement banner cropping;
+- MySQL 8.0.1+ or MariaDB 10.6+: the e-mail outbox uses `SELECT ... FOR UPDATE SKIP LOCKED`,
+  which older servers reject. CI runs MySQL 8.4 and MariaDB 11.4 and 11.8;
 - Python 3.11+;
 - Apache 2.4 with the modules listed above.
 
@@ -179,6 +181,19 @@ in `/etc/default/filehost` and restart both systemd services. In Docker only, pl
 It disables uvicorn access logs and routine startup/request/mail-batch messages. Warnings and
 errors remain. The main benefit is less console/journal I/O and a cleaner production log; memory
 or throughput improvement is expected to be small and should be measured.
+
+### Other environment variables
+
+Operating-system environment variables, set in `/etc/default/filehost` on Debian, in
+`scripts\filehost-env.bat` on Windows or in `.env` for Docker:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `FILEHOST_DB_POOL_MAX` | `20` | Size of the upload server's database connection pool (5-100). |
+| `FILEHOST_THUMB_WORKERS`, `FILEHOST_THUMB_MAX_INPUT_BYTES`, `FILEHOST_THUMB_MAX_SOURCE_PIXELS` | see `.env.example` | Caps for the thumbnail workers that parse untrusted media. |
+| `FILEHOST_DOWNLOAD_LEASE_SECONDS` | `120` | Lease for interrupted-download recovery (5-600). |
+| `APP_ENV` / `FILEHOST_ENV` | `production` | Only `dev`, `development`, `local` or `test` allow the file fallback `data/.appkey` for `APP_SECRET_KEY`; keep the default on a real installation and supply the key explicitly. |
+| `FILEHOST_SERVICE_USER`, `FILEHOST_SERVICE_GROUP` | `www-data` | Account the Debian installer gives the systemd services (see [docs/DEBIAN.md](docs/DEBIAN.md)). |
 
 ### E-mail outbox worker
 

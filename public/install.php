@@ -23,6 +23,7 @@ define('INSTALLER_MIN_PHP', '8.1.0');
 
 require_once INSTALLER_ROOT . '/src/brand.php';
 require_once INSTALLER_ROOT . '/src/includes/CanonicalUrl.php';
+require_once INSTALLER_ROOT . '/src/includes/DatabaseServerVersion.php';
 require_once INSTALLER_ROOT . '/src/includes/InstallerSecurity.php';
 require_once INSTALLER_ROOT . '/src/includes/InputLimits.php';
 
@@ -539,6 +540,12 @@ function handleTestDb(): never
 
 	try {
 		$pdo = installerPdo($cfg, false);
+
+		// Refuse a server that cannot run the e-mail outbox before anything is written to it.
+		$versionProblem = filehostDatabaseServerVersionProblem((string) $pdo->query('SELECT VERSION()')->fetchColumn());
+		if ($versionProblem !== null) {
+			apiOut(false, ['error' => $versionProblem], 400);
+		}
 
 		$stmt = $pdo->prepare('SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?');
 		$stmt->execute([$cfg['name']]);

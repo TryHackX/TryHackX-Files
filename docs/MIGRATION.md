@@ -10,8 +10,8 @@ rollback is not assumed to be compatible with a newer schema.
 
 - PHP 8.1+ with `pdo_mysql`, `curl`, `mbstring`, `openssl` and preferably `fileinfo`;
 - Python 3.11+;
-- MySQL 8 or MariaDB 10.4+;
-- Apache 2.4 with `proxy`, `proxy_http`, `rewrite` and `headers`;
+- MySQL 8.0.1+ or MariaDB 10.6+ (the e-mail outbox needs `FOR UPDATE SKIP LOCKED`);
+- Apache 2.4 with `proxy`, `proxy_http`, `rewrite`, `headers` and preferably `expires`;
 - a virtual host whose `DocumentRoot` is exactly `public/`;
 - one stable `APP_SECRET_KEY` available to PHP and CLI workers.
 
@@ -81,6 +81,20 @@ venv.new/bin/python -m py_compile upload_server.py
 
 Do not upgrade packages opportunistically during deployment. Lock-file updates require a
 separate reviewed change and the full test suite.
+
+Always build the new environment next to the old one (`venv.new`, as above) and swap it in step 6
+rather than installing over `venv/`: a release that drops a package (the lock no longer installs
+`websockets`, `watchfiles`, `python-dotenv` and PyYAML, and adds `uvloop` on Linux) would otherwise
+leave the old ones behind. After the swap, `venv/bin/python -c "import uvloop"` confirms the Linux
+event loop is present.
+
+A release that changes `scripts/*.service` (the systemd sandbox, resource limits and restart
+policy have changed) is applied on Debian by re-running `sudo bash scripts/install-debian.sh`: it
+renders both units again, writes the storage drop-in when `UPLOADS_PATH`, `DATA_PATH` or
+`FILE_QUARANTINE_PATH` point outside the application directory, reloads systemd and restarts the
+services when the installation is already configured. It also runs `pip install` into the
+existing `venv/`, so use it on a stopped service or after the `venv.new` swap. Compare
+`systemctl cat filehost-upload` with the template if the units were edited by hand.
 
 ## 5. Permissions and Apache
 
