@@ -409,34 +409,66 @@ final class AdRepository
 		return $created;
 	}
 
-	/** The surcharge total for an ad's still-unpaid (draft) add-on placements. */
-	public static function draftAddonAmount(int $adId, array $package): int
+	/**
+	 * Price one checkout and name exactly the placements it pays for.
+	 *
+	 * The order has to carry the child ids it was priced with: placements added after the
+	 * buyer was sent to the provider are not part of that payment, and fulfilment must not
+	 * activate them on the strength of it.
+	 *
+	 *   - add-on top-up: the surcharges of the draft children, and those children;
+	 *   - first purchase / renewal: the package price plus the surcharge of every child that
+	 *     is not being dropped, and those children.
+	 *
+	 * @param list<int> $dropIds children a renewal leaves behind
+	 * @return array{amount: int, children: list<int>}
+	 */
+	public static function priceCheckout(int $adId, array $package, bool $addonTopUp, array $dropIds = []): array
 	{
 		$allowed = json_decode((string) ($package['addon_zones'] ?? ''), true) ?: [];
-		$sum = 0;
-		foreach (self::childrenOf($adId) as $c) {
-			if ($c['status'] === 'draft') {
-				$sum += max(0, (int) ($allowed[(string) $c['zone']] ?? 0));
+		$amount = $addonTopUp ? 0 : (int) ($package['amount_minor'] ?? 0);
+		$children = [];
+		foreach (self::childrenOf($adId) as $child) {
+			$childId = (int) $child['id'];
+			if ($addonTopUp ? $child['status'] !== 'draft' : in_array($childId, $dropIds, true)) {
+				continue;
 			}
+			$amount += max(0, (int) ($allowed[(string) $child['zone']] ?? 0));
+			$children[] = $childId;
 		}
-		return $sum;
+		return ['amount' => $amount, 'children' => $children];
 	}
 
 	/**
 	 * The addon top-up was paid: its draft children join the review queue. The parent's
 	 * approved creative stays live untouched — only the new placements need eyes.
+	 *
+	 * @param list<int>|null $childIds the placements this order was priced with; null only for
+	 *                                 orders created before checkouts recorded them
 	 */
-	public static function markAddonsPaid(int $adId): bool
+	public static function markAddonsPaid(int $adId, ?array $childIds = null): bool
 	{
 		$pdo = Database::getInstance();
 		if (!$pdo) {
 			return false;
 		}
+		if ($childIds !== null) {
+			$childIds = array_values(array_unique(array_filter(array_map('intval', $childIds), fn($id) => $id > 0)));
+			if ($childIds === []) {
+				return false;
+			}
+		}
 		try {
 			self::copyBannerToChildren($adId);
+			$params = [time(), $adId];
+			$only = '';
+			if ($childIds !== null) {
+				$only = ' AND `id` IN (' . implode(',', array_fill(0, count($childIds), '?')) . ')';
+				$params = array_merge($params, $childIds);
+			}
 			$stmt = $pdo->prepare("UPDATE `" . Database::table('ads') . "`
-				SET `status` = 'pending', `updated_at` = ? WHERE `parent_ad_id` = ? AND `status` = 'draft'");
-			$stmt->execute([time(), $adId]);
+				SET `status` = 'pending', `updated_at` = ? WHERE `parent_ad_id` = ? AND `status` = 'draft'{$only}");
+			$stmt->execute($params);
 			return $stmt->rowCount() > 0;
 		} catch (PDOException $e) {
 			return false;
@@ -643,8 +675,13 @@ final class AdRepository
 	/**
 	 * Payment fulfilment: draft → pending. Conditional so a repeated webhook is a no-op even
 	 * without the payment claim in front of it.
+	 *
+	 * @param list<int>|null $childIds the add-on placements the order was priced with. Only
+	 *                                 those follow the primary into review; anything added
+	 *                                 after checkout stays a draft for its own top-up. null
+	 *                                 only for orders created before checkouts recorded them.
 	 */
-	public static function markPaid(int $adId, array $package = []): bool
+	public static function markPaid(int $adId, array $package = [], ?array $childIds = null): bool
 	{
 		$pdo = Database::getInstance();
 		if (!$pdo) {
@@ -677,12 +714,24 @@ final class AdRepository
 				WHERE `id` = ? AND `status` = 'draft'");
 			$stmt->execute([$duration, $now, $adId]);
 			$paid = $stmt->rowCount() > 0;
-			if ($paid) {
-				// Add-on placements were paid by the same order.
+			if ($paid && $childIds !== null) {
+				$childIds = array_values(array_unique(array_filter(
+					array_map('intval', $childIds),
+					fn($id) => $id > 0
+				)));
+			}
+			if ($paid && ($childIds === null || $childIds !== [])) {
+				// Add-on placements paid by the same order (and only those).
+				$params = [$duration, $now, $adId];
+				$only = '';
+				if ($childIds !== null) {
+					$only = ' AND `id` IN (' . implode(',', array_fill(0, count($childIds), '?')) . ')';
+					$params = array_merge($params, $childIds);
+				}
 				$pdo->prepare("UPDATE `" . Database::table('ads') . "`
 					SET `status` = 'pending', `purchase_duration_days` = ?, `updated_at` = ?
-					WHERE `parent_ad_id` = ? AND `status` = 'draft'")
-					->execute([$duration, $now, $adId]);
+					WHERE `parent_ad_id` = ? AND `status` = 'draft'{$only}")
+					->execute($params);
 			}
 			if ($ownsTransaction) {
 				$pdo->commit();

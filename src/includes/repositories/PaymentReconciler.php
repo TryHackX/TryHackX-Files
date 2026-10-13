@@ -43,6 +43,21 @@ final class PaymentReconciler
 	}
 
 	/**
+	 * The add-on placements an ad order was priced with (see AdRepository::priceCheckout).
+	 * null for orders created before checkouts recorded them — those keep the old behaviour.
+	 *
+	 * @return list<int>|null
+	 */
+	private static function paidAdChildren(array $payment): ?array
+	{
+		$meta = json_decode((string) ($payment['meta'] ?? ''), true);
+		if (!is_array($meta) || !array_key_exists('children', $meta) || !is_array($meta['children'])) {
+			return null;
+		}
+		return array_values(array_map('intval', $meta['children']));
+	}
+
+	/**
 	 * Bring one payment up to date with the provider.
 	 *
 	 * @return string the payment's status afterwards (PaymentRepository::* constants)
@@ -240,7 +255,7 @@ final class PaymentReconciler
 		// children go to the review queue; the live parent is untouched.
 		if (($payment['kind'] ?? '') === PaymentRepository::KIND_AD_ADDON) {
 			$adId = (int) ($payment['ad_id'] ?? 0);
-			$ok = $adId > 0 && AdRepository::markAddonsPaid($adId);
+			$ok = $adId > 0 && AdRepository::markAddonsPaid($adId, self::paidAdChildren($payment));
 			Database::logAudit(
 				$ok ? 'ad_addons_paid' : 'ad_payment_orphan',
 				$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,
@@ -328,7 +343,7 @@ final class PaymentReconciler
 				return self::finishGrant($pdo, $payment, $via, $token, $ok, 'ad_renew_failed', $afterCommit);
 			}
 
-			$ok = $adId > 0 && AdRepository::markPaid($adId, $package ?: []);
+			$ok = $adId > 0 && AdRepository::markPaid($adId, $package ?: [], self::paidAdChildren($payment));
 			Database::logAudit(
 				$ok ? 'ad_payment_completed' : 'ad_payment_orphan',
 				$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,

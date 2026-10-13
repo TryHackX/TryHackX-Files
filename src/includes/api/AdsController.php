@@ -318,6 +318,13 @@ final class AdsController
 			echo json_encode(['success' => false, 'error' => $data['error']]);
 			return;
 		}
+		// Raw markup and third-party ad code run on every public page, so they stay with the
+		// administrator. `ads.manage` can be delegated to moderators; they get image creatives.
+		if (!self::mayAuthorMarkup((string) ($data['type'] ?? 'image'))) {
+			http_response_code(403);
+			echo json_encode(['success' => false, 'error' => __('ads.err_type')]);
+			return;
+		}
 		if (($data['status'] ?? '') === 'active' && !self::zoneHasRoom((string) $data['zone'], $id)) {
 			echo json_encode(['success' => false, 'error' => __('ads.err_zone_full')]);
 			return;
@@ -453,7 +460,20 @@ final class AdsController
 				$refundState = null;
 				$refundError = '';
 				if (!empty($input['refund'])) {
-					[$refundState, $refundError] = self::refundAdPayment($id, (string) $ad['name']);
+					if ($addonTopUp) {
+						// The rejected placements were bought by their own top-up order.
+						[$refundState, $refundError] = self::refundAdPayment(
+							$id,
+							(string) $ad['name'],
+							PaymentRepository::KIND_AD_ADDON
+						);
+					} elseif (!empty($ad['approved_at']) || $ad['ends_at'] !== null) {
+						// An edited creative of an ad that already ran: the re-review bought
+						// nothing, so there is no payment this rejection could give back.
+						[$refundState, $refundError] = ['failed', 'no_refundable_payment'];
+					} else {
+						[$refundState, $refundError] = self::refundAdPayment($id, (string) $ad['name']);
+					}
 				}
 				if (!empty($ad['owner_id'])) {
 					Notifications::send((int) $ad['owner_id'], 'ad.rejected', [
@@ -1075,6 +1095,11 @@ final class AdsController
 		$boostPkgId = (int) ($_GET['pkg'] ?? 0);
 		$renewal = false;
 		$addonTopUp = !empty($_GET['extra']);
+		// The exact add-on placements this order pays for. Recorded on the payment so that
+		// placements added while the buyer is at the provider stay drafts (they need their
+		// own top-up) instead of riding along on a cheaper order.
+		$paidChildren = null;
+		$dropIds = [];
 		if ($addonTopUp) {
 			// Surcharge-only checkout for placements added to an existing purchase (runda 5).
 			$package = AdRepository::packageGet((int) ($ad['package_id'] ?? 0));
@@ -1084,7 +1109,9 @@ final class AdsController
 			if (!in_array($ad['status'], ['active', 'pending', 'rejected'], true)) {
 				self::bounce($back, 'ad');
 			}
-			$amount = AdRepository::draftAddonAmount((int) $ad['id'], $package);
+			$priced = AdRepository::priceCheckout((int) $ad['id'], $package, true);
+			$amount = $priced['amount'];
+			$paidChildren = $priced['children'];
 		} elseif ($boostPkgId > 0) {
 			// Boost purchase: the ad must already be live — extra weight on a paused or
 			// unreviewed creative would be buying nothing.
@@ -1129,13 +1156,10 @@ final class AdsController
 			}
 			// The price is the base plus each KEPT add-on zone's surcharge — priced from the
 			// package's CURRENT config, whether this is the first purchase or a renewal.
-			$amount = (int) $package['amount_minor'];
-			$allowed = json_decode((string) ($package['addon_zones'] ?? ''), true) ?: [];
-			foreach (AdRepository::childrenOf((int) $ad['id']) as $child) {
-				if (in_array((int) $child['id'], $dropIds, true)) {
-					continue;
-				}
-				$amount += max(0, (int) ($allowed[(string) $child['zone']] ?? 0));
+			$priced = AdRepository::priceCheckout((int) $ad['id'], $package, false, $dropIds);
+			$amount = $priced['amount'];
+			if (!$renewal) {
+				$paidChildren = $priced['children'];
 			}
 		}
 		if ($amount <= 0) {
@@ -1152,10 +1176,17 @@ final class AdsController
 		}
 
 		$currency = strtoupper((string) ($package['currency'] ?? 'PLN'));
+		$orderMeta = [];
+		if (!empty($dropIds)) {
+			$orderMeta['drop'] = $dropIds;
+		}
+		if ($paidChildren !== null) {
+			$orderMeta['children'] = $paidChildren;
+		}
 		$extOrderId = PaymentRepository::startAd(
 			$provider, (int) $ad['id'], (int) $package['id'], (int) $user['id'], $amount, $currency,
 			$addonTopUp ? PaymentRepository::KIND_AD_ADDON : PaymentRepository::KIND_AD,
-			!empty($dropIds) ? ['drop' => $dropIds] : []
+			$orderMeta
 		);
 		if ($extOrderId === null) {
 			self::bounce($back, 'internal');
@@ -1253,6 +1284,16 @@ final class AdsController
 		return $data;
 	}
 
+	/**
+	 * Whether this session may save a creative of $type. `html` and `adsense` put operator
+	 * markup or third-party code on every public page, so only an administrator may author
+	 * them — not every holder of the delegable `ads.manage`.
+	 */
+	public static function mayAuthorMarkup(string $type): bool
+	{
+		return !in_array($type, ['html', 'adsense'], true) || !empty($_SESSION['is_admin']);
+	}
+
 	/** A creative as the admin screens need it (owner and package names resolved). */
 	private static function adminView(array $ad): array
 	{
@@ -1296,9 +1337,12 @@ final class AdsController
 	 *
 	 * @return array{0: string, 1: string} ['ok'|'failed', error detail for the reviewer]
 	 */
-	private static function refundAdPayment(int $adId, string $adName): array
-	{
-		$payment = PaymentRepository::latestCompletedForAd($adId);
+	private static function refundAdPayment(
+		int $adId,
+		string $adName,
+		string $kind = PaymentRepository::KIND_AD
+	): array {
+		$payment = PaymentRepository::latestCompletedForAd($adId, $kind);
 		if (!$payment || !in_array((string) $payment['provider'], ['payu', 'przelewy24'], true)
 			|| empty($payment['provider_order_id'])) {
 			return ['failed', 'no_refundable_payment'];

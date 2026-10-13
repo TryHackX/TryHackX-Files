@@ -470,10 +470,13 @@ final class PaymentRepository
 	}
 
 	/**
-	 * The most recent COMPLETED payment for an ad — what a refund on rejection gives back.
-	 * The ad id on a payment row is always the purchase's ROOT ad (children never pay).
+	 * The most recent COMPLETED payment of one kind for an ad — what a refund on rejection gives
+	 * back. The ad id on a payment row is always the purchase's ROOT ad (children never pay).
+	 *
+	 * The kind matters: a live ad can carry a placement purchase, renewals, boosts and add-on
+	 * top-ups, and rejecting the add-ons must refund the top-up, not whatever was paid last.
 	 */
-	public static function latestCompletedForAd(int $adId): ?array
+	public static function latestCompletedForAd(int $adId, string $kind = self::KIND_AD): ?array
 	{
 		$pdo = Database::getInstance();
 		if (!$pdo || $adId <= 0) {
@@ -481,8 +484,9 @@ final class PaymentRepository
 		}
 		try {
 			$stmt = $pdo->prepare("SELECT * FROM `" . Database::table('payments') . "`
-				WHERE `ad_id` = ? AND `status` = ? ORDER BY `created_at` DESC LIMIT 1");
-			$stmt->execute([$adId, self::COMPLETED]);
+				WHERE `ad_id` = ? AND `status` = ? AND `kind` = ?
+				ORDER BY `created_at` DESC, `id` DESC LIMIT 1");
+			$stmt->execute([$adId, self::COMPLETED, $kind]);
 			return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 		} catch (PDOException $e) {
 			return null;

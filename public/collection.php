@@ -252,6 +252,8 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 					<div class="coll-empty"><?= _h('collection.empty') ?></div>
 				<?php endif; ?>
 			</div>
+
+			<?= AdRenderer::zone('collection_bottom') ?>
 		<?php endif; ?>
 		<?php require __DIR__ . '/../src/includes/site_footer.php'; ?>
 	</div>
@@ -297,9 +299,6 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 				'UTF-8'
 			) ?>"></div>
 		<script src="<?= $appUrl ?>/assets/js/collection.js?v=<?= APP_VERSION ?>"></script>
-	<?php endif; ?>
-	<?php if ($collection && $needsPassword): ?>
-		<?= AdRenderer::zone('collection_bottom') ?>
 	<?php endif; ?>
 
 	<?php require_once __DIR__ . '/../src/includes/auth_modal.php'; ?>
