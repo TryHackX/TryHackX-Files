@@ -123,11 +123,105 @@ class FileManager
 		if (!empty($state['password_hash']) && !$passwordAuthorized) {
 			return ['allowed' => false, 'status' => 403, 'message' => 'Password required'];
 		}
+		if ($mode === 'preview' && self::previewWithheldBy($state) !== '') {
+			return ['allowed' => false, 'status' => 403, 'message' => 'Preview withheld for this file'];
+		}
 		if ($mode !== 'preview' && !Database::claimOneTime($id)) {
 			return ['allowed' => false, 'status' => 410, 'message' => 'This one-time link has already been used'];
 		}
 
 		return ['allowed' => true, 'status' => 200, 'message' => ''];
+	}
+
+	/**
+	 * May this visitor receive the whole file as an inline preview?
+	 *
+	 * A preview is the complete file — a video player or `curl` gets every byte of it — yet it
+	 * never counts as a download. So it is withheld whenever counting is the point: a one-time
+	 * link, a download cap, a download that would currently need a CAPTCHA, or one that would
+	 * push the visitor past the transfer allowance the sidecar enforces. The page then shows a
+	 * thumbnail or an icon, and the Download button goes through every one of those checks.
+	 *
+	 * @param array{id?: string, size?: int} $file a getFile() row
+	 * @return array{allowed: bool, reason: string} reason: one_time | download_cap | captcha | transfer_quota | missing
+	 */
+	public static function previewPolicy(array $file, ?int $userId, string $ip): array
+	{
+		$state = Database::getFileSharingState((string) ($file['id'] ?? ''));
+		if (empty($state['found'])) {
+			return ['allowed' => false, 'reason' => 'missing'];
+		}
+		$reason = self::previewWithheldBy($state);
+		if ($reason === '' && TransferQuotaRepository::wouldExceed(
+			$userId,
+			$ip,
+			self::downloaderGroup($userId),
+			(int) ($file['size'] ?? 0)
+		)) {
+			$reason = 'transfer_quota';
+		}
+		return ['allowed' => $reason === '', 'reason' => $reason];
+	}
+
+	/** The sharing-state part of previewPolicy(): '' when nothing withholds the preview. */
+	private static function previewWithheldBy(array $state): string
+	{
+		if (!empty($state['one_time'])) {
+			return 'one_time';
+		}
+		if (!empty($state['max_downloads'])) {
+			return 'download_cap';
+		}
+		if (self::downloadCaptchaDue()) {
+			return 'captcha';
+		}
+		return '';
+	}
+
+	/**
+	 * Would the next download from this browser session have to pass a CAPTCHA?
+	 * `recaptcha_download_threshold`: 0 = every download, -1 = never, N = every Nth.
+	 */
+	public static function downloadCaptchaDue(): bool
+	{
+		if (!Database::isRecaptchaEnabled()) {
+			return false;
+		}
+		$threshold = (int) Database::getSetting('recaptcha_download_threshold', 0);
+		if ($threshold === -1) {
+			return false;
+		}
+		if ($threshold <= 0) {
+			return true;
+		}
+		$next = (int) ($_SESSION['download_clicks_counter'] ?? 0) + 1;
+		return $next % $threshold === 0;
+	}
+
+	/** The group whose download limits apply: the account's effective group, or `guest`. */
+	public static function downloaderGroup(?int $userId): ?array
+	{
+		return $userId
+			? GroupRepository::effectiveForUser($userId)
+			: GroupRepository::getBySlug('guest');
+	}
+
+	/**
+	 * Bounds for bytes this PHP process serves itself (previews and embeds). These requests
+	 * hold a PHP-FPM worker for their whole duration, and the pool is shared, so the number of
+	 * them — site-wide and per address — and their length are capped. Operators can tune the
+	 * caps with the `php_stream_max_global`, `php_stream_max_per_ip` and
+	 * `php_stream_max_seconds` settings; keep the global one below the pool's max_children.
+	 *
+	 * @return array{global: int, perIp: int, maxSeconds: int}
+	 */
+	public static function streamLimits(): array
+	{
+		return [
+			'global' => max(1, (int) Database::getSetting('php_stream_max_global', 4)),
+			'perIp' => max(1, (int) Database::getSetting('php_stream_max_per_ip', 2)),
+			'maxSeconds' => max(30, (int) Database::getSetting('php_stream_max_seconds', 300)),
+		];
 	}
 
 	/** Return a canonical child path or null when it escapes (including through a symlink). */
@@ -1656,27 +1750,41 @@ class FileManager
 		$ip = getClientIP();
 
 		$user = getCurrentUser();
-		$limitKey = $user ? 'concurrent_downloads_user' : 'concurrent_downloads_guest';
-		$defaultLimit = $user ? 0 : 1; // Default: 0 (unlimited) for user, 1 for guest
-
-		$limit = (int) Database::getSetting($limitKey, $defaultLimit);
-		$activeId = null;
-
-		if ($count && $limit > 0) {
-			$current = Database::getConcurrentDownloads($ip);
-			if ($current >= $limit) {
-				http_response_code(429);
-				die("Too many concurrent downloads. Limit is $limit.");
-			}
-			$activeId = Database::addActiveDownload($ip, $id);
+		$userId = $user ? (int) ($user['id'] ?? 0) : 0;
+		// Nothing below reads or writes the session. Releasing it now keeps this browser's other
+		// requests (the Download button, the panel in another tab) from queueing behind a
+		// transfer that can last minutes.
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			session_write_close();
 		}
 
-		// Ensure cleanup on shutdown/exit
-		register_shutdown_function(function () use ($activeId) {
-			if ($activeId) {
-				Database::removeActiveDownload($activeId);
-			}
+		$limitKey = $user ? 'concurrent_downloads_user' : 'concurrent_downloads_guest';
+		$defaultLimit = $user ? 0 : 1; // Default: 0 (unlimited) for user, 1 for guest
+		$limit = (int) Database::getSetting($limitKey, $defaultLimit);
+		if ($count && $limit > 0 && Database::getConcurrentDownloads($ip) >= $limit) {
+			http_response_code(429);
+			header('Retry-After: 10');
+			die("Too many concurrent downloads. Limit is $limit.");
+		}
+
+		// Every PHP-served stream holds a worker of a shared pool, so each one takes a slot.
+		$slot = self::acquireStreamSlot($ip, $id);
+		if (!$slot['ok']) {
+			http_response_code($slot['status']);
+			header('Retry-After: 5');
+			header('Cache-Control: no-store');
+			exit('Too many files are being streamed right now. Try again in a moment.');
+		}
+		$activeId = (int) $slot['id'];
+		register_shutdown_function(static function () use ($activeId): void {
+			Database::removeActiveDownload($activeId);
 		});
+		$limits = self::streamLimits();
+		$group = self::downloaderGroup($userId ?: null);
+		$rate = max(0, (int) ($group['limit_download'] ?? 0));
+		if (function_exists('set_time_limit')) {
+			@set_time_limit($limits['maxSeconds'] + 30);
+		}
 
 		try {
 			// Previews ($count === false) must not count as downloads — only the actual
@@ -1703,6 +1811,9 @@ class FileManager
 			$end = $range['end'];
 
 			if ($range['status'] === 206) {
+				// A media player asks for `bytes=0-` and then for whatever comes next, so one
+				// bounded slice per request is enough for it — and keeps each request short.
+				$end = min($end, $start + self::STREAM_RANGE_CAP - 1);
 				http_response_code(206);
 				header("Content-Range: bytes {$start}-{$end}/{$fileSize}");
 			}
@@ -1729,31 +1840,93 @@ class FileManager
 			}
 
 			$handle = fopen($filePath, 'rb');
-			if ($start > 0) {
-				fseek($handle, $start);
-			}
-
-			$bufferSize = 8192;
-			$remaining = $length;
-
-			while (!feof($handle) && $remaining > 0) {
-				// Check connection status to abort if client disconnects
-				if (connection_aborted()) {
-					break;
+			if ($handle !== false) {
+				if ($start > 0) {
+					fseek($handle, $start);
 				}
-				$read = min($bufferSize, $remaining);
-				echo fread($handle, $read);
-				$remaining -= $read;
-				flush();
+				self::pumpBytes($handle, $length, $rate, $activeId, microtime(true) + $limits['maxSeconds']);
+				fclose($handle);
 			}
-
-			fclose($handle);
 		} finally {
-			if ($activeId) {
-				Database::removeActiveDownload($activeId);
-			}
+			Database::removeActiveDownload($activeId);
 		}
 		exit;
+	}
+
+	/** Bytes per write (and per throttle step when the group has a speed limit). */
+	private const STREAM_CHUNK = 65536;
+	/** How often a running stream refreshes its lease and notices an administrator's kill. */
+	private const STREAM_HEARTBEAT_SECONDS = 5;
+	/** The most a ranged preview/embed answer carries; players request the next slice. */
+	public const STREAM_RANGE_CAP = 8388608;
+
+	/**
+	 * Take a stream slot for this address, or say why not.
+	 *
+	 * The row is written first and the caps counted afterwards, so two requests racing for
+	 * the last slot cannot both get it (at worst both are refused and retry).
+	 *
+	 * @return array{ok: bool, id: ?int, status: int}
+	 */
+	public static function acquireStreamSlot(string $ip, string $fileId): array
+	{
+		$activeId = Database::addActiveDownload($ip, $fileId);
+		if (!$activeId) {
+			return ['ok' => false, 'id' => null, 'status' => 503];
+		}
+		$limits = self::streamLimits();
+		if (ActiveDownloadRepository::countPhpStreams($ip) > $limits['perIp']
+			|| ActiveDownloadRepository::countPhpStreams() > $limits['global']) {
+			Database::removeActiveDownload($activeId);
+			return ['ok' => false, 'id' => null, 'status' => 429];
+		}
+		return ['ok' => true, 'id' => $activeId, 'status' => 200];
+	}
+
+	/**
+	 * Copy up to $length bytes from $handle to the client.
+	 *
+	 * Stops early when the client goes away, when the stream outlives $deadline (a slow reader
+	 * must not hold a shared worker for ever — ranged players simply ask again), or when the
+	 * lease row disappears because an administrator killed the transfer. With $rate > 0 the
+	 * output is paced to that many bytes per second, the group's download speed limit.
+	 *
+	 * @param resource $handle
+	 * @return int bytes sent
+	 */
+	public static function pumpBytes($handle, int $length, int $rate, ?int $activeId, float $deadline): int
+	{
+		$chunk = $rate > 0 ? max(4096, min(self::STREAM_CHUNK, intdiv($rate, 4))) : self::STREAM_CHUNK;
+		$started = microtime(true);
+		$lastBeat = $started;
+		$sent = 0;
+		$remaining = $length;
+		while ($remaining > 0 && !feof($handle)) {
+			if (connection_aborted() || microtime(true) > $deadline) {
+				break;
+			}
+			if ($activeId !== null && microtime(true) - $lastBeat >= self::STREAM_HEARTBEAT_SECONDS) {
+				if (!ActiveDownloadRepository::heartbeat($activeId)) {
+					break;
+				}
+				$lastBeat = microtime(true);
+			}
+			$data = fread($handle, min($chunk, $remaining));
+			if ($data === false || $data === '') {
+				break;
+			}
+			echo $data;
+			flush();
+			$sent += strlen($data);
+			$remaining -= strlen($data);
+			if ($rate > 0) {
+				$wait = ($started + $sent / $rate) - microtime(true);
+				if ($wait > 0) {
+					usleep((int) min(1000000, $wait * 1000000));
+				}
+			}
+		}
+		return $sent;
 	}
 	public static function deleteAllUserFiles(int $userId): int
 	{

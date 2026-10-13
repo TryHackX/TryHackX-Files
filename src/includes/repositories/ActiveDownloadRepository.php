@@ -30,6 +30,60 @@ final class ActiveDownloadRepository
 		}
 	}
 
+	/**
+	 * How long a PHP-served stream counts without a heartbeat. The streamer refreshes its row
+	 * every few seconds, so a worker that died mid-transfer stops blocking new ones quickly.
+	 */
+	public const PHP_STREAM_FRESH_SECONDS = 30;
+
+	/** Live PHP-served streams (previews, embeds), for the whole site or one address. */
+	public static function countPhpStreams(?string $ip = null): int
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return 0;
+		}
+		$sql = "SELECT COUNT(*) FROM `" . Database::table('active_downloads') . "`
+			WHERE `instance_id` LIKE 'php-%' AND `heartbeat_at` >= ?";
+		$params = [time() - self::PHP_STREAM_FRESH_SECONDS];
+		if ($ip !== null) {
+			$sql .= ' AND `ip_address` = ?';
+			$params[] = $ip;
+		}
+		try {
+			$stmt = $pdo->prepare($sql);
+			$stmt->execute($params);
+			return (int) $stmt->fetchColumn();
+		} catch (PDOException $e) {
+			return 0;
+		}
+	}
+
+	/**
+	 * Refresh a stream's lease. False when the row is gone — an administrator killed the
+	 * transfer from the live list — so the streamer stops instead of carrying on unseen.
+	 */
+	public static function heartbeat(int $id): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return true; // never cut a transfer because the database blinked
+		}
+		$table = Database::table('active_downloads');
+		try {
+			$stmt = $pdo->prepare("UPDATE `{$table}` SET `heartbeat_at` = ? WHERE `id` = ?");
+			$stmt->execute([time(), $id]);
+			if ($stmt->rowCount() > 0) {
+				return true;
+			}
+			$exists = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `id` = ?");
+			$exists->execute([$id]);
+			return (bool) $exists->fetchColumn();
+		} catch (PDOException $e) {
+			return true;
+		}
+	}
+
 	public static function remove(int $id): void
 	{
 		$pdo = Database::getInstance();
@@ -82,7 +136,6 @@ final class ActiveDownloadRepository
 		}
 	}
 
-	/** Live list of in-progress downloads (Faza 2.1), joined with the file name. */
 	/**
 	 * Uploads currently in flight (pt 8) — the mirror of listActive().
 	 *
@@ -176,6 +229,7 @@ final class ActiveDownloadRepository
 		}
 	}
 
+	/** Live list of in-progress downloads (Faza 2.1), joined with the file name. */
 	public static function listActive(int $limit = 100): array
 	{
 		$pdo = Database::getInstance();
@@ -211,7 +265,9 @@ final class ActiveDownloadRepository
 		}
 		try {
 			$stmt = $pdo->prepare("DELETE FROM `" . Database::table('active_downloads') . "` WHERE `id` = ?");
-			return $stmt->execute([$id]);
+			$stmt->execute([$id]);
+			// Saying "killed" about a transfer that had already ended would be a false report.
+			return $stmt->rowCount() === 1;
 		} catch (PDOException $e) {
 			return false;
 		}

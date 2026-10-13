@@ -216,49 +216,27 @@ final class FileController
 		// Password-protected files: require the correct password before issuing a token. After
 		// repeated failures the same CAPTCHA proof used by the download page becomes mandatory.
 		if (Database::fileIsProtected($id)) {
-			$ip = getClientIP();
-			$failCount = Database::getSecurityEvent($ip, 'file_password_fail');
-			$passwordThreshold = (int) Database::getSetting('recaptcha_file_password_threshold', 3);
-			if ($passwordThreshold >= 0 && $failCount >= $passwordThreshold && Database::isRecaptchaEnabled()) {
-				if (!$captchaProof || !Database::verifyUploadToken($captchaProof, $ip)) {
-					echo json_encode(['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')]);
-					return;
-				}
-				Database::deleteUploadToken($captchaProof);
-				$captchaWasAccepted = true;
-				Database::clearSecurityEvent($ip, 'file_password_fail');
-				$failCount = 0;
+			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $captchaProof, true);
+			if ($gate['refusal'] !== null) {
+				self::sendRefusal($gate['refusal']);
+				return;
 			}
+			$captchaWasAccepted = $gate['captcha_accepted'];
 			$pwRaw = $input['pw'] ?? $_POST['pw'] ?? $_GET['pw'] ?? '';
 			$pw = is_string($pwRaw) && strlen($pwRaw) <= InputLimits::PASSWORD_MAX ? $pwRaw : '';
 			if ($pw === '' || !Database::verifyFilePassword($id, $pw)) {
-				Database::incrementSecurityEvent($ip, 'file_password_fail');
-				$captchaNext = $passwordThreshold >= 0 && ($failCount + 1) >= $passwordThreshold && Database::isRecaptchaEnabled();
-				echo json_encode($captchaNext
-					? ['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')]
-					: ['success' => false, 'require_password' => true]);
+				echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, true));
 				return;
 			}
-			Database::clearSecurityEvent($ip, 'file_password_fail');
+			Database::clearSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
 		}
 
-		// CAPTCHA Logic
+		// CAPTCHA Logic: 0 = always, -1 = never, N = every Nth download of this session.
 		if (Database::isRecaptchaEnabled()) {
 			$threshold = (int) Database::getSetting('recaptcha_download_threshold', 0);
-			// 0 = Always, -1 = Disabled, N = Every N clicks
-
 			if ($threshold !== -1) {
-				$requireCaptcha = false;
-				$currentCount = $_SESSION['download_clicks_counter'] ?? 0;
-				$nextCount = $currentCount + 1;
-
-				if ($threshold === 0) {
-					$requireCaptcha = true;
-				} else {
-					if ($nextCount % $threshold === 0) {
-						$requireCaptcha = true;
-					}
-				}
+				$nextCount = (int) ($_SESSION['download_clicks_counter'] ?? 0) + 1;
+				$requireCaptcha = FileManager::downloadCaptchaDue();
 
 				if ($requireCaptcha) {
 					// If we have a valid proof, we allow it this time
@@ -319,6 +297,23 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.preview_unsupported')]);
 			return;
 		}
+		// A preview is the whole file without counting as a download; see previewPolicy().
+		$policy = FileManager::previewPolicy(
+			$file,
+			isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null,
+			getClientIP()
+		);
+		if (!$policy['allowed']) {
+			http_response_code(403);
+			header('Content-Type: application/json');
+			header('Cache-Control: no-store');
+			echo json_encode([
+				'success' => false,
+				'preview_withheld' => $policy['reason'],
+				'error' => __('api.preview_withheld'),
+			]);
+			return;
+		}
 
 		FileManager::streamFile($id, false, true, previewGranted($id));
 	}
@@ -364,28 +359,107 @@ final class FileController
 		header('Content-Type: application/json');
 
 		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$id = $input['id'] ?? $_POST['id'] ?? '';
+		$id = (string) ($input['id'] ?? $_POST['id'] ?? '');
 		$pwRaw = $input['pw'] ?? $_POST['pw'] ?? '';
 		$pw = is_string($pwRaw) && strlen($pwRaw) <= InputLimits::PASSWORD_MAX ? $pwRaw : '';
+		$captchaProof = (string) ($input['captcha_proof'] ?? $_POST['captcha_proof'] ?? '');
 
-		if (!$id) {
+		if ($id === '') {
 			echo json_encode(['success' => false, 'error' => __('api.missing_id2')]);
 			return;
 		}
+		$file = FileManager::getFile($id);
+		// Whether a full preview may be shown once unlocked, so the page can fall back to an
+		// icon instead of a player that would only be refused.
+		$previewAllowed = $file !== null && FileManager::previewPolicy(
+			$file,
+			isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null,
+			getClientIP()
+		)['allowed'];
 
 		// Nothing to unlock for unprotected files.
 		if (!Database::fileIsProtected($id)) {
-			echo json_encode(['success' => true]);
+			echo json_encode(['success' => true, 'preview' => $previewAllowed]);
 			return;
 		}
 
-		if ($pw === '' || !Database::verifyFilePassword($id, $pw)) {
-			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
+		// The same password, the same budget as the Download button: this endpoint must not
+		// be a way round the failed-attempt counter and its CAPTCHA.
+		$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $captchaProof, true);
+		if ($gate['refusal'] !== null) {
+			self::sendRefusal($gate['refusal']);
 			return;
 		}
+		if ($pw === '' || !Database::verifyFilePassword($id, $pw)) {
+			echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, true) + ['error' => __('api.bad_password')]);
+			return;
+		}
+		Database::clearSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
 
 		$_SESSION['preview_grants'][$id] = time();
-		echo json_encode(['success' => true]);
+		echo json_encode(['success' => true, 'preview' => $previewAllowed]);
+	}
+
+	private const FILE_PASSWORD_EVENT = 'file_password_fail';
+	private const COLLECTION_PASSWORD_EVENT = 'collection_password_fail';
+	/** Wrong passwords per address and security window after which guessing simply stops. */
+	private const PASSWORD_FAIL_HARD_LIMIT = 20;
+
+	/**
+	 * Decide whether another password guess may be checked at all.
+	 *
+	 * Every endpoint that checks a file or collection password goes through here, so none of
+	 * them is a cheaper oracle than the others. Past `recaptcha_file_password_threshold`
+	 * failures a CAPTCHA proof is required where the page can show one ($captchaCapable);
+	 * past PASSWORD_FAIL_HARD_LIMIT the answer is "try later" whatever is supplied, which is
+	 * also the only brake on an installation that runs without a CAPTCHA.
+	 *
+	 * @return array{refusal: ?array{status: int, body: array}, captcha_accepted: bool}
+	 */
+	private static function passwordAttemptGate(string $event, string $captchaProof, bool $captchaCapable): array
+	{
+		$ip = getClientIP();
+		$fails = Database::getSecurityEvent($ip, $event);
+		if ($fails >= self::PASSWORD_FAIL_HARD_LIMIT) {
+			return ['refusal' => [
+				'status' => 429,
+				'body' => ['success' => false, 'error' => __('api.too_many_attempts')],
+			], 'captcha_accepted' => false];
+		}
+		$threshold = (int) Database::getSetting('recaptcha_file_password_threshold', 3);
+		if ($captchaCapable && $threshold >= 0 && $fails >= $threshold && Database::isRecaptchaEnabled()) {
+			if ($captchaProof === '' || !Database::verifyUploadToken($captchaProof, $ip)) {
+				return ['refusal' => [
+					'status' => 200,
+					'body' => ['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')],
+				], 'captcha_accepted' => false];
+			}
+			Database::deleteUploadToken($captchaProof);
+			Database::clearSecurityEvent($ip, $event);
+			return ['refusal' => null, 'captcha_accepted' => true];
+		}
+		return ['refusal' => null, 'captcha_accepted' => false];
+	}
+
+	/** Count one wrong password and say what the next attempt will need. */
+	private static function passwordFailure(string $event, bool $captchaCapable): array
+	{
+		$ip = getClientIP();
+		Database::incrementSecurityEvent($ip, $event);
+		$fails = Database::getSecurityEvent($ip, $event);
+		$threshold = (int) Database::getSetting('recaptcha_file_password_threshold', 3);
+		if ($captchaCapable && $threshold >= 0 && $fails >= $threshold && Database::isRecaptchaEnabled()) {
+			return ['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')];
+		}
+		return ['success' => false, 'require_password' => true];
+	}
+
+	/** @param array{status: int, body: array} $refusal */
+	private static function sendRefusal(array $refusal): void
+	{
+		http_response_code($refusal['status']);
+		header('Content-Type: application/json');
+		echo json_encode($refusal['body']);
 	}
 
 	public static function handleInfo()
@@ -1184,6 +1258,11 @@ final class FileController
 		}
 		$allowed = [];
 		$rejected = [];
+		// Member passwords are file passwords: they share the failed-attempt budget of the
+		// download page, so building or unlocking a collection is no cheaper way to guess one.
+		$throttled = Database::getSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT)
+			>= self::PASSWORD_FAIL_HARD_LIMIT;
+		$wrongGuess = false;
 		foreach ($fileIds as $fid) {
 			$row = $rows[$fid] ?? null;
 			if (!$row) {
@@ -1198,14 +1277,19 @@ final class FileController
 			$tokRaw = $tokens[$fid] ?? '';
 			$pw = is_string($pwRaw) && strlen($pwRaw) <= InputLimits::PASSWORD_MAX ? $pwRaw : '';
 			$tok = is_string($tokRaw) && strlen($tokRaw) <= InputLimits::SHORT_TEXT_MAX ? $tokRaw : '';
-			if (($pw !== '' && password_verify($pw, (string) $row['password_hash']))
+			$passwordOk = !$throttled && $pw !== '' && password_verify($pw, (string) $row['password_hash']);
+			if ($passwordOk
 				|| ($exemptByToken && $tok !== ''
 					&& self::deleteTokenMatches($tok, (string) $row['delete_token']))
 			) {
 				$allowed[] = $fid;
 			} else {
+				$wrongGuess = $wrongGuess || ($pw !== '' && !$throttled);
 				$rejected[] = $row['original_name'] ?? $fid;
 			}
+		}
+		if ($wrongGuess) {
+			Database::incrementSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
 		}
 		return [$allowed, $rejected];
 	}
@@ -1596,14 +1680,19 @@ final class FileController
 			echo json_encode(['success' => true, 'token' => '']);
 			return;
 		}
-		if (strlen($password) > InputLimits::PASSWORD_MAX) {
+		// The collection page has no CAPTCHA to offer, so the budget here is the hard one.
+		$gate = self::passwordAttemptGate(self::COLLECTION_PASSWORD_EVENT, '', false);
+		if ($gate['refusal'] !== null) {
+			self::sendRefusal($gate['refusal']);
+			return;
+		}
+		if (strlen($password) > InputLimits::PASSWORD_MAX
+			|| !password_verify($password, $col['password_hash'])) {
+			Database::incrementSecurityEvent(getClientIP(), self::COLLECTION_PASSWORD_EVENT);
 			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
 			return;
 		}
-		if (!password_verify($password, $col['password_hash'])) {
-			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
-			return;
-		}
+		Database::clearSecurityEvent(getClientIP(), self::COLLECTION_PASSWORD_EVENT);
 		echo json_encode(['success' => true, 'token' => self::collectionToken($id, $col['delete_token'])]);
 	}
 
@@ -1874,6 +1963,11 @@ final class FileController
 						'name' => (string) $file['original_name'],
 					], $protected),
 				]);
+				return;
+			}
+			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, '', false);
+			if ($gate['refusal'] !== null) {
+				self::sendRefusal($gate['refusal']);
 				return;
 			}
 			$allIds = array_map(static fn(array $file): string => (string) $file['id'], $collection['files'] ?? []);

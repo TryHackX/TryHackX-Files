@@ -301,6 +301,13 @@ header {
 	color: var(--text-muted);
 }
 
+/* A withheld preview: the small thumbnail at its own size, above the note. */
+.preview .preview-thumb {
+	width: auto;
+	max-width: 100%;
+	margin: 0 auto 16px;
+}
+
 .actions {
 	padding: 20px;
 	display: flex;

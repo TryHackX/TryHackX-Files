@@ -1,0 +1,119 @@
+<?php
+
+/**
+ * Bytes served by PHP itself (previews, embeds) hold a worker of a shared pool: they take a
+ * slot under a site-wide and a per-address cap, follow the group's speed limit, stop at a
+ * deadline or when an administrator kills them — and a preview, which never counts as a
+ * download, is withheld wherever counting is the point.
+ */
+final class StreamControlsTest extends RepoTestCase
+{
+	protected function setUp(): void
+	{
+		$this->truncate('active_downloads', 'files', 'transfer_quota_usage', 'security_events');
+		Database::setSetting('php_stream_max_per_ip', '1');
+		Database::setSetting('php_stream_max_global', '2');
+		Database::setSetting('recaptcha_enabled', '0');
+		Database::invalidateSettingsCache();
+		$_SESSION = [];
+	}
+
+	protected function tearDown(): void
+	{
+		$this->truncate('active_downloads', 'files', 'transfer_quota_usage');
+		Database::setSetting('php_stream_max_per_ip', '2');
+		Database::setSetting('php_stream_max_global', '4');
+		$guest = GroupRepository::getBySlug('guest');
+		if ($guest) {
+			Database::getInstance()->prepare(
+				"UPDATE `" . Database::table('groups') . "` SET `transfer_quota_bytes` = 0 WHERE `id` = ?"
+			)->execute([(int) $guest['id']]);
+		}
+		Database::invalidateSettingsCache();
+		$_SESSION = [];
+	}
+
+	public function testSlotsAreCappedPerAddressAndSiteWide(): void
+	{
+		$first = FileManager::acquireStreamSlot('198.51.100.1', 'f1');
+		$this->assertTrue($first['ok']);
+		$second = FileManager::acquireStreamSlot('198.51.100.1', 'f1');
+		$this->assertFalse($second['ok'], 'second stream from one address');
+		$this->assertSame(429, $second['status']);
+
+		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.2', 'f1')['ok']);
+		$this->assertFalse(FileManager::acquireStreamSlot('198.51.100.3', 'f1')['ok'], 'site-wide cap');
+		$this->assertSame(2, ActiveDownloadRepository::countPhpStreams());
+
+		// A refused request leaves no row behind, and an ended stream frees its slot.
+		Database::removeActiveDownload((int) $first['id']);
+		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.3', 'f1')['ok']);
+	}
+
+	public function testStaleLeasesStopCounting(): void
+	{
+		$slot = FileManager::acquireStreamSlot('198.51.100.9', 'f1');
+		Database::getInstance()->prepare(
+			"UPDATE `" . Database::table('active_downloads') . "` SET `heartbeat_at` = ? WHERE `id` = ?"
+		)->execute([time() - ActiveDownloadRepository::PHP_STREAM_FRESH_SECONDS - 5, (int) $slot['id']]);
+		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.9', 'f1')['ok']);
+	}
+
+	public function testKillIsReportedOnlyWhenSomethingWasStoppedAndTheStreamNotices(): void
+	{
+		$slot = FileManager::acquireStreamSlot('198.51.100.4', 'f1');
+		$this->assertTrue(ActiveDownloadRepository::heartbeat((int) $slot['id']));
+		$this->assertTrue(Database::killActiveDownload((int) $slot['id']));
+		$this->assertFalse(Database::killActiveDownload((int) $slot['id']));
+		$this->assertFalse(ActiveDownloadRepository::heartbeat((int) $slot['id']));
+	}
+
+	public function testPumpFollowsTheSpeedLimitAndTheDeadline(): void
+	{
+		$handle = fopen('php://memory', 'w+b');
+		fwrite($handle, str_repeat('x', 300000));
+		rewind($handle);
+		$started = microtime(true);
+		ob_start();
+		$sent = FileManager::pumpBytes($handle, 300000, 200000, null, microtime(true) + 30);
+		$body = (string) ob_get_clean();
+		$elapsed = microtime(true) - $started;
+		$this->assertSame(300000, $sent);
+		$this->assertSame(300000, strlen($body));
+		$this->assertGreaterThan(1.2, $elapsed, '300 kB at 200 kB/s must take about 1.5 s');
+
+		rewind($handle);
+		ob_start();
+		$this->assertSame(0, FileManager::pumpBytes($handle, 300000, 0, null, microtime(true) - 1));
+		ob_end_clean();
+		fclose($handle);
+	}
+
+	public function testPreviewIsWithheldWhereCountingMatters(): void
+	{
+		$this->insertFile('plain1', null, ['size' => 10]);
+		$this->insertFile('once1', null, ['size' => 10, 'one_time' => 1]);
+		$this->insertFile('capped1', null, ['size' => 10, 'max_downloads' => 3]);
+		$file = static fn(string $id): array => ['id' => $id, 'size' => 10];
+
+		$this->assertSame(['allowed' => true, 'reason' => ''], FileManager::previewPolicy($file('plain1'), null, '198.51.100.5'));
+		$this->assertSame('one_time', FileManager::previewPolicy($file('once1'), null, '198.51.100.5')['reason']);
+		$this->assertSame('download_cap', FileManager::previewPolicy($file('capped1'), null, '198.51.100.5')['reason']);
+		$this->assertSame(403, FileManager::authorizeFileRead('once1', 'preview')['status']);
+
+		// A guest whose transfer allowance cannot cover the file.
+		$guest = GroupRepository::getBySlug('guest');
+		$this->assertNotNull($guest);
+		Database::getInstance()->prepare(
+			"UPDATE `" . Database::table('groups') . "` SET `transfer_quota_bytes` = 100, `transfer_quota_period` = 'week' WHERE `id` = ?"
+		)->execute([(int) $guest['id']]);
+		$window = TransferQuotaRepository::periodWindow('week');
+		Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('transfer_quota_usage') . "`
+			 (`subject_type`, `subject_key`, `period`, `period_start`, `used_bytes`, `reserved_bytes`, `updated_at`)
+			 VALUES ('ip', ?, 'week', ?, 95, 0, ?)"
+		)->execute(['198.51.100.5', $window['start'], time()]);
+		$this->assertSame('transfer_quota', FileManager::previewPolicy($file('plain1'), null, '198.51.100.5')['reason']);
+		$this->assertTrue(FileManager::previewPolicy($file('plain1'), null, '198.51.100.6')['allowed']);
+	}
+}

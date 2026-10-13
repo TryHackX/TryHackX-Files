@@ -20,6 +20,7 @@
     let pendingAction = null;
     let currentCaptchaProof = '';
     let filePassword = '';
+    let previewPassword = '';
     let passwordPromptMode = 'download';
 
     async function copyLink() {
@@ -113,6 +114,8 @@
                     doDownload();
                 } else if (pendingAction === 'delete') {
                     doDelete();
+                } else if (pendingAction === 'preview') {
+                    unlockPreviewWithPassword(previewPassword);
                 }
             }
 
@@ -246,10 +249,23 @@
             const result = await window.FHApi.post('preview_auth', {
                 id: config.fileId,
                 pw: password,
+                captcha_proof: currentCaptchaProof || undefined,
             });
             if (result.success) {
                 hidePasswordPrompt();
-                renderPreview();
+                previewPassword = '';
+                if (result.preview === false) {
+                    renderPreviewWithheld();
+                } else {
+                    renderPreview();
+                }
+            } else if (result.require_captcha) {
+                // Same failed-attempt budget as the Download button: prove a human, then retry.
+                previewPassword = password;
+                hidePasswordPrompt();
+                captchaVerified = false;
+                currentCaptchaProof = '';
+                showCaptchaModal('preview');
             } else if (result.require_password) {
                 showPasswordPrompt('preview', true);
             } else {
@@ -258,6 +274,18 @@
         } catch (_error) {
             showToast(window.t('common.connection_error'));
         }
+    }
+
+    /** Unlocked, but the file is one the server will not stream as a preview. */
+    function renderPreviewWithheld() {
+        const slot = byId('previewSlot');
+        if (!slot) return;
+        const note = document.createElement('p');
+        note.className = 'preview-withheld';
+        note.textContent = window.t('download.preview_withheld');
+        slot.replaceChildren(note);
+        const locked = byId('previewLocked');
+        if (locked) locked.hidden = true;
     }
 
     function renderPreview() {
@@ -442,8 +470,9 @@
                 renderReportCaptcha();
             }
             const errorText = result.error || window.t('report.generic_error');
-            const validationMarkers = ['fill in', 'wypełnij', 'Invalid email', 'Nieprawidłowy'];
-            message.className = validationMarkers.some((marker) => errorText.includes(marker))
+            // The server says what kind of refusal it is; the wording is translated and must
+            // never be what the styling depends on.
+            message.className = result.error_kind === 'validation'
                 ? 'report-message warning'
                 : 'report-message error';
             message.textContent = errorText;
@@ -510,6 +539,15 @@
         document.querySelectorAll('.captcha-modal.show').forEach((modal) => {
             modal.classList.remove('show');
         });
+    });
+
+    // A withheld preview shows the thumbnail when there is one; without it, just the note.
+    document.querySelectorAll('img[data-thumb-fallback]').forEach((image) => {
+        if (image.complete && image.naturalWidth === 0) {
+            image.remove();
+            return;
+        }
+        image.addEventListener('error', () => image.remove(), { once: true });
     });
 
     initializeEmbedCodes();

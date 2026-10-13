@@ -33,6 +33,21 @@ final class ReportController
 			&& filter_var($value, FILTER_VALIDATE_URL) !== false;
 	}
 
+	/**
+	 * Text for a reporter's e-mail. The reporter has no account and therefore no saved
+	 * language, so the installation's default language is the best guess — not whichever
+	 * language the moderator who resolved the report happens to use.
+	 */
+	public static function reporterText(string $key, array $params): string
+	{
+		return Lang::translateFor(self::reporterLanguage(), $key, $params);
+	}
+
+	private static function reporterLanguage(): string
+	{
+		return (string) Database::getSetting('default_language', 'pl');
+	}
+
 	private static function requirePermission(string $permission): bool
 	{
 		if (empty($_SESSION['user_id']) || !Permissions::has($permission)) {
@@ -81,14 +96,15 @@ final class ReportController
 		}
 
 		if ($recaptchaReportRequired && Database::isRecaptchaEnabled()) {
+			// The page solves the CAPTCHA through `verify_captcha` and sends the proof token it
+			// got back, the same flow as downloads and deletions.
 			if (empty($captchaProof) || !Database::verifyUploadToken($captchaProof, $ip)) {
-				// Note: We use verifyUploadToken because frontend likely obtains a proof/token, not raw captcha response string?
-				// The frontend likely sends the raw g-recaptcha-response if it's the old modal, or the new proof token?
-				// Let's check frontend. If the user says "Internal Error invalid CAPTCHA", it implies we are validating it wrong.
-				// Assuming we switched everything to the unified "Get Token -> Verify Token" flow.
-				// If not, we should probably stick to verifyRecaptcha if it IS a raw response.
-				// BUT the new standard is: frontend resolves captcha -> calls verify_captcha -> gets a token -> sends token.
-				echo json_encode(['success' => false, 'error' => __('api.captcha_invalid'), 'require_captcha' => true]);
+				echo json_encode([
+					'success' => false,
+					'error' => __('api.captcha_invalid'),
+					'error_kind' => 'captcha',
+					'require_captcha' => true,
+				]);
 				return;
 			}
 			// Valid proof -> Consume it
@@ -107,34 +123,31 @@ final class ReportController
 			'info' => self::text($input['info'] ?? '', 20000)
 		];
 
-		// Backend Validation
+		// Backend validation. `error_kind` tells the page what sort of refusal this is; the
+		// wording is translated and must never be what the client matches on.
 		$missing = [];
-		if (empty($data['name']))
-			$missing[] = 'Imię i nazwisko';
-		if (empty($data['email']))
-			$missing[] = 'Email';
-		if (empty($data['entity']))
-			$missing[] = 'Podmiot zgłaszający';
-		if (empty($data['org']))
-			$missing[] = 'Organizacja';
-		if (empty($data['title']))
-			$missing[] = 'Typ naruszenia';
-		if (empty($data['info']))
-			$missing[] = 'Dodatkowe informacje';
+		foreach (['name', 'email', 'entity', 'org', 'title', 'info'] as $field) {
+			if ($data[$field] === '') {
+				$missing[] = __('report.field_' . $field);
+			}
+		}
 
 		if (!empty($missing)) {
-			echo json_encode(['success' => false, 'error' => __('api.fill_required') . implode(', ', $missing) . '.']);
+			echo json_encode([
+				'success' => false,
+				'error' => __('api.fill_required') . implode(', ', $missing) . '.',
+				'error_kind' => 'validation',
+			]);
 			return;
 		}
 
 		if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-			echo json_encode(['success' => false, 'error' => __('api.bad_email')]);
-
+			echo json_encode(['success' => false, 'error' => __('api.bad_email'), 'error_kind' => 'validation']);
 			return;
 		}
 		if (!self::safeHttpUrl($data['link'])) {
 			http_response_code(422);
-			echo json_encode(['success' => false, 'error' => __('api.bad_report_link')]);
+			echo json_encode(['success' => false, 'error' => __('api.bad_report_link'), 'error_kind' => 'validation']);
 			return;
 		}
 
@@ -243,15 +256,20 @@ final class ReportController
 		$fileName = $details['original_name'] ?? '-';
 
 		if (Database::rejectReport($reportId)) {
-			// Send email to $email with $reason
 			if ($email) {
-				$subject = "Aktualizacja zgłoszenia [#$reportId]";
-				$message = "Twoje zgłoszenie dotyczące pliku: $fileName zostało zweryfikowane.\n\nID zgłoszenia: #$reportId\nTytuł zgłoszenia: $reportTitle\nStatus: Odrzucone\nPowód: $reason\n\nDziękujemy za zaangażowanie.\n\nZespół " . APP_NAME;
-				Database::sendEmail(
+				$params = [
+					'id' => $reportId,
+					'file' => $fileName,
+					'title' => $reportTitle,
+					'reason' => $reason !== '' ? $reason : '-',
+					'app' => APP_NAME,
+				];
+				MailService::send(
 					$email,
-					$subject,
-					$message,
-					'report-rejected:' . $reportId
+					self::reporterText('report.mail_subject_rejected', $params),
+					self::reporterText('report.mail_body_rejected', $params),
+					'report-rejected:' . $reportId,
+					self::reporterLanguage()
 				);
 			}
 			echo json_encode(['success' => true]);
@@ -312,19 +330,20 @@ final class ReportController
 				Database::rejectReport($reportId); // Actually this just deletes the report row, which is what we want
 			}
 
+			// $email is only ever set from a stored report, so $reportId is known here.
 			if ($email && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-				$subject = "Aktualizacja zgłoszenia" . ($reportId ? " [#$reportId]" : "") . " - Podjęto działania";
-				$message = "Twoje zgłoszenie dotyczące pliku: $fileName zostało zweryfikowane.\n\n";
-				if ($reportId)
-					$message .= "ID zgłoszenia: #$reportId\n";
-				if ($reportTitle !== '-')
-					$message .= "Tytuł zgłoszenia: $reportTitle\n";
-				$message .= "Status: Zaakceptowane\nPlik nielegalny lub naruszający regulamin został usunięty.\n\nDziękujemy za zgłoszenie.\n\nZespół " . APP_NAME;
-				Database::sendEmail(
+				$params = [
+					'id' => $reportId,
+					'file' => $fileName,
+					'title' => $reportTitle,
+					'app' => APP_NAME,
+				];
+				MailService::send(
 					$email,
-					$subject,
-					$message,
-					'report-accepted:' . ($reportId ?: $fileId)
+					self::reporterText('report.mail_subject_accepted', $params),
+					self::reporterText('report.mail_body_accepted', $params),
+					'report-accepted:' . ($reportId ?: $fileId),
+					self::reporterLanguage()
 				);
 			}
 

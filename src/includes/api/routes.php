@@ -196,9 +196,9 @@ $routes = [
 	'admin_ads_stats' => $read([AdsController::class, 'handleAdminAdsStats'], true, 'ads.metrics'),
 
 	// ---- Collections, language and bans (admin) ----
-	'admin_collections' => $read([AdminController::class, 'handleAdminCollections'], true, 'admin'),
-	'collection_facets' => $read([AdminController::class, 'handleCollectionFacets'], true, 'admin'),
-	'admin_delete_collections' => $write([AdminController::class, 'handleAdminDeleteCollections'], true, 'admin'),
+	'admin_collections' => $read([AdminController::class, 'handleAdminCollections'], true, 'collections.view_all'),
+	'collection_facets' => $read([AdminController::class, 'handleCollectionFacets'], true, 'collections.filters'),
+	'admin_delete_collections' => $write([AdminController::class, 'handleAdminDeleteCollections'], true, 'collections.delete_all'),
 	'admin_doc' => $read([AdminController::class, 'handleAdminDoc'], true, 'admin'),
 	'admin_languages' => $read([AdminController::class, 'handleAdminLanguages'], true, 'admin'),
 	'admin_language_toggle' => $write([AdminController::class, 'handleAdminLanguageToggle'], true, 'admin'),

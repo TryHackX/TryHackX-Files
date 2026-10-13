@@ -21,6 +21,7 @@ $fileId = $_GET['id'] ?? '';
 $file = null;
 $error = null;
 $isProtected = false;
+$previewPolicy = ['allowed' => false, 'reason' => ''];
 
 $recaptchaEnabled = Database::isRecaptchaEnabled();
 $recaptchaOnReport = $recaptchaEnabled ? Database::getSetting('recaptcha_on_report', '0') : '0';
@@ -37,8 +38,15 @@ if (empty($fileId)) {
 	if (!$file) {
 		$error = __('download.err_gone');
 	} else {
-		$file['name'] = urldecode($file['name']);
+		// Names are stored exactly as uploaded (the sidecar decodes the header once); decoding
+		// again turned `C++ notes.pdf` into `C   notes.pdf`.
 		$isProtected = Database::fileIsProtected($fileId);
+		// Whether the whole file may be streamed inline here; see FileManager::previewPolicy().
+		$previewPolicy = FileManager::previewPolicy(
+			$file,
+			isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null,
+			getClientIP()
+		);
 	}
 }
 ?>
@@ -169,6 +177,16 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 							. '<button type="button" class="btn" data-download-action="unlock-preview" style="margin-top:12px;">' . _h('download.preview_show') . '</button>'
 							. '</div>';
 						echo '<div id="previewSlot" data-type="' . htmlspecialchars($type) . '" data-mime="' . htmlspecialchars($file['mimeType']) . '"></div>';
+					} elseif ($isPreviewable && !$previewPolicy['allowed']) {
+						// The whole file would stream here without counting as a download, so for a
+						// one-time link, a capped file, a download behind a CAPTCHA or one past the
+						// transfer allowance the page shows a thumbnail (or the icon) instead.
+						$thumb = in_array($type, ['image', 'video'], true)
+							? '<img class="preview-thumb" data-thumb-fallback src="' . htmlspecialchars($appUrl . '/api/thumb?id=' . rawurlencode($fileId)) . '" alt="' . htmlspecialchars($file['name']) . '">'
+							: '';
+						echo '<div class="preview-icon preview-withheld">'
+							. ($thumb !== '' ? $thumb : '<div class="icon">' . fileIconHtml($file['name'], $file['mimeType']) . '</div>')
+							. '<p>' . _h('download.preview_withheld') . '</p></div>';
 					} else switch ($type) {
 						case 'image':
 							echo '<img src="' . $previewUrl . '" alt="' . htmlspecialchars($file['name']) . '">';
