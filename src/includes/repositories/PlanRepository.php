@@ -17,6 +17,8 @@
  * lapsed assignment back to the default group, so nothing has to run on a schedule for a
  * subscription to end on time.
  */
+require_once __DIR__ . '/../CheckoutHtml.php';
+
 final class PlanRepository
 {
 	/**
@@ -165,6 +167,14 @@ final class PlanRepository
 		if ($row['checkout_type'] === 'builtin') {
 			$row['checkout_url'] = '';
 			$row['checkout_html'] = '';
+		}
+		// The plans page runs under a CSP that blocks scripts, forms and frames, so an HTML block
+		// containing them could only ever be a dead button. Refuse it here, with the reason.
+		if ($row['checkout_type'] === 'html') {
+			$blocked = CheckoutHtml::problem($row['checkout_html']);
+			if ($blocked !== null) {
+				return ['success' => false, 'error' => __('api.plan_html_blocked', ['what' => $blocked])];
+			}
 		}
 
 		// A showcase card describes a tier somebody is already on, so there is nothing to sell,

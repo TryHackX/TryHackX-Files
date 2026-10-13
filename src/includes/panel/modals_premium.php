@@ -156,7 +156,7 @@ if (!defined('APP_ROOT')) {
 			</div>
 			<div class="form-group" id="planCheckoutHtmlRow" style="display:none;" data-plan-sale>
 				<label><?= _h('panel.prem.checkout_snippet') ?></label>
-				<textarea id="planCheckoutHtml" rows="5" maxlength="100000" class="auth-input" placeholder="&lt;form action=&quot;...&quot;&gt;…&lt;/form&gt;"></textarea>
+				<textarea id="planCheckoutHtml" rows="5" maxlength="100000" class="auth-input" placeholder="&lt;p&gt;Bank transfer: …&lt;/p&gt; &lt;a href=&quot;https://…&quot;&gt;Pay&lt;/a&gt;"></textarea>
 				<small><?= _h('panel.prem.checkout_snippet_hint') ?></small>
 			</div>
 			<div class="form-group">

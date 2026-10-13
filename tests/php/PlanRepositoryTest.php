@@ -294,4 +294,26 @@ final class PlanRepositoryTest extends RepoTestCase
 		$this->assertFalse(PlanRepository::delete((int) $plan['id']));
 		$this->assertNotNull(PlanRepository::get((int) $plan['id']));
 	}
+
+	/** The plans page's CSP blocks scripts, forms and frames, so an HTML block holding them is refused on save. */
+	public function testHtmlCheckoutBlockRefusesScriptsFormsAndFrames(): void
+	{
+		foreach (['<script>x()</script>', '<form action="https://pay.example"><button>Pay</button></form>', '<iframe src="https://pay.example"></iframe>', '<a href="javascript:alert(1)">pay</a>', '<p onclick="x()">pay</p>'] as $html) {
+			$res = PlanRepository::save(null, [
+				'name' => 'Html plan', 'group_id' => $this->groupId, 'checkout_type' => 'html', 'checkout_html' => $html,
+			]);
+			$this->assertFalse($res['success'], $html);
+		}
+		$ok = PlanRepository::save(null, [
+			'name' => 'Html plan', 'group_id' => $this->groupId, 'checkout_type' => 'html',
+			'checkout_html' => '<p><strong>Bank transfer</strong><br>PL00 0000 0000 0000<br><a href="https://pay.example/">Pay online</a></p>',
+		]);
+		$this->assertTrue($ok['success'], (string) ($ok['error'] ?? ''));
+		// other checkout types never look at the HTML field's content
+		$link = PlanRepository::save(null, [
+			'name' => 'Link plan', 'group_id' => $this->groupId, 'checkout_type' => 'link',
+			'checkout_url' => 'https://pay.example/', 'checkout_html' => '<script>ignored</script>',
+		]);
+		$this->assertTrue($link['success']);
+	}
 }
