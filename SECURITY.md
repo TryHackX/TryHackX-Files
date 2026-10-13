@@ -2,8 +2,9 @@
 
 ## Supported version
 
-Until the first stable release, security fixes are made only on the newest revision of the
-`main` branch.
+Security fixes are made on the newest revision of the `main` branch and published as a new
+tagged release (`vX.Y.Z`); only the latest tag is supported. Older releases are not patched, so
+upgrade using [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## Reporting a vulnerability
 

@@ -1,14 +1,20 @@
 # Releasing TryHackX Files
 
-This checklist is for the first public GitHub release and later tagged releases. Run it from the
-repository root. A release must be built from a reviewed commit, never directly from a working
-deployment directory containing uncommitted runtime data.
+This checklist is for every tagged release. Run it from the repository root. A release must be
+built from a reviewed commit, never directly from a working deployment directory containing
+uncommitted runtime data.
 
 ## 1. Freeze the release scope
 
 Before staging files:
 
-1. finish the release notes and version update;
+1. finish the release notes and version update. The number appears in `src/config.php`
+   (`APP_VERSION`), the fallback in `scripts/mail-worker.php`, `SERVER_VERSION` in
+   `upload_server.py`, the first `## [x.y.z]` heading of `CHANGELOG.md` and the sentences in
+   `docs/MIGRATION.md`, `docs/P24.md` and `docs/ROADMAP.md`; `scripts/check-repository-policy.php`
+   fails when they disagree. Also state the schema version in `docs/MIGRATION.md` and describe any
+   change to `scripts/*.service` or `requirements-lock.txt` there, because the operator applies
+   those with `scripts/install-debian.sh` and a rebuilt `venv/`;
 2. make `LICENSE`, the README license section and package metadata agree;
 3. identify the copyright holder and an approved commercial-licensing contact channel;
 4. preserve the licenses and notices of bundled third-party components;
@@ -208,14 +214,11 @@ Run `php scripts/check-repository-policy.php` once more against the final staged
 
 ## 6. Publish the commit, then the tag
 
-Before the first commit, verify the author identity that Git will embed permanently in public
-history. If the personal mailbox must stay private, copy the exact GitHub-provided `noreply`
-address from **GitHub Settings -> Emails** and configure it for this repository; do not invent or
-guess the numeric form:
+Verify the author identity that Git will embed permanently in public history. If the personal
+mailbox must stay private, use the exact GitHub-provided `noreply` address from **GitHub
+Settings -> Emails**; do not invent or guess the numeric form:
 
 ```text
-git config --local user.name "TryHackX"
-git config --local user.email "<exact-address-from-GitHub-Settings>"
 git config --local --get user.name
 git config --local --get user.email
 ```
@@ -224,13 +227,12 @@ Create and push the release commit first:
 
 ```text
 git commit -m "Prepare TryHackX Files X.Y.Z"
-git branch -M main
-git remote add origin <GitHub-repository-URL>   # only when origin does not exist
-git push -u origin main
+git push origin main
 ```
 
-Wait for every required GitHub Actions job to pass. Then create an annotated tag from that exact
-green commit and publish it:
+Wait for every required GitHub Actions job to pass (push runs happen for `main` and for tags;
+other branches are tested through their pull request). Then create an annotated tag from that
+exact green commit and publish it:
 
 ```text
 git tag -a vX.Y.Z -m "TryHackX Files X.Y.Z"
@@ -241,5 +243,6 @@ Create the GitHub Release from `vX.Y.Z`, verify its generated source archive, an
 notes describing security-relevant configuration or migration steps. Do not attach a copy made
 from the live working directory.
 
-For the first public repository, also enable branch protection, private vulnerability reporting,
-Dependabot alerts and GitHub secret scanning before announcing the release.
+Keep branch protection (required status checks: the job names in `.github/workflows/ci.yml`,
+which change when the test matrix does), private vulnerability reporting, Dependabot alerts and
+GitHub secret scanning enabled.

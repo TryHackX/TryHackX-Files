@@ -9,10 +9,10 @@
  * regardless of how often this runs.
  *
  * Run from cron / Task Scheduler, e.g. every 15 minutes:
- *   *\/15 * * * *  php /path/to/pon/scripts/cleanup.php >> /var/log/filehost-cleanup.log 2>&1
+ *   *\/15 * * * *  php /path/to/filehost/scripts/cleanup.php >> /var/log/filehost-cleanup.log 2>&1
  *
  * Windows Task Scheduler (daily/hourly):
- *   php.exe C:\wamp64\www\pon\scripts\cleanup.php
+ *   php.exe C:\wamp64\www\filehost\scripts\cleanup.php
  *
  * Safe to run by hand; it is idempotent and prints a one-line summary.
  */

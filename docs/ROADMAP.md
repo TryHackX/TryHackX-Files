@@ -11,8 +11,7 @@ changes belong in [CHANGELOG.md](../CHANGELOG.md).
 
 ## Owner roadmap — remaining items
 
-This section preserves the owner's open ideas and decisions. The Codex audit section begins at
-the explicit marker below.
+This section preserves the owner's open ideas and decisions. The audit addendum begins below.
 
 ### ⛔ Przelewy24 merchant sandbox validation
 
@@ -57,9 +56,7 @@ validated JSON and will not gain an in-panel editor.
 
 ---
 
-<!-- BEGIN CODEX AUDIT 2026-07-26 -->
-
-## Codex audit addendum — open items only
+## Audit addendum — open items only
 
 ### ⛔ AUD-OPEN-02 — first real Docker end-to-end run
 
@@ -86,5 +83,3 @@ server are already separated.
 New roadmap work requires a reproducing test, concurrency tests for lease/reservation protocols,
 forward-repair for schema changes, secret-free telemetry and updated documentation. Destructive
 operations additionally require preview, audit logging and a tested backup/restore path.
-
-<!-- END CODEX AUDIT 2026-07-26 -->
