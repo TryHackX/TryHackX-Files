@@ -28,6 +28,13 @@ as a deployment test.
 | `app` | Apache + PHP and Python upload server under Supervisor | `${HTTP_PORT:-8080}` → 80 |
 | `db` | MySQL 8.4 | internal only |
 
+The image is built on the official `php:8.5-apache-trixie` (PHP 8.5 and Python 3.13 on Debian 13,
+the production combination), pinned by digest; Dependabot refreshes tag and digest. It starts from
+`php.ini-production` plus `docker/php-overrides.ini` (errors to the container log, no
+`X-Powered-By`) and `docker/apache-security.conf` (no Apache version banner), and its GD supports
+JPEG, PNG, WebP and FreeType. The Python environment is installed from `requirements-lock.txt`
+before the sources are copied, so editing code does not reinstall it.
+
 Apache and Python share one container because the public rules proxy transfer, ZIP, thumbnail,
 ShareX and QR routes to loopback `127.0.0.1:8001`. Python trusts forwarded client addresses only
 from its loopback peer.
