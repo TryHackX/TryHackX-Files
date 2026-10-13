@@ -397,6 +397,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<?php endif; ?>
 	<script src="<?= $appUrl ?>/assets/js/panel.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-table-sort.js?v=<?= APP_VERSION ?>"></script>
+	<script src="<?= $appUrl ?>/assets/js/panel-tabs.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-events.js?v=<?= APP_VERSION ?>"></script>
 </body>
 

@@ -208,7 +208,12 @@
 		if (!holder) return;
 		if (!series.length) { holder.textContent = t('panel.dash.no_data'); return; }
 
-		const W = 640, H = 210, padL = 54, padR = 16, padT = 16, padB = 26;
+		// Drawn at the card's real width, up to the 640-unit layout desktop has always used: a
+		// fixed 640 viewBox scaled into a ~285px phone card shrank the axis labels to ~4px.
+		const W = Math.max(300, Math.min(640, Math.round(holder.clientWidth || 640)));
+		const narrow = W < 480;
+		const valueFont = narrow ? 11 : 9, dateFont = narrow ? 11 : 10;
+		const H = 210, padL = narrow ? 62 : 54, padR = 16, padT = 16, padB = 26;
 		const plotW = W - padL - padR;
 		const plotH = H - padT - padB;
 		const base = padT + plotH;
@@ -227,13 +232,14 @@
 			const gy = y(val);
 			const dash = i === levels ? ' stroke-dasharray="5 4"' : (i === 0 ? '' : ' stroke-dasharray="2 5"');
 			grid += `<line x1="${padL}" y1="${gy}" x2="${W - padR}" y2="${gy}" stroke="var(--border)" stroke-width="1"${dash}/>`;
-			grid += `<text x="${padL - 8}" y="${gy + 3}" font-size="9" fill="var(--text-muted)" text-anchor="end">${formatSize(val)}</text>`;
+			grid += `<text x="${padL - 8}" y="${gy + 3}" font-size="${valueFont}" fill="var(--text-muted)" text-anchor="end">${formatSize(val)}</text>`;
 		}
 		// Solid baseline axis.
 		grid += `<line x1="${padL}" y1="${base}" x2="${W - padR}" y2="${base}" stroke="var(--border)" stroke-width="1.5"/>`;
 
-		// Print every nth label so a long range doesn't turn the axis into a smear.
-		const every = Math.max(1, Math.ceil(series.length / 12));
+		// Print every nth label so a long range doesn't turn the axis into a smear (12 labels across
+		// the desktop width, proportionally fewer on a narrow card).
+		const every = Math.max(1, Math.ceil(series.length / Math.max(4, Math.round(12 * plotW / 570))));
 
 		let bars = '';
 		series.forEach((s, i) => {
@@ -243,7 +249,7 @@
 			bars += `<rect x="${x + gap / 2}" y="${upY}" width="${half}" height="${Math.max(0, base - upY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gUp)"><title>${esc(s.date)} · Upload ${formatSize(s.upload)}</title></rect>`;
 			bars += `<rect x="${x + gap / 2 + half}" y="${dlY}" width="${half}" height="${Math.max(0, base - dlY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gDl)"><title>${esc(s.date)} · Download ${formatSize(s.download)}</title></rect>`;
 			if (i % every === 0) {
-				bars += `<text x="${x + bw / 2}" y="${H - 8}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${esc(trafficLabel(s.date, bucket))}</text>`;
+				bars += `<text x="${x + bw / 2}" y="${H - 8}" font-size="${dateFont}" fill="var(--text-muted)" text-anchor="middle">${esc(trafficLabel(s.date, bucket))}</text>`;
 			}
 		});
 

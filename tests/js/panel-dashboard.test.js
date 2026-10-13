@@ -139,3 +139,57 @@ test('top files widget says when the server cut the period to the detailed log',
 	await window.FHPanelDashboard.loadTopFiles();
 	assert.equal(label.textContent, 'panel.top.all panel.top.clamped:30');
 });
+
+async function renderTrafficAt(clientWidth) {
+	const holder = { clientWidth, innerHTML: '', textContent: '' };
+	const series = Array.from({ length: 30 }, (_, i) => ({
+		date: `2026-09-${String(i + 1).padStart(2, '0')}`,
+		upload: 1000 * (i + 1),
+		download: 500 * (i + 1)
+	}));
+	const document = {
+		getElementById(id) {
+			if (id === 'panelBootstrap') {
+				return { dataset: { config: JSON.stringify({ apiUrl: '/api.php', tab: 'dashboard' }) } };
+			}
+			return id === 'trafficChart' ? holder : null;
+		},
+		querySelector() { return null; },
+		querySelectorAll() { return []; },
+		visibilityState: 'visible'
+	};
+	const window = {
+		FHUtil: { esc: v => String(v ?? ''), formatSize: v => String(v), formatDate: v => String(v) },
+		t: key => key,
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, {
+		console,
+		document,
+		localStorage: { getItem() { return null; }, setItem() {} },
+		setInterval() { return 1; },
+		clearInterval() {},
+		URLSearchParams,
+		FHApi: { get: async () => ({ success: true, from: 0, to: 0, bucket: 'day', series }) },
+		window
+	}, { filename: 'panel-dashboard.js' });
+	await window.FHPanelDashboard.loadTraffic();
+	return holder.innerHTML;
+}
+
+test('traffic chart is drawn at a phone card\'s real width with readable labels', async () => {
+	const svg = await renderTrafficAt(285);
+	assert.match(svg, /viewBox="0 0 300 210"/);
+	assert.doesNotMatch(svg, /font-size="(?:9|10)"/);
+	assert.match(svg, /font-size="11"/);
+	// 30 daily buckets on a narrow card: no more than a handful of date labels.
+	assert.ok((svg.match(/text-anchor="middle"/g) || []).length <= 8);
+});
+
+test('traffic chart keeps the desktop 640-unit layout on wide cards', async () => {
+	const svg = await renderTrafficAt(1100);
+	assert.match(svg, /viewBox="0 0 640 210"/);
+	assert.match(svg, /font-size="9"/);
+	assert.match(svg, /font-size="10"/);
+});

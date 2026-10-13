@@ -591,6 +591,11 @@ final class HttpApiTest extends TestCase
 			$res['body']
 		);
 		$this->assertStringContainsString('data-fh-submit=', $res['body']);
+		// The shared foundation comes first so the panel files can override details of it.
+		$basePos = strpos($res['body'], '/assets/css/base.css');
+		$this->assertNotFalse($basePos);
+		$this->assertLessThan(strpos($res['body'], '/assets/css/panel.css'), $basePos);
+		$this->assertStringContainsString('/assets/js/panel-tabs.js', $res['body']);
 		$this->assertStringContainsString('/assets/css/panel-forms.css', $res['body']);
 		$this->assertStringContainsString('/assets/css/panel-shell.css', $res['body']);
 		$this->assertStringContainsString('/assets/css/panel-features.css', $res['body']);
