@@ -1,7 +1,8 @@
 # TryHackX Files testing and quality gates
 
-CI runs the same classes of checks across PHP 8.1/8.4, MySQL 8.4/MariaDB 11.4 and Python
-3.11/3.14.
+CI runs the same classes of checks across PHP 8.1/8.4/8.5, MySQL 8.4, MariaDB 11.4/11.8 (8.5 with
+MariaDB 11.8 is what production runs) and Python 3.11/3.13/3.14. The exact pairs are in
+`.github/workflows/ci.yml`; branches are tested once, through their pull request.
 
 ## Tooling
 
@@ -20,7 +21,9 @@ venv/bin/python -m pip install --require-hashes -r requirements-dev-lock.txt
 venv/bin/python -m pip check
 ```
 
-On Windows use `venv\Scripts\python.exe`.
+On Windows use `venv\Scripts\python.exe`. The locks are compiled with `uv`; the command and the
+reasons are in [tests/README.md](../tests/README.md). PHPUnit is a downloaded phar pinned by
+SHA-256 per PHP version (table in the same file) and kept in the ignored `tools/` directory.
 
 ## Static and fast checks
 

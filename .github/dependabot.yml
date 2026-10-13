@@ -1,25 +1,80 @@
 version: 2
 updates:
+  # One pull request per ecosystem and week: minor and patch bumps arrive grouped, majors stay
+  # separate so each can be read on its own. Everything runs through the same CI as a normal change.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+      time: "05:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 3
+    groups:
+      github-actions:
+        patterns: ["*"]
 
+  # requirements-lock.txt and requirements-dev-lock.txt are compiled with `uv pip compile` (see
+  # tests/README.md). A bump that changes a transitive pin has to regenerate both files; if a
+  # Dependabot pull request edits single pins and the "Install dependencies" step fails, close it
+  # and regenerate the locks instead.
   - package-ecosystem: pip
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+      time: "05:15"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 3
+    cooldown:
+      default-days: 3
+    groups:
+      # pydantic pins pydantic-core to an exact version; they must always move together.
+      pydantic:
+        patterns: ["pydantic", "pydantic-core"]
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: composer
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+      time: "05:30"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 2
+    groups:
+      composer-dev:
+        patterns: ["*"]
 
+  # The Dockerfile lives in docker/, not in the repository root.
   - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:45"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 2
+    ignore:
+      # Moving the PHP minor is a deliberate decision with its own testing; digest and patch
+      # refreshes of the pinned tag still arrive.
+      - dependency-name: php
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+
+  # docker-compose.yml (mysql:8.4).
+  - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 2
+    ignore:
+      # Stay on the 8.4 LTS line instead of being offered an innovation release.
+      - dependency-name: mysql
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

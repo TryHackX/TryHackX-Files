@@ -4,9 +4,11 @@ The project has independent PHP, Python and browser-JavaScript suites, all used 
 [CI](../.github/workflows/ci.yml). Do not hard-code test/assertion counts in documentation; the
 current runner output is authoritative.
 
-CI covers PHP 8.1/8.4 with MySQL 8.4 and MariaDB 11.4, plus Python 3.11/3.14. Separate policy
-checks validate syntax, pinned action SHAs, lock hashes, floating container tags and common
-secret formats.
+CI covers PHP 8.1, 8.4 and 8.5 with MySQL 8.4 and MariaDB 11.4 and 11.8 (the pairs are listed
+in the workflow; 8.5 with MariaDB 11.8 is the production combination), plus Python 3.11, 3.13 and
+3.14. Separate policy checks validate syntax, pinned action SHAs, lock hashes and agreement,
+digest-pinned container bases, the release number in every file that states it, and common secret
+formats.
 
 ## PHPUnit
 
@@ -15,15 +17,23 @@ schema integrity, payments, advertising, notifications, quotas, concurrent lease
 regressions. Every run creates a freshly named database, builds/migrates the schema and deletes
 only that guarded test database plus private temporary storage.
 
-PHPUnit 11.5.56 is pinned with SHA-256:
+The PHPUnit line depends on the PHP version, and CI pins each phar by SHA-256 (the policy check
+fails when a checksum used in the workflow is missing from this table):
+
+| PHP | PHPUnit | SHA-256 |
+|---|---|---|
+| 8.1, 8.2 | 10.5.66 | `42bcac97bbf9fb1aecf5a7d6a1b37123a11e7e295458978f0e268999f6d9e50f` |
+| 8.3, 8.4, 8.5 | 12.5.39 | `cf9a68e3e294257fac2da235c2dcfef29efd90462cafd67941ef32f52142dfce` |
 
 ```bash
 curl --fail --location --silent --show-error \
   --output tools/phpunit.phar \
-  https://phar.phpunit.de/phpunit-11.5.56.phar
-echo "915fa161f496dc04a45cd6032855879bca0bab644048cd0516982dffe678e9f1  tools/phpunit.phar" \
+  https://phar.phpunit.de/phpunit-12.5.39.phar
+echo "cf9a68e3e294257fac2da235c2dcfef29efd90462cafd67941ef32f52142dfce  tools/phpunit.phar" \
   | sha256sum --check --strict
 ```
+
+On Windows without `sha256sum`: `Get-FileHash tools\phpunit.phar -Algorithm SHA256`.
 
 Linux/macOS/CI:
 
@@ -65,17 +75,34 @@ The suite covers file-server helpers and asynchronous protocols including Range/
 reservations, transfer settlement, heartbeat leases, interrupted streams and upload boundaries.
 
 `requirements.txt` and `requirements-dev.txt` are human-maintained inputs. The runtime and test
-locks include all transitive versions and hashes:
+locks include all transitive versions and hashes. They are compiled **universally** with `uv`
+(pinned in `requirements-dev.txt`), so one file installs on Windows and on Linux with Python
+3.11 or newer: platform-specific packages carry environment markers (`uvloop` is installed only
+where it exists, `colorama` only on Windows). A plain `pip-compile` run on one machine cannot do
+that, which is how production once ended up without `uvloop`.
 
 ```bash
-python -m pip install pip-tools==7.6.0
-pip-compile --generate-hashes --strip-extras \
-  --output-file requirements-lock.txt requirements.txt
-pip-compile --generate-hashes --strip-extras \
-  --output-file requirements-dev-lock.txt requirements.txt requirements-dev.txt
+python -m pip install uv==0.13.0
+uv pip compile requirements.txt --universal --python-version 3.11 --generate-hashes --upgrade \
+  -o requirements-lock.txt
+uv pip compile requirements-dev.txt requirements.txt --universal --python-version 3.11 \
+  --generate-hashes --allow-unsafe --upgrade -o requirements-dev-lock.txt
 ```
 
-Update locks in an explicit change and run both full suites.
+Without `--upgrade` the existing pins are kept and only new requirements are resolved. Then prove
+that the result still installs and agrees with itself:
+
+```bash
+python -m venv /tmp/lockcheck && /tmp/lockcheck/bin/python -m pip install --require-hashes \
+  -r requirements-dev-lock.txt && /tmp/lockcheck/bin/python -m pip check
+python -m ruff check upload_server.py tests/python && python -m pytest tests/python -q
+php scripts/check-repository-policy.php
+```
+
+(`venv\Scripts\python.exe` on Windows.) The policy check fails when the two files disagree on a
+shared pin or a requirement is missing from the lock. Update locks in an explicit change and run
+both full suites; `pydantic` and `pydantic-core` always move together because pydantic pins the
+core exactly.
 
 ## Node
 

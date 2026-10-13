@@ -36,6 +36,32 @@ foreach ($workflowFiles as $workflow) {
 	}
 }
 
+/**
+ * The pins of a pip lock file: normalised name => version, environment marker, hash count.
+ *
+ * Understands the `name==1.2.3 ; marker \` + `    --hash=sha256:...` layout that
+ * `uv pip compile --generate-hashes` writes.
+ *
+ * @return array<string, array{version: string, marker: string, hashes: int}>
+ */
+function policyParseLock(string $content): array
+{
+	$pins = [];
+	$current = null;
+	foreach (preg_split('/\R/', $content) ?: [] as $line) {
+		if (preg_match('/^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\\\]+)\s*(?:;\s*([^\\\\]*?))?\s*\\\\?\s*$/', $line, $match)) {
+			$current = strtolower(str_replace('_', '-', $match[1]));
+			$pins[$current] = ['version' => $match[2], 'marker' => trim($match[3] ?? ''), 'hashes' => 0];
+			continue;
+		}
+		if ($current !== null && preg_match('/^\s+--hash=sha256:[0-9a-f]{64}\s*\\\\?\s*$/', $line)) {
+			$pins[$current]['hashes']++;
+		}
+	}
+	return $pins;
+}
+
+$lockPins = [];
 foreach ([$root . '/requirements-lock.txt', $root . '/requirements-dev-lock.txt'] as $lock) {
 	$content = is_file($lock) ? (string) file_get_contents($lock) : '';
 	$relative = basename($lock);
@@ -45,12 +71,102 @@ foreach ([$root . '/requirements-lock.txt', $root . '/requirements-dev-lock.txt'
 	if (preg_match('/^\s*(?:-e|--editable|https?:|git\+)/mi', $content)) {
 		$errors[] = "{$relative} contains an editable or direct unpinned dependency";
 	}
+	$lockPins[$relative] = policyParseLock($content);
+	foreach ($lockPins[$relative] as $name => $pin) {
+		if ($pin['hashes'] < 1) {
+			$errors[] = "{$relative} pins {$name} without a SHA-256 hash";
+		}
+	}
 }
 
+// The two lock files are compiled separately. A package both of them pin must have the same
+// version and marker, otherwise CI tests one set of dependencies and production runs another.
+$runtimePins = $lockPins['requirements-lock.txt'] ?? [];
+$devPins = $lockPins['requirements-dev-lock.txt'] ?? [];
+foreach ($runtimePins as $name => $pin) {
+	if (!isset($devPins[$name])) {
+		$errors[] = "requirements-dev-lock.txt does not pin {$name}, which requirements-lock.txt does";
+	} elseif ($devPins[$name]['version'] !== $pin['version'] || $devPins[$name]['marker'] !== $pin['marker']) {
+		$errors[] = "{$name} differs between the lock files ({$pin['version']} vs {$devPins[$name]['version']}); "
+			. 'recompile both with the commands in tests/README.md';
+	}
+}
+
+// A requirement added to requirements.txt without recompiling would otherwise install nothing.
+$requirementsText = is_file($root . '/requirements.txt') ? (string) file_get_contents($root . '/requirements.txt') : '';
+foreach (preg_split('/\R/', $requirementsText) ?: [] as $requirementLine) {
+	if (preg_match('/^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/', $requirementLine, $match)) {
+		$requirementName = strtolower(str_replace('_', '-', $match[1]));
+		if (!isset($runtimePins[$requirementName])) {
+			$errors[] = "requirements-lock.txt does not pin {$requirementName} from requirements.txt";
+		}
+	}
+}
+
+// Container bases must be pinned by digest so a rebuild cannot silently change the image; the
+// docker and docker-compose Dependabot ecosystems refresh tag and digest together.
 foreach ([$root . '/docker/Dockerfile', $root . '/docker-compose.yml'] as $containerFile) {
 	$content = is_file($containerFile) ? (string) file_get_contents($containerFile) : '';
+	$relative = substr($containerFile, strlen($root) + 1);
 	if (preg_match('/(?:FROM\s+\S+:latest\b|image:\s*\S+:latest\b)/i', $content)) {
-		$errors[] = substr($containerFile, strlen($root) + 1) . ' uses a floating latest tag';
+		$errors[] = "{$relative} uses a floating latest tag";
+	}
+	$references = [];
+	if (preg_match_all('/^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)/mi', $content, $found)) {
+		$references = array_merge($references, $found[1]);
+	}
+	if (preg_match_all('/^\s*image:\s*(\S+)/mi', $content, $found)) {
+		$references = array_merge($references, $found[1]);
+	}
+	foreach ($references as $reference) {
+		if (strcasecmp($reference, 'scratch') !== 0 && !preg_match('/@sha256:[0-9a-f]{64}$/', $reference)) {
+			$errors[] = "{$relative} references {$reference} without an @sha256 digest";
+		}
+	}
+}
+
+// The release number is written in several places by hand. A release that updates only some of
+// them leaves the sidecar, the e-mail worker or the upgrade guide announcing another version.
+$versionSources = [
+	'src/config.php' => "/define\\('APP_VERSION',\\s*'([^']+)'\\)/",
+	'scripts/mail-worker.php' => "/define\\('APP_VERSION',\\s*'([^']+)'\\)/",
+	'upload_server.py' => '/^SERVER_VERSION\s*=\s*"([^"]+)"/m',
+	'docs/MIGRATION.md' => '/upgrades a running installation to \*\*([0-9][^*]*)\*\*/',
+	'docs/P24.md' => '/\*\*Application version:\*\*\s*([0-9][^\s<]*)/',
+	'docs/ROADMAP.md' => '/for version ([0-9][^\s]*)/',
+];
+$changelog = is_file($root . '/CHANGELOG.md') ? (string) file_get_contents($root . '/CHANGELOG.md') : '';
+$versions = [];
+if (preg_match('/^## \[(\d+\.\d+\.\d+[^\]]*)\]/m', $changelog, $match)) {
+	$versions['CHANGELOG.md'] = $match[1];
+} else {
+	$errors[] = 'CHANGELOG.md has no released version heading';
+}
+foreach ($versionSources as $relative => $pattern) {
+	$text = is_file($root . '/' . $relative) ? (string) file_get_contents($root . '/' . $relative) : '';
+	if (preg_match($pattern, $text, $match)) {
+		$versions[$relative] = $match[1];
+	} else {
+		$errors[] = "{$relative} does not state the application version";
+	}
+}
+if (count(array_unique($versions)) > 1) {
+	$summary = [];
+	foreach ($versions as $relative => $value) {
+		$summary[] = "{$relative}={$value}";
+	}
+	$errors[] = 'the application version differs between files: ' . implode(', ', $summary);
+}
+
+// Every PHPUnit phar the workflow downloads has its SHA-256 documented next to the command a
+// developer runs locally, so the two cannot drift apart.
+$workflowText = is_file($root . '/.github/workflows/ci.yml') ? (string) file_get_contents($root . '/.github/workflows/ci.yml') : '';
+$testsReadme = is_file($root . '/tests/README.md') ? (string) file_get_contents($root . '/tests/README.md') : '';
+if (preg_match_all('/phpunit_sha256:\s*([0-9a-f]{64})/', $workflowText, $found)) {
+	foreach (array_unique($found[1]) as $hash) {
+		if (!str_contains($testsReadme, $hash)) {
+			$errors[] = "tests/README.md does not list the PHPUnit phar checksum {$hash} from .github/workflows/ci.yml";
+		}
 	}
 }
 
