@@ -7,6 +7,136 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.80.0] - 2026-10-14
+
+### Security
+
+- Actions that hand out privileges or rewire money (creating administrators, changing roles or
+  passwords, editing groups and plans, payment, ad and CSP settings, broadcasts) now ask for a
+  password entered in the last 10 minutes in the API itself, not only on the panel page; a session
+  restored from a cookie, or a tab left open, could previously call them directly. Only the
+  install owner can set another administrator's password, and nobody can set the owner's.
+- Sign-in is harder to brute-force. Failures and wrong 2FA codes are also counted per account
+  (a captcha, or a 15-minute wait where none is configured), five wrong codes end a pending 2FA
+  sign-in, an authenticator code cannot be reused, and a 2FA account whose secret cannot be read is
+  no longer let in with the password alone. "Sign out other devices" ends their live sessions, and
+  a replayed (stolen) device cookie ends every session of the account.
+- Behind a reverse proxy the client address is read from the right of `X-Forwarded-For`, past your
+  own proxies, so a client can no longer pick its own address to dodge limits and bans.
+  `CF-Connecting-IP` and `X-Real-IP` are believed only when named in the new `TRUSTED_PROXY_HEADER`.
+- Sessions use strict mode and cookie-only ids, HTTPS responses carry HSTS, every page runs under
+  the strict script policy, and signing out is POST-only. The users list no longer sends password
+  hashes or encrypted 2FA secrets to the browser.
+- Text stored by users can no longer inject attributes into admin screens: a collection name or ad
+  alt text containing a quote used to add a handler that the panel ran with the administrator's
+  session. Output is escaped, and those characters are replaced when such a name is saved.
+- File and collection passwords can no longer be guessed through the preview unlock, the collection
+  form or a ZIP's member passwords; they share the Download button's budget (a captcha where one
+  can be shown, and after 20 wrong passwords per address a pause).
+- Previews are no longer free downloads. They streamed the whole file without counting, so a
+  one-time link could be read without burning it and a capped file or a transfer allowance was
+  bypassed; they are now withheld in those cases. Streams PHP serves itself take a slot under a
+  site-wide and a per-address cap, follow the group speed limit and stop after 5 minutes, so slow
+  viewers cannot pin every PHP-FPM worker.
+- Raw HTML and AdSense ad creatives can be saved by administrators only.
+- The upload server can no longer be stopped by a handful of visitors. A signed-in download held a
+  database connection while asking for a second, so twenty at once froze everything; waits now end
+  after 10 s with a 503. A slow webhook receiver gets 15 s in total, `POST /api/qr` refuses bodies
+  over 8 KiB, and a timed-out thumbnail no longer leaves ffmpeg running. It also sends no CORS
+  headers, answers `/reload` and token-less `/metrics` only to local callers, and hides server paths.
+  The public `api.php?action=health` reports only up or down, not paths, config state or PHP version.
+- The upload service runs in a much tighter systemd sandbox (read-only file system except
+  `uploads/` and `data/`, no capabilities, filtered system calls), so a runaway thumbnail or ffmpeg
+  process cannot modify the code or `config/`. The Docker image starts from PHP's production
+  settings and pins its base images by digest.
+
+### Added
+
+- The panel answers a refused sensitive action with an inline password prompt and repeats it. New
+  optional settings, all with working defaults, are listed under Upgrade notes.
+- `scripts/install-debian.sh` can skip MariaDB (`FILEHOST_INSTALL_DB=0`), use PHP-FPM
+  (`FILEHOST_PHP_SAPI=fpm`) and opens storage kept outside the application directory for the
+  sandboxed service. CI also covers PHP 8.5, MariaDB 11.8 and Python 3.13.
+
+### Changed
+
+- The upload service runs on `uvloop` on Linux and every Python dependency is at its newest
+  compatible release (fastapi 0.143, uvicorn 0.54, starlette 1.8, pydantic 2.14, cryptography
+  50.0.2). One universal lock compiled with `uv` installs on Debian and Windows; `websockets`,
+  `watchfiles`, `python-dotenv` and PyYAML, which nothing used, are no longer installed.
+- One shared stylesheet, `assets/css/base.css`, carries the tokens, header, buttons, account modal
+  and toasts for every page (the copies had drifted), and muted text and light-theme status colours
+  meet WCAG AA contrast. Public pages ship only the translations their scripts use (about 9 KB
+  instead of 130 KB), and the panel skips admin-only scripts for accounts that cannot use them.
+- The five-minute schema re-check no longer marks the schema "not ready", so uploads are not
+  answered with 503 while it runs. The REST API, `ads.txt`, payment webhooks and the health probe
+  open no session, and the upload server writes no access log of its own (Apache already does).
+- Announcements to all accounts are written in a few statements and a repeat within ten minutes is
+  a retry; old traffic is folded with an index range instead of a table scan; "top downloaded"
+  offers only the periods the detailed log still covers; e-mail footers are translated.
+- The installer refuses MySQL older than 8.0.1 or MariaDB older than 10.6 (the e-mail outbox needs
+  `SKIP LOCKED`; the documented minimum said 10.4). The Docker image is PHP 8.5 on Debian 13.
+
+### Fixed
+
+- "Stay signed in" works on every page and API call, not only the panel, and uploads made on a
+  remembered device belong to the account. Several tabs opening at once no longer look like a
+  stolen cookie, and a brief database outage signs nobody out. Maintenance mode keeps the 2FA step
+  reachable, and changing the password keeps this browser signed in.
+- Saving the uploads path no longer corrupts `config/config.local.php` when it contains `$0`.
+  Removing html, svg, xml and similar types from the blocked extensions is no longer silently
+  undone; they stay blocked and saving says so.
+- Collection ZIPs containing a file over 2 GiB are complete, files with long non-Latin names can be
+  uploaded, and a slow download is no longer cut off as if an administrator had stopped it.
+- Ad add-ons added after checkout no longer go live on the cheaper payment, rejecting an ad
+  refunds the payment that bought it, and `collection_bottom` shows on every collection page. A
+  promo order cancelled after 72 hours and then paid is delivered, and a paid order that can never
+  be delivered is parked in the audit log instead of re-notifying the buyer every 15 minutes.
+- Deleting files always removes their bytes ("Clean files", reverting an upload by delete token,
+  files already missing with quarantine on). Collections stop at 200 files, and a refused save no
+  longer renames the collection. Moderators can use the collection list and bulk delete.
+- Notification e-mails from the cleanup job (expiry warnings, quota notices, payment results) were
+  silently dropped and are sent now. The mail worker no longer stays `failed` after a minute of
+  database downtime, and captcha verification no longer calls `curl_close()` (deprecated in PHP 8.5).
+- Files picked on the upload page before the session was ready are no longer uploaded
+  anonymously. Smaller page bugs are gone: the password strength meter, "belonging to 12ame",
+  collection-page errors, notice-page icons, dark mode set in the panel, double submits and
+  hard-coded Polish and English text.
+- Phones: the header no longer makes pages wider than the screen, so the account button and dialogs
+  are reachable; the notification list opens under the header; fields are 16px so iOS does not
+  zoom; the dashboard chart and the panel tab bar fit; the panel password page can be autofilled.
+
+### Removed
+
+- API actions with no caller left (`verify_token`, `increment_token`, `user_rename_collection`,
+  `user_check`, `stats`, `get_user_stats`), the helpers behind them, dead code in the upload
+  server, 43 unused translation keys and `.htaccess` guards for directories outside `public/`;
+  `php-intl` from the Debian installer, `mysqli`, `zip` and `python3-pip` from the Docker image.
+
+### Upgrade notes
+
+- No schema change: the database stays at schema 64. Restart the upload server and the mail
+  worker after updating, or rebuild the Docker image.
+- Rebuild the Python environment from the new `requirements-lock.txt` (Python 3.11+): install into
+  `venv.new` with `--require-hashes`, stop the services, swap it into `venv`, start them. On Linux
+  `venv/bin/python -c "import uvloop, httptools"` must succeed.
+- Re-render the systemd units from `scripts/filehost-upload.service` and
+  `scripts/filehost-mail-worker.service` (`scripts/install-debian.sh` does it), then run
+  `systemctl daemon-reload`. The upload service can now write only `uploads/` and `data/`; storage
+  elsewhere (`UPLOADS_PATH`, `DATA_PATH`, `FILE_QUARANTINE_PATH`) needs the drop-in
+  `filehost-upload.service.d/10-storage.conf`, which the installer writes. Re-run it after moving them.
+- MySQL 8.0.1+ or MariaDB 10.6+ is required and checked by the installer.
+- Monitoring that parses `api.php?action=health` must read the new answer,
+  `{success, php: {database_connected}, python: {status, database_connected} | null, python_running}`;
+  `php.version` is gone. A call to `/reload` through a proxy now gets 403.
+- Optional, all with working defaults: settings `php_stream_max_global` (4; keep it below the
+  PHP-FPM pool's `pm.max_children`), `php_stream_max_per_ip` (2) and `php_stream_max_seconds` (300)
+  without a panel field; environment `FILEHOST_DB_ACQUIRE_TIMEOUT` (10 s) and `FILEHOST_IO_THREADS`
+  (64); and, behind a proxy that sets `CF-Connecting-IP` or `X-Real-IP`,
+  `define('TRUSTED_PROXY_HEADER', 'CF-Connecting-IP');` in `config/config.local.php`.
+- Nobody is signed out by the upgrade itself. Everyone signs in once more only if the PHP session
+  store moves, for example to the dedicated PHP-FPM pool that docs/DEBIAN.md recommends.
+
 ## [2.79.2] - 2026-08-26
 
 ### Added
