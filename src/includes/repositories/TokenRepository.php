@@ -121,7 +121,6 @@ final class TokenRepository
 		$table = Database::table('upload_tokens');
 		$tokenLifetime = (int) Database::getSetting('recaptcha_token_lifetime', 120);
 		$validTime = time() - ($tokenLifetime * 60);
-		$maxFiles = (int) Database::getSetting('recaptcha_max_files_per_session', 0);
 
 		try {
 			$stmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE `token` = ? AND `ip_address` = ? AND `created_at` > ?");
@@ -131,6 +130,15 @@ final class TokenRepository
 			if (!$row) {
 				return null;
 			}
+			// The cap the panel saves and the upload server enforces, per audience. This used to
+			// read `recaptcha_max_files_per_session`, a key nothing writes, so the page always
+			// showed "unlimited" until the upload server refused the next file.
+			$maxFiles = (int) Database::getSetting(
+				!empty($row['user_id'])
+					? 'recaptcha_max_files_per_session_auth'
+					: 'recaptcha_max_files_per_session_guest',
+				0
+			);
 			return [
 				'valid' => true,
 				'files_uploaded' => (int) ($row['files_count'] ?? 0),

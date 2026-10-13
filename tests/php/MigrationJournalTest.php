@@ -321,6 +321,49 @@ final class MigrationJournalTest extends RepoTestCase
 		$this->assertNull($row['last_error']);
 	}
 
+	/**
+	 * The five-minute re-check of a healthy schema runs on some visitor's request. It must not
+	 * mark the schema "not ready" (the upload server answers 503 while it says so), must not
+	 * journal or create anything, and must not make other requests queue behind it.
+	 */
+	public function testRoutineRecheckNeitherFlipsReadinessNorQueuesOtherRequests(): void
+	{
+		$pdo = Database::getInstance();
+		$journal = Database::table('migration_journal');
+		$journalState = static fn(): array => $pdo->query(
+			"SELECT `version`, `status`, `attempts` FROM `{$journal}` ORDER BY `version`"
+		)->fetchAll(PDO::FETCH_NUM);
+		Database::migrate();
+		Database::invalidateSettingsCache();
+		$before = $journalState();
+
+		// Another worker is already doing the re-check.
+		$other = new PDO(
+			'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
+			DB_USER,
+			DB_PASS,
+			[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+		);
+		$lockName = 'filehost:recheck:' . sha1(DB_NAME . ':' . DB_PREFIX);
+		$this->assertSame(1, (int) $other->query('SELECT GET_LOCK(' . $other->quote($lockName) . ', 0)')->fetchColumn());
+		$this->assertTrue(Database::setSetting('schema_contract_checked_at', '1'));
+		Database::invalidateSettingsCache();
+
+		$started = microtime(true);
+		Database::migrate();
+		$this->assertLessThan(2.0, microtime(true) - $started, 'nobody waits for the other worker');
+		Database::invalidateSettingsCache();
+		$this->assertSame('1', (string) Database::getSetting('schema_ready'));
+		$this->assertSame('1', (string) Database::getSetting('schema_contract_checked_at'), 'left to the lock holder');
+
+		$other->query('SELECT RELEASE_LOCK(' . $other->quote($lockName) . ')');
+		Database::migrate();
+		Database::invalidateSettingsCache();
+		$this->assertSame('1', (string) Database::getSetting('schema_ready'));
+		$this->assertGreaterThan(time() - 60, (int) Database::getSetting('schema_contract_checked_at'));
+		$this->assertSame($before, $journalState(), 'a routine re-check journals nothing');
+	}
+
 	public function testPublishedVersionRepairsMissingHistoricalColumnWithoutDowngrade(): void
 	{
 		$pdo = Database::getInstance();

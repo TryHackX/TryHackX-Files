@@ -238,7 +238,9 @@ final class CaptchaService
 			$result = curl_exec($ch);
 			$httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 			$transportError = curl_error($ch);
-			curl_close($ch);
+			// The handle is not closed explicitly: since PHP 8.0 it is an object freed with its last
+			// reference, and PHP 8.5 deprecates the close call (one E_DEPRECATED per captcha check).
+			unset($ch);
 
 			if ($result === false || $httpCode !== 200) {
 				if ($attempt === 1) {

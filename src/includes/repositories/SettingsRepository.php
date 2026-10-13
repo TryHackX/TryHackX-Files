@@ -93,18 +93,23 @@ final class SettingsRepository
 	 * @param callable():T $operation
 	 * @return T
 	 */
-	private static function withCacheLock(callable $operation)
+	private static function withCacheLock(callable $operation, int $mode = LOCK_EX)
 	{
 		self::ensureDataDirectory();
 		$lockPath = self::lockPath();
+		// Permissions are set when the lock file is created, not re-asserted on every request:
+		// chmod() is a metadata write, and this runs on every page view.
+		$created = !file_exists($lockPath);
 		$lock = fopen($lockPath, 'c+b');
 		if ($lock === false) {
 			throw new RuntimeException('Cannot open the settings cache lock.');
 		}
 
 		try {
-			self::protectFile($lockPath);
-			if (!flock($lock, LOCK_EX)) {
+			if ($created) {
+				self::protectFile($lockPath);
+			}
+			if (!flock($lock, $mode)) {
 				throw new RuntimeException('Cannot lock the settings cache.');
 			}
 			return $operation();
@@ -227,6 +232,21 @@ final class SettingsRepository
 	{
 		if (self::$cache !== null) {
 			return self::$cache;
+		}
+
+		// The common case — a published cache — is read under a SHARED lock, so concurrent
+		// requests no longer queue behind each other just to read settings. Writers and the
+		// rebuild below still take the exclusive lock, so a reader never sees a half-written
+		// file or an older snapshot published after a newer setting.
+		try {
+			$cached = self::withCacheLock(static function (): ?array {
+				return self::readCacheUnlocked();
+			}, LOCK_SH);
+		} catch (RuntimeException $e) {
+			$cached = null; // the exclusive path below reports and rebuilds a bad cache
+		}
+		if ($cached !== null) {
+			return self::$cache = $cached;
 		}
 
 		return self::withCacheLock(static function (): array {

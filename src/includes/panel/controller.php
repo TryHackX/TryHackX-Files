@@ -32,27 +32,7 @@ if (!$isAdmin) {
 	return;
 }
 
-/**
- * Write (or replace) a string constant in config/config.local.php.
- *
- * The upload location lives there — not in the DB — because it is the one file that both PHP
- * and the Python upload server read, and PHP needs it before any DB connection exists. Editing
- * it from the panel therefore means rewriting that constant.
- */
-function filehostWriteLocalConstant(string $name, string $value): bool
-{
-	$file = PROJECT_ROOT . '/config/config.local.php';
-	$current = @file_get_contents($file);
-	if ($current === false) {
-		return false;
-	}
-	$line = "define('" . $name . "', '" . str_replace(['\\', "'"], ['\\\\', "\\'"], $value) . "');";
-	$pattern = "/^[ \t]*define\s*\(\s*['\"]" . preg_quote($name, '/') . "['\"].*$/m";
-	$updated = preg_match($pattern, $current)
-		? preg_replace($pattern, $line, $current, 1)
-		: rtrim($current, "\r\n") . "\n" . $line . "\n";
-	return @file_put_contents($file, $updated, LOCK_EX) !== false;
-}
+require_once APP_ROOT . '/includes/LocalConfig.php';
 
 if ($action === 'save_settings') {
 	$group = $_POST['setting_group'] ?? 'general';
@@ -117,6 +97,18 @@ if ($action === 'save_settings') {
 				$thumbPx = max(64, min(2000, (int) ($_POST['thumbnail_max_px'] ?? 400)));
 				$thumbPxOld = (int) Database::getSetting('thumbnail_max_px', 400);
 
+				// Active-document types (html, svg, xml, …) are always blocked: served from this
+				// origin they could run script as the site. They used to be accepted off the list
+				// here and then put back silently by the schema check a few minutes later, so the
+				// save looked like it worked. Now they are kept on the list at save time and the
+				// operator is told so.
+				$blockedSubmitted = array_values(array_unique(array_filter(array_map(
+					static fn(string $ext): string => strtolower(ltrim(trim($ext), '.')),
+					explode(',', is_string($_POST['blocked_extensions'] ?? null) ? $_POST['blocked_extensions'] : '')
+				))));
+				$blockedKept = array_values(array_diff(Database::ACTIVE_DOCUMENT_EXTENSIONS, $blockedSubmitted));
+				$blockedExtensions = implode(',', array_merge($blockedSubmitted, $blockedKept));
+
 				$settingsToUpdate = [
 					'max_upload_folder_mb' => $maxUploadFolderVal,
 					'auto_delete_days' => max(0, (int) ($_POST['auto_delete_days'] ?? 0)),
@@ -124,7 +116,7 @@ if ($action === 'save_settings') {
 						0,
 						min(3650, (int) ($_POST['file_quarantine_days'] ?? 0))
 					),
-					'blocked_extensions' => trim($_POST['blocked_extensions'] ?? ''),
+					'blocked_extensions' => $blockedExtensions,
 					'system_max_file_size_mb' => $systemMaxVal,
 					'thumbnail_max_px' => $thumbPx,
 					// pt 1: read by the Python server (settings_cache), which is what streams
@@ -282,6 +274,9 @@ if ($action === 'save_settings') {
 			Database::logAudit('settings_saved', 'group: ' . $group);
 		}
 		$success = __('panel.ctl.saved');
+		if (!empty($blockedKept)) {
+			$success .= ' ' . __('panel.ctl.blocked_ext_kept', ['list' => implode(', ', $blockedKept)]);
+		}
 		$tab = 'settings';
 	}
 } elseif ($action === 'save_cron') {

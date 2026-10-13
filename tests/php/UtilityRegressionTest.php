@@ -54,4 +54,47 @@ final class UtilityRegressionTest extends RepoTestCase
 		);
 	}
 
+	/**
+	 * The panel rewrites UPLOADS_PATH in config.local.php. Whatever an administrator types
+	 * must come out as that literal string: a `$0` used to be expanded by preg_replace() and
+	 * leave a file that no longer parsed, taking every page down with it.
+	 */
+	public function testLocalConfigWriterStoresAnyValueLiterally(): void
+	{
+		require_once PROJECT_ROOT . '/src/includes/LocalConfig.php';
+		$file = DATA_DIR . DIRECTORY_SEPARATOR . 'config-writer-' . bin2hex(random_bytes(4)) . '.php';
+		file_put_contents($file, "<?php\ndefine('DB_NAME', 'files');\ndefine('UPLOADS_PATH', '/old/place');\n");
+		$tricky = "/mnt/x\$0 \\1 it's \"quoted\" \${1}";
+		try {
+			$this->assertTrue(filehostWriteLocalConstant('UPLOADS_PATH', $tricky, $file));
+			$this->assertTrue(filehostWriteLocalConstant('NEW_CONSTANT', 'appended', $file));
+
+			$probe = sprintf(
+				'require %s; echo json_encode([UPLOADS_PATH, DB_NAME, NEW_CONSTANT]);',
+				var_export($file, true)
+			);
+			$output = [];
+			$status = 1;
+			exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($probe), $output, $status);
+			$this->assertSame(0, $status, 'the rewritten file still parses');
+			$this->assertSame([$tricky, 'files', 'appended'], json_decode(implode('', $output), true));
+			$this->assertSame(1, substr_count((string) file_get_contents($file), "'UPLOADS_PATH'"));
+		} finally {
+			@unlink($file);
+		}
+	}
+
+	/** PHP 8.5 deprecates curl_close(); production runs 8.5, CI does not yet. */
+	public function testNoDeprecatedCurlCloseCalls(): void
+	{
+		$hits = [];
+		$files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PROJECT_ROOT . '/src'));
+		foreach ($files as $item) {
+			if ($item->isFile() && str_ends_with($item->getFilename(), '.php')
+				&& preg_match('/\bcurl_close\s*\(/', (string) file_get_contents($item->getPathname()))) {
+				$hits[] = $item->getPathname();
+			}
+		}
+		$this->assertSame([], $hits);
+	}
 }

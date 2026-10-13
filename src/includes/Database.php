@@ -48,6 +48,13 @@ require_once __DIR__ . '/Permissions.php';
 class Database
 {
 	public const CURRENT_SCHEMA_VERSION = 64;
+
+	/**
+	 * Extensions a browser would render as an active document from this origin. They stay in the
+	 * upload blocklist whatever the operator saves (panel controller, migration 39 and its drift
+	 * check all use this one list).
+	 */
+	public const ACTIVE_DOCUMENT_EXTENSIONS = ['html', 'htm', 'xhtml', 'svg', 'shtml', 'xml'];
 	private const SCHEMA_CONTRACT_CACHE_SECONDS = 300;
 	private static bool $migrationJournalActive = false;
 	private static string $migrationJournalPrefix = '';
@@ -1624,7 +1631,7 @@ class Database
 					explode(',', (string) self::getSetting('blocked_extensions', ''))
 				));
 				$missing = array_diff(
-					['html', 'htm', 'xhtml', 'svg', 'shtml', 'xml'],
+					self::ACTIVE_DOCUMENT_EXTENSIONS,
 					array_unique($blocked)
 				);
 				if ($missing !== []) {
@@ -1793,6 +1800,80 @@ class Database
 	}
 
 	/**
+	 * Whether the schema was verified and published for exactly this code: current version,
+	 * marked ready, same contract hash — and, with $fresh, re-checked within the last
+	 * SCHEMA_CONTRACT_CACHE_SECONDS.
+	 */
+	private static function schemaPublishedForThisCode(bool $fresh): bool
+	{
+		if ((int) self::getSetting('schema_version', 1) !== self::CURRENT_SCHEMA_VERSION
+			|| (string) self::getSetting('schema_ready', '0') !== '1'
+			|| !hash_equals(self::schemaContractHash(), (string) self::getSetting('schema_contract_hash', ''))) {
+			return false;
+		}
+		if (!$fresh) {
+			return true;
+		}
+		$checkedAt = (int) self::getSetting('schema_contract_checked_at', 0);
+		return $checkedAt > 0 && $checkedAt >= time() - self::SCHEMA_CONTRACT_CACHE_SECONDS;
+	}
+
+	/**
+	 * The routine re-check of a schema already published for this code.
+	 *
+	 * It runs on whichever web request comes along once the previous check is
+	 * SCHEMA_CONTRACT_CACHE_SECONDS old, so it must not hurt anyone else:
+	 *   - `schema_ready` is left at '1'. Flipping it to '0' for the duration (as the full
+	 *     migration path does) made the upload server answer 503 to every upload, commit and
+	 *     download that arrived meanwhile — every five minutes.
+	 *   - Only one request does it. The lock is tried without waiting; everyone else carries on
+	 *     with the schema that was fine a moment ago instead of queueing behind ~300 statements.
+	 *   - Nothing is created, dropped or journalled.
+	 *
+	 * Returns false only when the check found real drift; the caller then takes the full
+	 * migration path, which repairs it and republishes. A check that merely could not run
+	 * (a transient database error) is logged and retried at the next interval.
+	 */
+	private static function reverifyPublishedSchema(PDO $pdo, string $prefix): bool
+	{
+		// MySQL caps lock names at 64 characters: keep the prefix short.
+		$lockName = 'filehost:recheck:'
+			. sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . $prefix);
+		try {
+			$lock = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+			$lock->execute([$lockName]);
+			if ((int) $lock->fetchColumn() !== 1) {
+				return true;
+			}
+		} catch (PDOException $e) {
+			return true;
+		}
+
+		try {
+			self::forgetLocalSettingsCache();
+			if (self::schemaPublishedForThisCode(true)) {
+				return true;
+			}
+			try {
+				self::assertSupportedSchema($pdo, $prefix);
+			} catch (PDOException $e) {
+				error_log('Periodic schema verification could not run: ' . $e->getMessage());
+			} catch (RuntimeException $e) {
+				error_log('Periodic schema verification found drift: ' . $e->getMessage());
+				return false;
+			}
+			self::setSetting('schema_contract_checked_at', (string) time());
+			return true;
+		} finally {
+			try {
+				$pdo->prepare('SELECT RELEASE_LOCK(?)')->execute([$lockName]);
+			} catch (Throwable $e) {
+				error_log('Could not release the schema re-check lock: ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
 	 * Lightweight schema migration for installs created before audit-log / file-sharing
 	 * columns existed. Runs the idempotent DDL once, then records a schema version so it
 	 * never runs again (cheap: gated by a single cached setting).
@@ -1805,15 +1886,10 @@ class Database
 		}
 
 		$prefix = defined('DB_PREFIX') ? DB_PREFIX : '';
-		$now = time();
-		$version = (int) self::getSetting('schema_version', 1);
-		$lastContractCheck = (int) self::getSetting('schema_contract_checked_at', 0);
-		$publishedContractHash = (string) self::getSetting('schema_contract_hash', '');
-		if ($version === self::CURRENT_SCHEMA_VERSION
-			&& (string) self::getSetting('schema_ready', '0') === '1'
-			&& $lastContractCheck > 0
-			&& $lastContractCheck >= $now - self::SCHEMA_CONTRACT_CACHE_SECONDS
-			&& hash_equals(self::schemaContractHash(), $publishedContractHash)) {
+		if (self::schemaPublishedForThisCode(true)) {
+			return;
+		}
+		if (self::schemaPublishedForThisCode(false) && self::reverifyPublishedSchema($pdo, $prefix)) {
 			return;
 		}
 
@@ -1832,6 +1908,13 @@ class Database
 				error_log('Could not release migration lock: ' . $e->getMessage());
 			}
 		};
+		// Whoever held the lock before us may have just finished the very work this request
+		// queued up for. Re-read and stand down instead of repeating it.
+		self::forgetLocalSettingsCache();
+		if (self::schemaPublishedForThisCode(true)) {
+			$releaseMigrationLock();
+			return;
+		}
 		$version = (int) self::getSetting('schema_version', 1);
 		try {
 			if (!self::setSetting('schema_ready', '0')) {
@@ -2996,7 +3079,6 @@ class Database
 			$payments = "{$prefix}payments";
 			$lockName = 'filehost:migrate:v37:' . sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . $prefix);
 			$locked = false;
-			$migrated = false;
 
 			try {
 				$lockStmt = $pdo->prepare("SELECT GET_LOCK(?, 10)");
@@ -3030,7 +3112,6 @@ class Database
 
 				self::persistMigrationVersion(37);
 				$version = max($version, 37);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v37 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(37, $e);
@@ -3045,11 +3126,6 @@ class Database
 				}
 			}
 
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v38: versioned browser sessions and immediate credential revocation (AUD-P0-03) ---
@@ -3061,7 +3137,6 @@ class Database
 			$users = "{$prefix}users";
 			$lockName = 'filehost:migrate:v38:' . sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . $prefix);
 			$locked = false;
-			$migrated = false;
 
 			try {
 				$lockStmt = $pdo->prepare("SELECT GET_LOCK(?, 10)");
@@ -3090,7 +3165,6 @@ class Database
 
 				self::persistMigrationVersion(38);
 				$version = max($version, 38);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v38 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(38, $e);
@@ -3105,11 +3179,6 @@ class Database
 				}
 			}
 
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v39: active browser-document extensions are never uploadable by default ---
@@ -3119,7 +3188,6 @@ class Database
 		if ($runStep(39)) {
 			$lockName = 'filehost:migrate:v39:' . sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . $prefix);
 			$locked = false;
-			$migrated = false;
 
 			try {
 				$lockStmt = $pdo->prepare("SELECT GET_LOCK(?, 10)");
@@ -3133,7 +3201,7 @@ class Database
 					static fn(string $ext): string => strtolower(ltrim(trim($ext), '.')),
 					explode(',', (string) self::getSetting('blocked_extensions', ''))
 				))));
-				foreach (['html', 'htm', 'xhtml', 'svg', 'shtml', 'xml'] as $activeExtension) {
+				foreach (self::ACTIVE_DOCUMENT_EXTENSIONS as $activeExtension) {
 					if (!in_array($activeExtension, $blocked, true)) {
 						$blocked[] = $activeExtension;
 					}
@@ -3145,7 +3213,6 @@ class Database
 				}
 				self::persistMigrationVersion(39);
 				$version = max($version, 39);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v39 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(39, $e);
@@ -3160,18 +3227,12 @@ class Database
 				}
 			}
 
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v40: hashed, expiring, one-time account lifecycle capabilities (AUD-P1-09) ---
 		if ($runStep(40)) {
 			$users = "{$prefix}users";
 			$recovery = "{$prefix}recovery_tokens";
-			$migrated = false;
 			try {
 				$userColumns = $pdo->query("SHOW COLUMNS FROM `{$users}`")->fetchAll(PDO::FETCH_COLUMN);
 				$userDefinitions = [
@@ -3247,23 +3308,16 @@ class Database
 					self::persistMigrationVersion(40);
 				}
 				$version = max($version, 40);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v40 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(40, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v41: encrypt TOTP seeds at rest and make room for authenticated ciphertext ---
 		if ($runStep(41)) {
 			$users = "{$prefix}users";
-			$migrated = false;
 			try {
 				$pdo->exec("ALTER TABLE `{$users}` MODIFY COLUMN `totp_secret` TEXT DEFAULT NULL");
 				$stmt = $pdo->query(
@@ -3279,16 +3333,10 @@ class Database
 				}
 				self::persistMigrationVersion(41);
 				$version = max($version, 41);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v41 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(41, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
@@ -3299,7 +3347,6 @@ class Database
 		// resurrect metadata or leave account deletion half-complete.
 		if ($runStep(42)) {
 			$queue = "{$prefix}file_deletion_queue";
-			$migrated = false;
 			try {
 				self::createOrRepairTable($pdo, "CREATE TABLE IF NOT EXISTS `{$queue}` (
 					`file_id` VARCHAR(32) NOT NULL PRIMARY KEY,
@@ -3318,16 +3365,10 @@ class Database
 				}
 				self::persistMigrationVersion(42);
 				$version = max($version, 42);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v42 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(42, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
@@ -3335,7 +3376,6 @@ class Database
 		if ($runStep(43)) {
 			$payments = "{$prefix}payments";
 			$promos = "{$prefix}promo_codes";
-			$migrated = false;
 			try {
 				$paymentColumns = $pdo->query(
 					"SHOW COLUMNS FROM `{$payments}`"
@@ -3386,23 +3426,16 @@ class Database
 
 				self::persistMigrationVersion(43);
 				$version = max($version, 43);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v43 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(43, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v44: atomic byte reservations for concurrent uploads (AUD-P1-11) ---
 		if ($runStep(44)) {
 			$reservations = "{$prefix}upload_storage_reservations";
-			$migrated = false;
 			try {
 				self::createOrRepairTable($pdo, "CREATE TABLE IF NOT EXISTS `{$reservations}` (
 					`id` CHAR(32) NOT NULL PRIMARY KEY,
@@ -3456,23 +3489,16 @@ class Database
 				}
 				self::persistMigrationVersion(44);
 				$version = max($version, 44);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v44 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(44, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v45: retain the paid ad duration independently of mutable package rows ---
 		if ($runStep(45)) {
 			$ads = "{$prefix}ads";
-			$migrated = false;
 			try {
 				$columns = $pdo->query("SHOW COLUMNS FROM `{$ads}`")->fetchAll(PDO::FETCH_COLUMN);
 				if (!in_array('purchase_duration_days', $columns, true)) {
@@ -3489,23 +3515,16 @@ class Database
 				);
 				self::persistMigrationVersion(45);
 				$version = max($version, 45);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v45 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(45, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v46: bind a paid entitlement to the order that currently owns it ---
 		if ($runStep(46)) {
 			$users = "{$prefix}users";
-			$migrated = false;
 			try {
 				$columns = $pdo->query("SHOW COLUMNS FROM `{$users}`")->fetchAll(PDO::FETCH_COLUMN);
 				if (!in_array('group_payment_ext_order_id', $columns, true)) {
@@ -3516,23 +3535,16 @@ class Database
 				}
 				self::persistMigrationVersion(46);
 				$version = max($version, 46);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v46 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(46, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v47: indexes for bounded API traversal + durable migration journal ---
 		if ($runStep(47)) {
 			$files = "{$prefix}files";
-			$migrated = false;
 			try {
 				$indexes = $pdo->query("SHOW INDEX FROM `{$files}`")->fetchAll(PDO::FETCH_ASSOC);
 				$indexNames = array_column($indexes, 'Key_name');
@@ -3544,23 +3556,16 @@ class Database
 				}
 				self::persistMigrationVersion(47);
 				$version = max($version, 47);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v47 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(47, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v48: multi-worker ownership and leases for active downloads ---
 		if ($runStep(48)) {
 			$active = "{$prefix}active_downloads";
-			$migrated = false;
 			try {
 				$columns = $pdo->query("SHOW COLUMNS FROM `{$active}`")->fetchAll(PDO::FETCH_COLUMN);
 				if (!in_array('instance_id', $columns, true)) {
@@ -3587,23 +3592,16 @@ class Database
 				}
 				self::persistMigrationVersion(48);
 				$version = max($version, 48);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v48 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(48, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v49: exclusive webhook delivery leases and receiver-visible event IDs ---
 		if ($runStep(49)) {
 			$deliveries = "{$prefix}webhook_deliveries";
-			$migrated = false;
 			try {
 				$columns = $pdo->query(
 					"SHOW COLUMNS FROM `{$deliveries}`"
@@ -3642,23 +3640,16 @@ class Database
 				}
 				self::persistMigrationVersion(49);
 				$version = max($version, 49);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v49 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(49, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v50: atomic notification stacking and once-only deduplication ---
 		if ($runStep(50)) {
 			$notifications = "{$prefix}notifications";
-			$migrated = false;
 			try {
 				$columns = $pdo->query(
 					"SHOW COLUMNS FROM `{$notifications}`"
@@ -3693,23 +3684,16 @@ class Database
 				}
 				self::persistMigrationVersion(50);
 				$version = max($version, 50);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v50 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(50, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v51: durable daily traffic aggregates and bounded detail retention ---
 		if ($runStep(51)) {
 			$daily = "{$prefix}traffic_daily";
-			$migrated = false;
 			try {
 				self::createOrRepairTable(
 					$pdo,
@@ -3723,23 +3707,16 @@ class Database
 				);
 				self::persistMigrationVersion(51);
 				$version = max($version, 51);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v51 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(51, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
 		// --- v52: durable transfer lifecycle (reserved → started → completed/released) ---
 		if ($runStep(52)) {
 			$reservations = "{$prefix}download_reservations";
-			$migrated = false;
 			try {
 				self::createOrRepairTable(
 					$pdo,
@@ -3764,16 +3741,10 @@ class Database
 				);
 				self::persistMigrationVersion(52);
 				$version = max($version, 52);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v52 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(52, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
@@ -3784,7 +3755,6 @@ class Database
 			$tokens = "{$prefix}download_tokens";
 			$reservations = "{$prefix}download_reservations";
 			$effects = "{$prefix}download_reservation_effects";
-			$migrated = false;
 			try {
 				$columnSets = [
 					$files => [
@@ -3857,22 +3827,15 @@ class Database
 
 				self::persistMigrationVersion(53);
 				$version = max($version, 53);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v53 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(53, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v54: relational integrity with explicit retention policies ---
 		if ($runStep(54)) {
-			$migrated = false;
 			try {
 				$users = "{$prefix}users";
 				$groups = "{$prefix}groups";
@@ -4072,22 +4035,15 @@ class Database
 
 				self::persistMigrationVersion(54);
 				$version = max($version, 54);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v54 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(54, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v55: repair the plan/group delete policy published briefly by schema 54 ---
 		if ($runStep(55)) {
-			$migrated = false;
 			try {
 				$constraintName = substr(
 					'fk_' . substr(hash('sha256', $prefix), 0, 8) . '_plan_group',
@@ -4114,22 +4070,15 @@ class Database
 				}
 				self::persistMigrationVersion(55);
 				$version = max($version, 55);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v55 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(55, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v56: durable transactional e-mail outbox ---
 		if ($runStep(56)) {
-			$migrated = false;
 			try {
 				self::createOrRepairTable(
 					$pdo,
@@ -4161,22 +4110,15 @@ class Database
 				);
 				self::persistMigrationVersion(56);
 				$version = max($version, 56);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v56 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(56, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v57: forward-repair the sent-mail retention index for early schema 56 ---
 		if ($runStep(57)) {
-			$migrated = false;
 			try {
 				$outbox = "{$prefix}mail_outbox";
 				$indexes = $pdo->query(
@@ -4190,22 +4132,15 @@ class Database
 				}
 				self::persistMigrationVersion(57);
 				$version = max($version, 57);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v57 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(57, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v58: recoverable file-deletion quarantine (AUD-OPEN-03) ---
 		if ($runStep(58)) {
-			$migrated = false;
 			try {
 				self::createOrRepairTable(
 					$pdo,
@@ -4235,22 +4170,15 @@ class Database
 				$setting->execute();
 				self::persistMigrationVersion(58);
 				$version = max($version, 58);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v58 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(58, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v59: independent moderator permission profiles and plan-scoped promo codes ---
 		if ($runStep(59)) {
-			$migrated = false;
 			try {
 				$users = "{$prefix}users";
 				$promos = "{$prefix}promo_codes";
@@ -4333,22 +4261,15 @@ class Database
 
 				self::persistMigrationVersion(59);
 				$version = max($version, 59);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v59 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(59, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v60: one role-bound, permissions-only Moderator system group ---
 		if ($runStep(60)) {
-			$migrated = false;
 			try {
 				$users = "{$prefix}users";
 				$groups = "{$prefix}groups";
@@ -4441,22 +4362,15 @@ class Database
 
 				self::persistMigrationVersion(60);
 				$version = max($version, 60);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v60 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(60, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v61: periodic transfer quotas, configurable plan cards and reliable upload cancel ---
 		if ($runStep(61)) {
-			$migrated = false;
 			try {
 				foreach ([
 					"ALTER TABLE `{$prefix}groups`
@@ -4511,22 +4425,15 @@ class Database
 
 				self::persistMigrationVersion(61);
 				$version = max($version, 61);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v61 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(61, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v62: sortable upload IP + Moderator as a complete additive limit profile ---
 		if ($runStep(62)) {
-			$migrated = false;
 			try {
 				$fileIndexes = $pdo->query("SHOW INDEX FROM `{$prefix}files`")
 					->fetchAll(PDO::FETCH_ASSOC);
@@ -4563,22 +4470,15 @@ class Database
 
 				self::persistMigrationVersion(62);
 				$version = max($version, 62);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v62 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(62, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v63: persistent sign-in, one rotating token family per device ---
 		if ($runStep(63)) {
-			$migrated = false;
 			try {
 				// A browser session dies with the browser, so "stay signed in" cannot be one.
 				// Each device gets its own series; the secret inside it is replaced on every
@@ -4624,22 +4524,15 @@ class Database
 
 				self::persistMigrationVersion(63);
 				$version = max($version, 63);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v63 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(63, $e);
 				throw $e;
 			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
-			}
 		}
 
 		// --- v64: e-mail changes are confirmed from both addresses, so they need a stage ---
 		if ($runStep(64)) {
-			$migrated = false;
 			try {
 				// Changing the address used to be confirmed from the new one alone, which meant
 				// a stolen session could move an account away without the owner ever hearing
@@ -4668,16 +4561,10 @@ class Database
 
 				self::persistMigrationVersion(64);
 				$version = max($version, 64);
-				$migrated = true;
 			} catch (\Throwable $e) {
 				error_log('Database migration v64 failed: ' . $e->getMessage());
 				self::failMigrationJournalStep(64, $e);
 				throw $e;
-			}
-			if (!$migrated) {
-				self::$migrationJournalActive = false;
-				$releaseMigrationLock();
-				return;
 			}
 		}
 
@@ -5542,9 +5429,9 @@ class Database
 		return FileRepository::deleteAllForUser($id);
 	}
 
-	public static function adminUpdateUser(int $id, array $data): array
+	public static function adminUpdateUser(int $id, array $data, ?int $actorId = null): array
 	{
-		return UserRepository::adminUpdate($id, $data);
+		return UserRepository::adminUpdate($id, $data, $actorId);
 	}
 
 	public static function getUserForAdmin(int $id): ?array
