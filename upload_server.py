@@ -23,11 +23,14 @@ import hmac
 import json
 import base64
 import io
+import signal
 import subprocess
+import threading
 import http.client
 import ipaddress
 import socket
 import ssl
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -119,6 +122,9 @@ try:
     )
 except (TypeError, ValueError):
     DOWNLOAD_LEASE_SECONDS = 120
+# A live transfer renews its lease several times per lease period, so a short configured
+# lease (the CI smoke uses 5 s) cannot expire under a healthy download between two renewals.
+DOWNLOAD_HEARTBEAT_SECONDS = max(1.0, min(15.0, DOWNLOAD_LEASE_SECONDS / 3))
 try:
     CI_PREBODY_DELAY_SECONDS = (
         max(
@@ -137,6 +143,9 @@ INSTANCE_ID = secrets.token_hex(16)
 THUMBS_DIR = DATA_DIR / "thumbs"
 THUMB_MAX_DEFAULT = 400  # longest edge in px, when the panel setting is unset/out of range
 THUMB_GENERATION_TIMEOUT = 30
+# Two ffmpeg attempts (seek 1 s, then 0 s) must fit inside the worker's own deadline, so the
+# outer kill never lands while a second ffmpeg is still running.
+THUMB_FFMPEG_ATTEMPT_TIMEOUT = 12
 THUMB_NEGATIVE_TTL = 300
 THUMB_MAX_OUTPUT_BYTES = 16 * 1024 * 1024
 try:
@@ -167,16 +176,51 @@ PORT = 8001
 # Bind to loopback only: all client traffic is proxied by Apache to 127.0.0.1:8001,
 # so the upload server never needs to be reachable directly from the network.
 HOST = "127.0.0.1"
-MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024
-CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks (increased for better performance)
 
-BLOCKED_EXTENSIONS = {
+
+def _env_number(name: str, default: float, low: float, high: float) -> float:
+    try:
+        return max(low, min(high, float(os.getenv(name, str(default)))))
+    except (TypeError, ValueError):
+        return default
+
+
+# A request never waits forever for a database connection: a saturated pool answers 503
+# instead of parking every coroutine behind it.
+DB_ACQUIRE_TIMEOUT = _env_number("FILEHOST_DB_ACQUIRE_TIMEOUT", 10.0, 1.0, 120.0)
+# The readiness probe (schema check plus a staging write) is cached this long between
+# requests; /ready itself always probes afresh.
+READINESS_CACHE_SECONDS = 5.0
+# A webhook delivery gets this long in total, however slowly the receiver answers.
+WEBHOOK_DELIVERY_DEADLINE = 15.0
+WEBHOOK_CONCURRENCY = 5
+# The QR renderer only ever needs a link or an otpauth:// URI.
+QR_POST_MAX_BYTES = 8 * 1024
+# Stored names must fit one filesystem path component (255 bytes on ext4/xfs) with room for
+# the `.blocked` / `.upload` suffixes.
+FILENAME_MAX_BYTES = 200
+
+# Blocking work runs on separate pools so one slow kind cannot starve another: file I/O of
+# every transfer (aiofiles, manifests, bcrypt) uses the default executor, enlarged at startup;
+# webhook deliveries, thumbnail workers and the maintenance run each get their own threads.
+IO_THREADS = int(_env_number("FILEHOST_IO_THREADS", 64, 8, 256))
+WEBHOOK_EXECUTOR = ThreadPoolExecutor(
+    max_workers=WEBHOOK_CONCURRENCY, thread_name_prefix="filehost-webhook"
+)
+THUMB_EXECUTOR = ThreadPoolExecutor(
+    max_workers=THUMB_WORKERS, thread_name_prefix="filehost-thumb"
+)
+MAINTENANCE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1, thread_name_prefix="filehost-maintenance"
+)
+
+BLOCKED_EXTENSIONS = frozenset({
     'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
     'exe', 'bat', 'cmd', 'sh', 'bash', 'cgi', 'pl', 'py', 'rb',
     'asp', 'aspx', 'jsp', 'jspx', 'cfm',
     'html', 'htm', 'xhtml', 'svg', 'shtml', 'xml',
     'htaccess', 'htpasswd'
-}
+})
 
 def load_php_config() -> dict:
     """Load database configuration from config.local.php."""
@@ -219,9 +263,9 @@ def load_php_config() -> dict:
 try:
     import uvicorn
     from fastapi import FastAPI, Request, HTTPException, Header, BackgroundTasks
-    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import PlainTextResponse, JSONResponse, StreamingResponse, FileResponse
     from starlette.concurrency import iterate_in_threadpool
+    from starlette.requests import ClientDisconnect
     import aiofiles
     import aiomysql
     import bcrypt
@@ -299,13 +343,28 @@ class ActualTransferAccountingMiddleware:
         response_status = 500
         response_content_length = None
         response_body_finished = False
-        last_heartbeat = 0.0
+        heartbeat_task = None
         reservation_started = False
         finished_normally = False
 
+        async def renew_lease_periodically():
+            # Renewal runs on its own timer rather than on sends: a client that drains slowly
+            # can hold a single send for longer than the whole lease, and a live transfer must
+            # not look abandoned to the reaper while that happens.
+            while True:
+                await asyncio.sleep(DOWNLOAD_HEARTBEAT_SECONDS)
+                context = scope.get("filehost.traffic") or {}
+                active_id = safe_int(context.get("active_id"), 0)
+                if active_id:
+                    await heartbeat_download(
+                        active_id,
+                        str(context.get("reservation_id") or ""),
+                        sent_bytes,
+                    )
+
         async def counted_send(message):
             nonlocal sent_bytes, response_status, response_content_length
-            nonlocal response_body_finished, last_heartbeat, reservation_started
+            nonlocal response_body_finished, heartbeat_task, reservation_started
             if message.get("type") == "http.response.start":
                 response_status = safe_int(message.get("status"), 500)
                 for raw_name, raw_value in message.get("headers") or []:
@@ -341,15 +400,18 @@ class ActualTransferAccountingMiddleware:
             ):
                 await mark_download_reservation_started(reservation_id)
                 reservation_started = True
-            now = time.monotonic()
-            if active_id and now - last_heartbeat >= 15.0:
+            if active_id and heartbeat_task is None:
                 await heartbeat_download(active_id, reservation_id, sent_bytes)
-                last_heartbeat = now
+                heartbeat_task = asyncio.create_task(renew_lease_periodically())
 
         try:
             await self.app(scope, receive, counted_send)
             finished_normally = True
         finally:
+            if heartbeat_task is not None:
+                # No need to wait for it: a renewal racing the finalization below is a no-op,
+                # because both guard on the reservation still being reserved/started.
+                heartbeat_task.cancel()
             context = scope.get("filehost.traffic")
             if context and sent_bytes > 0 and 200 <= response_status < 400:
                 await log_traffic(
@@ -407,29 +469,111 @@ app = FastAPI(
     lifespan=app_lifespan,
 )
 app.add_middleware(ActualTransferAccountingMiddleware)
-
-# Uploads/downloads authenticate with the X-Upload-Token header (not cookies), so credentials
-# are disabled. Requests reach this server same-origin via the Apache proxy.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["POST", "OPTIONS", "GET"],
-    allow_headers=["*"],
-    expose_headers=["X-File-Id", "X-Delete-Token"],
-)
+# No CORS middleware on purpose. Every browser reaches this server same-origin through the
+# Apache proxy, so a cross-origin policy grants nothing legitimate; a wildcard one let any
+# website drive uploads from its visitors' browsers and read back the delete token.
 
 db_pool = None
 db_config_cache = None
 db_config_mtime = 0
 db_pool_lock = asyncio.Lock()
+# (pool object, monotonic time) of the last successful readiness probe.
+readiness_cache = {"pool": None, "checked_at": 0.0}
 
 
-async def require_storage_ready():
-    """Fail closed unless DB schema and same-filesystem upload staging are writable."""
+def _release_if_acquired(pool):
+    """Done-callback that hands back a connection an abandoned acquire still obtained."""
+
+    def callback(task):
+        if not task.cancelled() and task.exception() is None:
+            pool.release(task.result())
+
+    return callback
+
+
+async def acquire_bounded(pool, timeout: float | None = None):
+    """Take a connection from an aiomysql pool, or answer 503 instead of waiting forever."""
+    limit = DB_ACQUIRE_TIMEOUT if timeout is None else timeout
+    task = asyncio.ensure_future(pool.acquire())
+    try:
+        done, _ = await asyncio.wait({task}, timeout=limit)
+    except BaseException:
+        task.add_done_callback(_release_if_acquired(pool))
+        task.cancel()
+        raise
+    if task in done:
+        return task.result()
+    task.add_done_callback(_release_if_acquired(pool))
+    task.cancel()
+    raise HTTPException(status_code=503, detail="Database is busy")
+
+
+class _BoundedAcquire:
+    """`await pool.acquire()` and `async with pool.acquire()` with a deadline."""
+
+    __slots__ = ("_pool", "_conn")
+
+    def __init__(self, pool):
+        self._pool = pool
+        self._conn = None
+
+    def __await__(self):
+        return acquire_bounded(self._pool).__await__()
+
+    async def __aenter__(self):
+        self._conn = await acquire_bounded(self._pool)
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        conn, self._conn = self._conn, None
+        if conn is not None:
+            self._pool.release(conn)
+        return False
+
+
+class BoundedPool:
+    """The aiomysql pool every request uses, with a bounded wait for a free connection.
+
+    The pool is small (FILEHOST_DB_POOL_MAX, default 20) and aiomysql waits for a free
+    connection without any limit. Combined with code that holds one connection while asking
+    for another, a burst of requests used to park forever; now the waiting ones give up.
+    """
+
+    def __init__(self, pool):
+        self._pool = pool
+
+    def acquire(self):
+        return _BoundedAcquire(self._pool)
+
+    def release(self, conn):
+        return self._pool.release(conn)
+
+    def close(self):
+        self._pool.close()
+
+    async def wait_closed(self):
+        await self._pool.wait_closed()
+
+    def __getattr__(self, name):
+        return getattr(self._pool, name)
+
+
+async def require_storage_ready(force: bool = False):
+    """Fail closed unless DB schema and same-filesystem upload staging are writable.
+
+    A successful probe is reused for READINESS_CACHE_SECONDS: it is three queries plus a file
+    created and removed in staging, and it guards every upload step and every download.
+    """
     pool = await get_db_pool()
     if not pool:
         raise HTTPException(status_code=503, detail="Database unavailable")
+    if (
+        not force
+        and readiness_cache["pool"] is pool
+        and time.monotonic() - readiness_cache["checked_at"] < READINESS_CACHE_SECONDS
+    ):
+        return pool
+    readiness_cache["pool"] = None
 
     try:
         prefix = db_config_cache.get("prefix", "") if db_config_cache else ""
@@ -481,6 +625,8 @@ async def require_storage_ready():
         print(f"Readiness storage check failed: {type(exc).__name__}: {exc}")
         raise HTTPException(status_code=503, detail="Upload storage is not writable")
 
+    readiness_cache["pool"] = pool
+    readiness_cache["checked_at"] = time.monotonic()
     return pool
 
 async def _get_db_pool_unlocked():
@@ -509,7 +655,7 @@ async def _get_db_pool_unlocked():
 
     if db_pool is None:
         try:
-            db_pool = await aiomysql.create_pool(
+            db_pool = BoundedPool(await aiomysql.create_pool(
                 host=db_config_cache['host'],
                 user=db_config_cache['user'],
                 password=db_config_cache['password'],
@@ -521,7 +667,7 @@ async def _get_db_pool_unlocked():
                     5,
                     min(100, safe_int(os.getenv("FILEHOST_DB_POOL_MAX"), 20)),
                 )
-            )
+            ))
             info_log(f"Connected to database: {db_config_cache['host']}/{db_config_cache['database']}")
         except HTTPException:
             raise
@@ -573,8 +719,11 @@ def request_client_ip(request: Request) -> str:
     """
     Resolve the real client address behind this application's loopback Apache proxy.
 
-    X-Forwarded-For is accepted only from a loopback TCP peer. The Python service binds
-    to loopback, while a direct/non-loopback caller can never spoof its own identity.
+    Apache's mod_proxy APPENDS the address it accepted the connection from, so only the
+    rightmost X-Forwarded-For entry is trustworthy; anything to its left was written by the
+    client. uvicorn (run with proxy headers trusted from 127.0.0.1 only, see __main__) already
+    moves that rightmost entry into `request.client`, so for proxied traffic the peer is not
+    loopback here. The fallback below covers a server started without that rewrite.
     """
     peer = request.client.host if request.client else ""
     try:
@@ -587,7 +736,7 @@ def request_client_ip(request: Request) -> str:
 
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
-        candidate = forwarded.split(",", 1)[0].strip()
+        candidate = forwarded.rsplit(",", 1)[-1].strip()
         try:
             return ipaddress.ip_address(candidate).compressed
         except ValueError:
@@ -596,15 +745,28 @@ def request_client_ip(request: Request) -> str:
     return peer_ip.compressed
 
 
+def request_is_direct_loopback(request: Request) -> bool:
+    """True only for a local caller talking to this port directly, never through Apache.
+
+    Every request Apache proxies carries X-Forwarded-For, so its absence plus a loopback
+    peer identifies a local process (the installer, a health check, a Prometheus scrape).
+    """
+    if "x-forwarded-for" in request.headers:
+        return False
+    peer = request.client.host if request.client else ""
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
+
+
 # Cache for dynamic settings
 settings_cache = {
     'blocked_extensions': None,
     'max_file_size': 5 * 1024 * 1024 * 1024,  # Default 5GB
     'max_upload_folder_mb': 0,  # 0 = unlimited
-    'limit_upload_guest': 0,    # Stored as bytes/s (0 = unlimited)
-    'limit_download_guest': 0,  # Panel stores bytes/s directly
-    'limit_upload_user': 0,     # Mirrored legacy/system setting; groups are authoritative
-    'limit_download_user': 0,
+    # Transfer limits live on the groups only (the flat limit_* settings are a legacy mirror
+    # the panel keeps for older readers and are deliberately not loaded here).
     'groups': {},               # A8: {group_id: {limit_upload, limit_download, max_file_size_mb, ...}}
     'default_group_id': None,   # id of the group registered users fall back to (group_id NULL)
     'thumb_max': THUMB_MAX_DEFAULT,  # longest edge of a generated thumbnail, in px
@@ -627,12 +789,12 @@ async def update_settings():
 
     pool = await get_db_pool()
     if not pool:
-        raise RuntimeError("Database unavailable while finalizing download")
+        raise RuntimeError("Database unavailable while loading settings")
 
     try:
         prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
         table = f"{prefix}settings"
-        
+
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 # Fetch blocked extensions
@@ -642,14 +804,7 @@ async def update_settings():
                     exts = {e.strip().lower() for e in row[0].split(',') if e.strip()}
                     settings_cache['blocked_extensions'] = exts
                 else:
-                    # Default fallback
-                    settings_cache['blocked_extensions'] = {
-                        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
-                        'exe', 'bat', 'cmd', 'sh', 'bash', 'cgi', 'pl', 'py', 'rb',
-                        'asp', 'aspx', 'jsp', 'jspx', 'cfm',
-                        'html', 'htm', 'xhtml', 'svg', 'shtml', 'xml',
-                        'htaccess', 'htpasswd'
-                    }
+                    settings_cache['blocked_extensions'] = set(BLOCKED_EXTENSIONS)
 
                 # Fetch max file size
                 await cur.execute(f"SELECT `setting_value` FROM `{table}` WHERE `setting_key` = 'system_max_file_size_mb'")
@@ -708,23 +863,6 @@ async def update_settings():
                 settings_cache['cron_interval'] = safe_int(cron_map.get('cron_interval', 15)) or 15
                 settings_cache['cron_php_binary'] = (cron_map.get('cron_php_binary') or '').strip()
 
-                # Fetch Bandwidth Limits
-                # Panel calcBits function uses: val * 1024 * 1024 (for Mb)
-                # Despite the name, this is actually BYTES per second (1024*1024 = 1MB)
-                # So we use the value directly without conversion
-                limit_keys = ['limit_upload_guest', 'limit_download_guest', 'limit_upload_user', 'limit_download_user']
-                placeholders = ','.join(['%s'] * len(limit_keys))
-                await cur.execute(f"SELECT `setting_key`, `setting_value` FROM `{table}` WHERE `setting_key` IN ({placeholders})", tuple(limit_keys))
-                rows = await cur.fetchall()
-                limit_map = {k: safe_int(v) for k, v in rows}
-                
-                # Values from DB are already in bytes/s
-                # Example: 2 Mb in panel = 2*1024*1024 = 2,097,152 bytes/s = ~2 MB/s
-                settings_cache['limit_upload_guest'] = limit_map.get('limit_upload_guest', 0)
-                settings_cache['limit_download_guest'] = limit_map.get('limit_download_guest', 0)
-                settings_cache['limit_upload_user'] = limit_map.get('limit_upload_user', 0)
-                settings_cache['limit_download_user'] = limit_map.get('limit_download_user', 0)
-
                 # A8: cache user groups (named limit profiles). A registered user's limits come
                 # from their group; group_id NULL resolves to the default group. Wrapped so a
                 # missing table on an un-migrated DB never aborts the rest of the settings load.
@@ -759,21 +897,16 @@ async def update_settings():
                     settings_cache['groups'] = groups_map
                     settings_cache['default_group_id'] = default_gid
                 except Exception as ge:
-                    print(f"⚠️  Failed to load groups (using flat user-tier limits): {ge}")
+                    # Transfers refuse to run without group limits (503), never unthrottled.
+                    print(f"⚠️  Failed to load groups: {ge}")
 
                 settings_cache['checked_at'] = time.time()
-                
+
     except Exception as e:
         print(f"⚠️  Failed to update settings: {e}")
         # Initialize defaults if failed first time
         if settings_cache['blocked_extensions'] is None:
-            settings_cache['blocked_extensions'] = {
-                'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
-                'exe', 'bat', 'cmd', 'sh', 'bash', 'cgi', 'pl', 'py', 'rb',
-                'asp', 'aspx', 'jsp', 'jspx', 'cfm',
-                'html', 'htm', 'xhtml', 'svg', 'shtml', 'xml',
-                'htaccess', 'htpasswd'
-            }
+            settings_cache['blocked_extensions'] = set(BLOCKED_EXTENSIONS)
 
 def _merge_group_limits(primary: dict, staff: dict | None) -> dict:
     """Return the more favourable limits from the plan/default and staff profiles."""
@@ -811,13 +944,17 @@ def _merge_group_limits(primary: dict, staff: dict | None) -> dict:
     return merged
 
 
-async def get_user_group_limits(user_id):
+async def get_user_group_limits(user_id, cur=None):
     """
     A8: resolve a registered user's effective group limits.
 
     Returns the cached limit dict for the user's group (or the default group when their
     group_id is NULL / dangling). Guests resolve to the system `guest` group. One small
     indexed lookup is needed only for authenticated users.
+
+    A caller that already holds a pooled connection MUST pass its cursor. Asking the pool
+    for a second connection while holding one is how a burst of downloads used to deadlock
+    the whole pool: every request held one connection and waited for another.
     """
     groups = settings_cache.get('groups') or {}
     if not groups:
@@ -830,30 +967,36 @@ async def get_user_group_limits(user_id):
 
     gid = None
     staff_gid = None
-    pool = await get_db_pool()
-    if not pool:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-    if pool:
-        try:
-            prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
+    prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
+
+    async def lookup(active_cursor):
+        await active_cursor.execute(
+            f"SELECT `group_id`, `staff_group_id`, `role` FROM `{prefix}users` "
+            f"WHERE `id` = %s AND `is_active` = 1",
+            (user_id,),
+        )
+        return await active_cursor.fetchone()
+
+    try:
+        if cur is not None:
+            row = await lookup(cur)
+        else:
+            pool = await get_db_pool()
+            if not pool:
+                raise HTTPException(status_code=503, detail="Database unavailable")
             async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        f"SELECT `group_id`, `staff_group_id`, `role` FROM `{prefix}users` "
-                        f"WHERE `id` = %s AND `is_active` = 1",
-                        (user_id,),
-                    )
-                    row = await cur.fetchone()
-                    if not row:
-                        raise HTTPException(status_code=403, detail="User is inactive")
-                    if row[0]:
-                        gid = row[0]
-                    if str(row[2] or "") == "moderator":
-                        staff_gid = row[1]
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=503, detail="User group lookup unavailable") from e
+                async with conn.cursor() as own_cursor:
+                    row = await lookup(own_cursor)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="User group lookup unavailable") from e
+    if not row:
+        raise HTTPException(status_code=403, detail="User is inactive")
+    if row[0]:
+        gid = row[0]
+    if str(row[2] or "") == "moderator":
+        staff_gid = row[1]
 
     primary = groups.get(gid) if gid else None
     if not primary:
@@ -1405,26 +1548,57 @@ async def throttled_file_reader(
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
 
-async def sanitize_filename_async(filename: str) -> str:
-    """Sanitize filename using dynamic blocked extensions"""
-    await update_settings()
-    
+def _truncate_utf8(filename: str, limit: int) -> str:
+    """Shorten a name to `limit` UTF-8 bytes, keeping its extension and whole characters.
+
+    Filesystems cap one path component in BYTES (255 on ext4/xfs), not characters: a
+    hundred CJK characters are already 300 bytes, so a character count let such names
+    through to a failing open().
+    """
+    if len(filename.encode("utf-8")) <= limit:
+        return filename
+    name, ext = os.path.splitext(filename)
+    if len(ext.encode("utf-8")) > limit // 2:
+        name, ext = filename, ""
+    budget = limit - len(ext.encode("utf-8"))
+    name = name.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+    return name + ext
+
+
+def sanitize_filename(filename: str, blocked_extensions) -> str:
+    """One safe path component: no separators or control characters, bounded in bytes."""
     filename = os.path.basename(filename)
-    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', filename)
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '_', filename)
+    if filename in ("", ".", ".."):
+        return "file"
 
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    
-    if ext in settings_cache['blocked_extensions']:
+    if ext in blocked_extensions:
         filename = filename + '.blocked'
 
-    if len(filename) > 200:
-        name, ext = os.path.splitext(filename)
-        filename = name[:200-len(ext)] + ext
+    filename = _truncate_utf8(filename, FILENAME_MAX_BYTES)
 
     if filename == STORAGE_MANIFEST_NAME:
         filename += ".upload"
 
     return filename or 'file'
+
+
+async def sanitize_filename_async(filename: str) -> str:
+    """Sanitize filename using dynamic blocked extensions"""
+    await update_settings()
+    return sanitize_filename(filename, settings_cache['blocked_extensions'] or BLOCKED_EXTENSIONS)
+
+
+def _upload_failure(exc: Exception) -> HTTPException:
+    """Log why an upload broke; tell the client only that it did.
+
+    The exception text of a filesystem error names the absolute staging path, which used
+    to be returned verbatim as the response detail.
+    """
+    if not isinstance(exc, ClientDisconnect):
+        print(f"Upload failed: {type(exc).__name__}: {exc}")
+    return HTTPException(status_code=500, detail="Upload failed")
 
 async def authorize_upload_identity(token: str | None, ip: str):
     """Fail-closed ban/CAPTCHA/token decision without consuming the upload slot yet."""
@@ -1480,9 +1654,38 @@ async def authorize_upload_identity(token: str | None, ip: str):
                     # A supplied but invalid capability is never silently downgraded to guest.
                     return False, None, None
 
-                if not captcha_enabled:
-                    return True, None, None
-                return False, None, None
+                if captcha_enabled:
+                    return False, None, None
+
+                # No token and no CAPTCHA: still a guest session, and still subject to the
+                # guest per-session file cap. Leaving out the header used to skip the cap
+                # entirely, so the address's newest guest token is counted instead (one is
+                # created when there is none), exactly as if the browser had sent it.
+                lifetime = max(1, safe_int(policy.get("recaptcha_token_lifetime"), 120))
+                await cur.execute(
+                    f"SELECT `token` FROM `{prefix}upload_tokens` "
+                    f"WHERE `ip_address` = %s AND `user_id` IS NULL AND `created_at` > %s "
+                    f"ORDER BY `created_at` DESC, `token` ASC LIMIT 1",
+                    (ip, now - lifetime * 60),
+                )
+                row = await cur.fetchone()
+                if row:
+                    implicit_token = str(row[0])
+                else:
+                    implicit_token = secrets.token_hex(32)
+                    await cur.execute(
+                        f"INSERT INTO `{prefix}upload_tokens` "
+                        f"(`token`, `ip_address`, `user_id`, `created_at`, `files_count`) "
+                        f"VALUES (%s, %s, NULL, %s, 0)",
+                        (implicit_token, ip, now),
+                    )
+                return True, None, {
+                    "token": implicit_token,
+                    "ip": ip,
+                    "default_limit": max(
+                        0, safe_int(policy.get("recaptcha_max_files_per_session_guest"), 0)
+                    ),
+                }
     except HTTPException:
         raise
     except Exception as exc:
@@ -1674,7 +1877,7 @@ async def reconcile_upload_storage():
         for candidate in STAGING_DIR.iterdir():
             try:
                 if candidate.stat(follow_symlinks=False).st_mtime < cutoff:
-                    cleanup_upload_directory(candidate)
+                    await remove_upload_directory(candidate)
                     removed_staging += 1
             except FileNotFoundError:
                 continue
@@ -1742,6 +1945,11 @@ def cleanup_upload_directory(path: Path):
         return
 
 
+async def remove_upload_directory(path: Path):
+    """cleanup_upload_directory() off the event loop: unlinking gigabytes is not instant."""
+    await asyncio.to_thread(cleanup_upload_directory, path)
+
+
 def _valid_storage_name(name: str) -> bool:
     """One filename component, never the manifest itself."""
     return (
@@ -1802,6 +2010,23 @@ def _write_storage_manifest(
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _seal_staged_upload(directory: Path, name: str, size: int, sha256: str) -> bool:
+    """Make the uploaded bytes durable, then publish their manifest (runs in a thread).
+
+    The payload is flushed before its manifest so a crash can never leave a manifest that
+    vouches for bytes still sitting in the page cache. Both fsyncs happen off the event loop:
+    on ext4 the manifest's fsync alone could wait for a multi-gigabyte journal commit.
+    """
+    payload = directory / name
+    try:
+        # r+b, not rb: Windows refuses to flush a handle opened read-only.
+        with payload.open("r+b") as handle:
+            os.fsync(handle.fileno())
+    except OSError:
+        return False
+    return _write_storage_manifest(directory, name, size, sha256)
 
 
 def _resolve_storage_file_sync(
@@ -1917,7 +2142,8 @@ async def commit_staged_upload(
     prefix = db_config_cache.get("prefix", "") if db_config_cache else ""
     published = False
     try:
-        if not _write_storage_manifest(
+        if not await asyncio.to_thread(
+            _seal_staged_upload,
             staging_dir,
             filename,
             received_size,
@@ -1959,7 +2185,7 @@ async def commit_staged_upload(
                 await conn.rollback()
                 raise
     except Exception as exc:
-        cleanup_upload_directory(final_dir if published else staging_dir)
+        await remove_upload_directory(final_dir if published else staging_dir)
         print(f"Upload publish failed: {type(exc).__name__}: {exc}")
         raise HTTPException(status_code=503, detail="Upload could not be committed")
 
@@ -1967,8 +2193,25 @@ async def commit_staged_upload(
 # STARTUP & SHUTDOWN EVENTS (MERGED - was duplicated before)
 # ============================================================================
 
+_service_tasks = set()
+
+
+def _start_service_task(coroutine):
+    """Keep a strong reference: the event loop holds running tasks only weakly."""
+    task = asyncio.create_task(coroutine)
+    _service_tasks.add(task)
+    task.add_done_callback(_service_tasks.discard)
+    return task
+
+
 async def startup():
     """Initialize background services and durable state."""
+    # aiofiles, manifests and bcrypt share the loop's default executor. Its stock size is
+    # cpu_count + 4 threads, which a few slow jobs could fill on a small VPS and stall
+    # every transfer behind them.
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(max_workers=IO_THREADS, thread_name_prefix="filehost-io")
+    )
     info_log("=" * 60)
     info_log(f"TryHackX Files Upload Server v{SERVER_VERSION}")
     info_log(f"Uploads directory: {UPLOADS_DIR}")
@@ -2002,17 +2245,18 @@ async def startup():
         print("config.local.php is missing; run the web installer")
 
     # Webhook delivery worker (Faza 4.1) — best-effort background loop.
-    asyncio.create_task(webhook_worker())
+    _start_service_task(webhook_worker())
     info_log("Webhook worker started")
 
     # Optional maintenance scheduler — see cleanup_scheduler(). The task always starts; it is
     # the setting that decides whether it does anything, so switching it on needs no restart.
-    asyncio.create_task(cleanup_scheduler())
+    _start_service_task(cleanup_scheduler())
     info_log("Cleanup scheduler ready")
 
 async def shutdown():
     """Close the database pool."""
     global db_pool, db_config_mtime
+    readiness_cache["pool"] = None
     if db_pool:
         db_pool.close()
         await db_pool.wait_closed()
@@ -2095,7 +2339,7 @@ async def stream_upload(
     try:
         slot_reserved = await reserve_upload_slot(reservation, user_limits)
     except Exception:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         await release_upload_capacity(storage_reservation)
         raise
     file_path = staging_dir / filename
@@ -2127,9 +2371,6 @@ async def stream_upload(
             stream_source = raw_stream
 
             if limit_Bps > 0:
-                # Convert bytes/s to MB/s for display
-                limit_mbps = limit_Bps / (1024 * 1024)
-                info_log(f"Throttling upload for {client_ip} ({limit_mbps:.2f} MiB/s)")
                 stream_source = throttled_iterator(stream_source, limit_Bps)
 
             async for chunk in stream_source:
@@ -2153,18 +2394,18 @@ async def stream_upload(
                         break
 
     except HTTPException:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         if slot_reserved:
             await release_upload_slot(reservation)
         await release_upload_capacity(storage_reservation)
         raise
 
     except Exception as e:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         if slot_reserved:
             await release_upload_slot(reservation)
         await release_upload_capacity(storage_reservation)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        raise _upload_failure(e) from e
 
     finally:
         await register_upload_end(upload_row, cancelled, received_size)
@@ -2174,7 +2415,7 @@ async def stream_upload(
         # The browser's status poll aborts the client-side XHR as soon as it observes this
         # state, so continuing to drain the request would waste the very bandwidth the
         # administrator intended to cut off.
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         if slot_reserved:
             await release_upload_slot(reservation)
         await release_upload_capacity(storage_reservation)
@@ -2185,7 +2426,7 @@ async def stream_upload(
         )
 
     if content_length > 0 and received_size != content_length:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         if slot_reserved:
             await release_upload_slot(reservation)
         await release_upload_capacity(storage_reservation)
@@ -2214,7 +2455,7 @@ async def stream_upload(
             storage_digest.hexdigest(),
         )
     except Exception:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         if slot_reserved:
             await release_upload_slot(reservation)
         await release_upload_capacity(storage_reservation)
@@ -2352,16 +2593,16 @@ async def sharex_upload(
                 if received_size > effective_max_size:
                     raise HTTPException(status_code=413, detail="File too large")
     except HTTPException:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         await release_upload_capacity(storage_reservation)
         raise
     except Exception as e:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         await release_upload_capacity(storage_reservation)
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        raise _upload_failure(e) from e
 
     if content_length > 0 and received_size != content_length:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         await release_upload_capacity(storage_reservation)
         raise HTTPException(status_code=400, detail=f"Size mismatch: expected {content_length}, got {received_size}")
 
@@ -2385,7 +2626,7 @@ async def sharex_upload(
             storage_digest.hexdigest(),
         )
     except Exception:
-        cleanup_upload_directory(staging_dir)
+        await remove_upload_directory(staging_dir)
         await release_upload_capacity(storage_reservation)
         raise
     await release_upload_capacity(storage_reservation)
@@ -2435,11 +2676,36 @@ async def qr_code_post(request: Request):
     """Same renderer, payload in the body. Used for secrets (a TOTP `otpauth://` URI
     carries the shared secret) that must never land in a URL — query strings end up in
     access logs and browser history; request bodies do not."""
+    raw = await read_bounded_body(request, QR_POST_MAX_BYTES)
     try:
-        body = await request.json()
-    except Exception:
+        body = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON")
     return _render_qr(str(body.get("data") or ""), safe_int(body.get("scale"), 6))
+
+
+async def read_bounded_body(request: Request, limit: int) -> bytes:
+    """Read a small request body, refusing anything larger before it is buffered.
+
+    Starlette's request.body()/json() keep every chunk in memory with no ceiling, and the
+    only limit in front of this public route is Apache's LimitRequestBody (1 GiB by default).
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            declared_size = int(declared)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if declared_size > limit:
+            raise HTTPException(status_code=413, detail="Request body too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > limit:
+            raise HTTPException(status_code=413, detail="Request body too large")
+    return bytes(body)
 
 
 @app.get("/live")
@@ -2447,9 +2713,8 @@ async def live_check():
     return {"status": "ok", "version": SERVER_VERSION}
 
 
-@app.get("/ready")
-async def ready_check():
-    await require_storage_ready()
+async def _readiness_state() -> dict:
+    await require_storage_ready(force=True)
     await update_settings()
     if not settings_cache.get("checked_at") or settings_cache.get("blocked_extensions") is None:
         raise HTTPException(status_code=503, detail="Upload settings unavailable")
@@ -2457,19 +2722,27 @@ async def ready_check():
         "status": "ready",
         "version": SERVER_VERSION,
         "schema_version": SUPPORTED_SCHEMA_VERSION,
-        "uploads_dir": str(UPLOADS_DIR),
     }
+
+
+@app.get("/ready")
+async def ready_check():
+    """Operator readiness probe (loopback only, never proxied): always probes afresh."""
+    return {**await _readiness_state(), "uploads_dir": str(UPLOADS_DIR)}
 
 
 @app.get("/health")
 async def health_check():
-    """Backward-compatible readiness endpoint: unhealthy dependencies produce HTTP 503."""
+    """Backward-compatible readiness endpoint: unhealthy dependencies produce HTTP 503.
+
+    PHP relays a summary of this to the public `api.php?action=health`, so it carries no
+    filesystem paths; /ready (loopback only) still reports the uploads directory.
+    """
     try:
-        ready = await ready_check()
+        ready = await _readiness_state()
         return {
             **ready,
             "status": "ok",
-            "config_exists": CONFIG_FILE.exists(),
             "database_configured": bool(load_php_config().get("database")),
             "database_connected": True,
         }
@@ -2480,23 +2753,29 @@ async def health_check():
                 "status": "unavailable",
                 "version": SERVER_VERSION,
                 "detail": str(exc.detail),
-                "config_exists": CONFIG_FILE.exists(),
                 "database_configured": bool(load_php_config().get("database")),
                 "database_connected": False,
-                "uploads_dir": str(UPLOADS_DIR),
             },
         )
 
-@app.get("/reload")
-async def reload_config():
-    """Reload configuration after web installation."""
-    global db_pool, db_config_mtime, settings_cache
-    global db_config_cache
+
+@app.api_route("/reload", methods=["GET", "POST"])
+async def reload_config(request: Request):
+    """Re-read config.local.php after the web installer and refresh cached settings.
+
+    Only a local caller may ask (Apache never proxies this path, and anything it did proxy
+    would carry X-Forwarded-For). The pool is rebuilt only when the database configuration
+    actually changed, so repeating the call costs a file read, not every live connection.
+    """
+    global db_config_mtime
+
+    if not request_is_direct_loopback(request):
+        raise HTTPException(status_code=403, detail="Reload is restricted to local callers")
 
     async with db_pool_lock:
-        db_config_mtime = -1
-        db_config_cache = None
-        settings_cache['checked_at'] = 0  # Force settings reload too
+        db_config_mtime = -1  # forces a re-read; the pool is replaced only if it differs
+        settings_cache['checked_at'] = 0
+        readiness_cache["pool"] = None
         pool = await _get_db_pool_unlocked()
 
     return {
@@ -2753,42 +3032,6 @@ async def _create_download_reservation_with_cursor(
         )
     return reservation_id
 
-
-async def reserve_download_slot(ip: str, user_id: int | None, file_id: str) -> int:
-    """Atomically enforce concurrency limits and publish the active-transfer row."""
-    pool = await require_storage_ready()
-    group_limits = await get_user_group_limits(user_id)
-    prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
-    lock_name = build_lock_name('download:' + hashlib.sha256(ip.encode()).hexdigest()[:24])
-    locked = False
-    conn = None
-    try:
-        conn = await pool.acquire()
-        if conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT GET_LOCK(%s, 5)", (lock_name,))
-                row = await cur.fetchone()
-                if not row or safe_int(row[0]) != 1:
-                    raise HTTPException(status_code=503, detail="Download limiter is busy")
-                locked = True
-                return await _reserve_download_slot_with_cursor(
-                    cur, prefix, ip, user_id, file_id, group_limits
-                )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        print(f"Download reservation failed: {type(exc).__name__}: {exc}")
-        raise HTTPException(status_code=503, detail="Download limiter unavailable")
-    finally:
-        if conn is not None:
-            try:
-                if locked:
-                    async with conn.cursor() as release_cur:
-                        await release_cur.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
-            except Exception:
-                pass
-            finally:
-                pool.release(conn)
 
 async def register_download_end(active_id: int):
     """Wyrejestruj pobieranie"""
@@ -3143,8 +3386,7 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
     """
     client_ip = request_client_ip(request)
     token_fingerprint = hashlib.sha256(token.encode()).hexdigest()[:12]
-    info_log(f"Download request from {client_ip}, request={token_fingerprint}")
-    
+
     # Ensure settings are up to date
     try:
         await update_settings()
@@ -3204,10 +3446,8 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                 if row:
                     file_id = row[0]
                     user_id = row[1]
-                    info_log(f"Token valid, file_id={file_id}, user_id={user_id}")
 
                 if not row:
-                    info_log(f"Invalid upload token for IP {client_ip}")
                     raise HTTPException(status_code=403, detail="Invalid token")
                 
                 # Sharing-control columns are mandatory. An outdated schema is a readiness
@@ -3230,7 +3470,6 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                 owner_id = file_row[9] if file_row else None
 
                 if not file_row:
-                    info_log(f"File info not found for {file_id}")
                     raise HTTPException(status_code=404, detail="File info not found")
 
                 # Enforce per-file expiry / download cap before any response bytes are sent.
@@ -3254,7 +3493,6 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                 original_name = file_row[0]
                 mime_type = file_row[1]
                 file_size = file_row[2]
-                info_log(f"File: {original_name}, size={file_size}, mime={mime_type}")
 
                 actual_file_path = await resolve_storage_file(
                     file_id,
@@ -3264,7 +3502,9 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                 if not actual_file_path:
                     raise HTTPException(status_code=404, detail="File content missing")
 
-                group_limits = await get_user_group_limits(user_id)
+                # Same connection: a second acquire while this one is held could deadlock
+                # the pool under a burst of signed-in downloads.
+                group_limits = await get_user_group_limits(user_id, cur)
                 group_dl = safe_int(group_limits.get('limit_download'), 0)
                 limit_Bps = max(0, group_dl)
                 range_spec = parse_single_range_header(
@@ -3393,9 +3633,9 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
         "X-Content-Type-Options": "nosniff",
     }
 
-    if limit_Bps > 0:
-        limit_mbps = limit_Bps / (1024 * 1024)
-        info_log(f"Throttling download for {client_ip} ({limit_mbps:.2f} MiB/s)")
+    # One line per started transfer, naming the token only by its fingerprint and never the
+    # visitor's file name (Apache already logs who asked).
+    info_log(f"Download {token_fingerprint}: file {file_id}")
     status_code = 200
     range_start = 0
     range_end = None
@@ -3546,9 +3786,36 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
-def _post_webhook(url: str, secret: str, event_id: str, event: str, payload: str):
+def _abort_webhook_connection(connection, state: dict) -> None:
+    """Watchdog: cut a delivery that outlived its deadline, from outside its thread.
+
+    The socket timeout bounds each read, not the delivery: a receiver dribbling one byte
+    every few seconds kept a worker thread busy for days. Shutting the socket down makes the
+    blocked read return at once. The base-class shutdown is called on purpose so a TLS
+    socket's state is not touched from this thread.
+    """
+    state["expired"] = True
+    sock = getattr(connection, "sock", None)
+    if sock is None:
+        return
+    try:
+        socket.socket.shutdown(sock, socket.SHUT_RDWR)
+    except (OSError, TypeError, ValueError):
+        pass
+
+
+def _post_webhook(
+    url: str,
+    secret: str,
+    event_id: str,
+    event: str,
+    payload: str,
+    deadline: float = WEBHOOK_DELIVERY_DEADLINE,
+):
     """DNS-pinned webhook POST. Redirects and non-public destinations are refused."""
     connection = None
+    watchdog = None
+    state = {"expired": False}
     try:
         scheme, host, port, pinned_ip, path = _public_webhook_target(url)
         data = payload.encode("utf-8")
@@ -3568,14 +3835,21 @@ def _post_webhook(url: str, secret: str, event_id: str, event: str, payload: str
             connection = _PinnedHTTPSConnection(host, pinned_ip, port, timeout=10)
         else:
             connection = http.client.HTTPConnection(pinned_ip, port, timeout=10)
+        watchdog = threading.Timer(deadline, _abort_webhook_connection, args=(connection, state))
+        watchdog.daemon = True
+        watchdog.start()
         connection.request("POST", path, body=data, headers=headers)
         response = connection.getresponse()
         response.read(4096)
         code = int(response.status)
+        if state["expired"]:
+            return (False, "deadline")
         return (200 <= code < 300, str(code))
     except Exception as e:
-        return (False, type(e).__name__)
+        return (False, "deadline" if state["expired"] else type(e).__name__)
     finally:
+        if watchdog is not None:
+            watchdog.cancel()
         if connection is not None:
             connection.close()
 
@@ -3631,8 +3905,10 @@ async def _deliver_claimed_webhook(pool, prefix: str, row, semaphore: asyncio.Se
     wh_table = f"{prefix}webhooks"
     did, wid, event_id, event, payload, attempts, url, secret = row
     async with semaphore:
-        ok, info = await asyncio.to_thread(
-            _post_webhook, url, secret, event_id, event, payload
+        # Own executor: a slow receiver can only ever occupy webhook threads, never the
+        # ones every upload and download does its file I/O on.
+        ok, info = await asyncio.get_running_loop().run_in_executor(
+            WEBHOOK_EXECUTOR, _post_webhook, url, secret, event_id, event, payload
         )
     ts = int(time.time())
     new_attempts = safe_int(attempts) + 1
@@ -3677,7 +3953,7 @@ async def _deliver_pending_webhooks():
     rows = await _claim_pending_webhooks(pool, prefix)
     if not rows:
         return
-    semaphore = asyncio.Semaphore(5)
+    semaphore = asyncio.Semaphore(WEBHOOK_CONCURRENCY)
     await asyncio.gather(*[
         _deliver_claimed_webhook(pool, prefix, row, semaphore) for row in rows
     ])
@@ -3753,7 +4029,7 @@ async def _run_cleanup_once() -> tuple[bool, str]:
         )
 
     try:
-        proc = await asyncio.to_thread(_run)
+        proc = await asyncio.get_running_loop().run_in_executor(MAINTENANCE_EXECUTOR, _run)
     except subprocess.TimeoutExpired:
         return False, "timed out after 300 s"
     except Exception as e:
@@ -3856,6 +4132,11 @@ def _zip_stream(entries):
 
     STORED avoids CPU on already-compressed media (images/video) and keeps the
     stream cheap. allowZip64 handles >4GiB archives/members.
+
+    Each member's size is declared before it is opened. In this non-seekable streaming
+    mode zipfile picks ZIP64 records for a member only from the size it is told up front;
+    left at 0, any member over 2 GiB raised "File size too large" after it had been
+    streamed in full, truncating the archive.
     """
     sink = _ZipSink()
     seen: dict = {}
@@ -3865,15 +4146,17 @@ def _zip_stream(entries):
             zinfo = zipfile.ZipInfo(filename=arcname, date_time=time.localtime()[:6])
             zinfo.compress_type = zipfile.ZIP_STORED
             zinfo.external_attr = 0o644 << 16  # regular file, rw-r--r--
-            with zf.open(zinfo, mode="w") as dest, open(disk_path, "rb") as src:
-                while True:
-                    chunk = src.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    dest.write(chunk)
-                    data = sink.drain()
-                    if data:
-                        yield data
+            with open(disk_path, "rb") as src:
+                zinfo.file_size = os.fstat(src.fileno()).st_size
+                with zf.open(zinfo, mode="w") as dest:
+                    while True:
+                        chunk = src.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        dest.write(chunk)
+                        data = sink.drain()
+                        if data:
+                            yield data
             data = sink.drain()
             if data:
                 yield data
@@ -4303,7 +4586,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
                 if not entries:
                     raise HTTPException(status_code=404, detail="Collection is empty")
 
-                group_limits = await get_user_group_limits(dl_user_id)
+                group_limits = await get_user_group_limits(dl_user_id, cur)
                 group_dl = safe_int(group_limits.get('limit_download'), 0)
                 limit_Bps = max(0, group_dl)
 
@@ -4382,7 +4665,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
 
     background_tasks.add_task(register_download_end, active_id)
 
-    info_log(f"Collection {id[:8]}: ZIP of {len(entries)} file(s) for {client_ip}")
+    info_log(f"Collection ZIP {id[:8]}: {len(entries)} file(s)")
 
     # Viewer identity: prefer the `dt` token's user — PHP stamps the session's user id into
     # `download_tokens` when issuing it, exactly like single files (notify_file_download gets
@@ -4422,8 +4705,6 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
         "X-Content-Type-Options": "nosniff",
     }
     stream = _zip_stream(entries)
-    if limit_Bps > 0:
-        info_log(f"Throttling collection ZIP for {client_ip} ({limit_Bps / (1024 * 1024):.2f} MiB/s)")
     stream = _throttled_sync_iterator(
         stream, limit_Bps, active_id, transfer_state
     )
@@ -4436,7 +4717,13 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
 # ============================================================================
 
 def _extract_video_frame(src: Path, max_edge: int):
-    """Grab one frame (~1s in, falling back to the very start) via the bundled ffmpeg."""
+    """Grab one frame (~1s in, falling back to the very start) via the bundled ffmpeg.
+
+    ffmpeg stays in the worker's own process group (no new session), so the worker's
+    deadline kill takes it down too instead of leaving an orphan without any timeout. Input
+    is restricted to the local file protocol: a playlist-shaped upload cannot make ffmpeg
+    open anything else.
+    """
     exe = imageio_ffmpeg.get_ffmpeg_exe()
     for seek in ("1", "0"):
         proc = None
@@ -4446,6 +4733,7 @@ def _extract_video_frame(src: Path, max_edge: int):
                 [exe, "-nostdin", "-loglevel", "error", "-threads", "1",
                  "-filter_threads", "1", "-filter_complex_threads", "1",
                  "-probesize", "5000000", "-analyzeduration", "5000000",
+                 "-protocol_whitelist", "file",
                  "-ss", seek, "-i", str(src), "-frames:v", "1",
                  "-an", "-sn", "-dn",
                  "-vf", f"scale={max_edge}:{max_edge}:force_original_aspect_ratio=decrease",
@@ -4454,9 +4742,8 @@ def _extract_video_frame(src: Path, max_edge: int):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 creationflags=creation_flags,
-                start_new_session=os.name != "nt",
             )
-            stdout, _ = proc.communicate(timeout=25)
+            stdout, _ = proc.communicate(timeout=THUMB_FFMPEG_ATTEMPT_TIMEOUT)
             if 0 < len(stdout) <= THUMB_MAX_OUTPUT_BYTES:
                 return Image.open(io.BytesIO(stdout))
         except subprocess.TimeoutExpired:
@@ -4516,6 +4803,23 @@ def _generate_thumbnail(src: Path, mime: str, dest: Path, max_edge: int = THUMB_
         return False
 
 
+def _kill_worker_tree(proc, posix: bool | None = None) -> None:
+    """Kill a thumbnail worker together with any ffmpeg it started.
+
+    The worker leads its own session (start_new_session), so its process group is exactly
+    the worker plus its children. Windows has no process groups; there the worker is killed.
+    """
+    if posix is None:
+        posix = os.name != "nt"
+    pid = getattr(proc, "pid", None)
+    if posix and isinstance(pid, int) and pid > 0:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.kill()
+
+
 def _run_thumbnail_worker(src: Path, mime: str, dest: Path, max_edge: int) -> bool:
     """Run all untrusted media parsing in a killable child process."""
     creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -4538,7 +4842,7 @@ def _run_thumbnail_worker(src: Path, mime: str, dest: Path, max_edge: int) -> bo
     try:
         proc.communicate(timeout=THUMB_GENERATION_TIMEOUT)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        _kill_worker_tree(proc)
         proc.communicate()
         dest.with_suffix(".tmp").unlink(missing_ok=True)
         return False
@@ -4564,7 +4868,8 @@ async def _generate_thumbnail_bounded(
 ) -> bool:
     """Keep the event loop responsive and cap global child-process concurrency."""
     async with thumb_semaphore:
-        return await asyncio.to_thread(
+        return await asyncio.get_running_loop().run_in_executor(
+            THUMB_EXECUTOR,
             _run_thumbnail_worker,
             src,
             mime,
@@ -4738,16 +5043,15 @@ async def metrics(request: Request):
     except Exception as exc:  # noqa: BLE001
         info_log(f"/metrics: settings refresh failed, serving cached values ({exc})")
 
-    client_ip = request.client.host if request.client else ''
     token = (settings_cache.get('metrics_token') or '').strip()
 
     if token:
         supplied = (request.headers.get('authorization') or '').strip()
         if supplied.lower().startswith('bearer '):
             supplied = supplied[7:].strip()
-        if not hmac.compare_digest(supplied, token):
+        if not hmac.compare_digest(supplied.encode(), token.encode()):
             raise HTTPException(status_code=401, detail="Invalid metrics token")
-    elif client_ip not in ('127.0.0.1', '::1'):
+    elif not request_is_direct_loopback(request):
         raise HTTPException(status_code=403, detail="Metrics restricted to loopback (set metrics_token to scrape remotely)")
 
     out = [_metric("filehost_up", "1 when the upload server is serving", "gauge", 1)]
@@ -4833,9 +5137,15 @@ if __name__ == "__main__":
         raise SystemExit(_thumbnail_worker_main(sys.argv[2:]))
     import uvicorn
     uvicorn.run(
-        app, 
-        host=HOST, 
+        app,
+        host=HOST,
         port=PORT,
         log_level="warning" if MINIMAL_LOGS else "info",
-        access_log=not MINIMAL_LOGS
+        # Apache already logs every request with the real client. uvicorn's own access log
+        # only ever saw 127.0.0.1 and wrote full single-use tokens out of the query strings.
+        access_log=False,
+        # Pinned rather than read from FORWARDED_ALLOW_IPS: only the local Apache hop is
+        # trusted, so uvicorn takes the rightmost, Apache-appended X-Forwarded-For entry.
+        proxy_headers=True,
+        forwarded_allow_ips="127.0.0.1",
     )

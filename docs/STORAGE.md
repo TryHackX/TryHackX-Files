@@ -182,5 +182,5 @@ Verify both runtimes resolve the same path:
 ```bash
 php -r 'require "src/config.php"; echo UPLOADS_DIR, "\n";'
 venv/bin/python -c "import upload_server as u; print(u.UPLOADS_DIR)"
-curl -s http://127.0.0.1:8001/health
+curl -s http://127.0.0.1:8001/ready
 ```

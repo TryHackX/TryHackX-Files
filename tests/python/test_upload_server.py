@@ -11,7 +11,9 @@ import hashlib
 import io
 import json
 import re
+import socket
 import sys
+import threading
 import time
 import zipfile
 from pathlib import Path
@@ -160,9 +162,20 @@ class TestClientIp:
 
         return Request()
 
-    def test_loopback_proxy_uses_first_forwarded_address(self):
-        request = self._request("127.0.0.1", "198.51.100.27, 10.0.0.2")
-        assert us.request_client_ip(request) == "198.51.100.27"
+    def test_loopback_proxy_uses_the_hop_apache_appended(self):
+        # mod_proxy APPENDS the peer it accepted; everything left of it came from the client.
+        request = self._request("127.0.0.1", "198.51.100.27, 203.0.113.44")
+        assert us.request_client_ip(request) == "203.0.113.44"
+
+    def test_spoofed_forwarded_prefix_is_ignored(self):
+        request = self._request("127.0.0.1", "6.6.6.6,10.0.0.1, 192.0.2.10")
+        assert us.request_client_ip(request) == "192.0.2.10"
+
+    def test_direct_loopback_means_no_proxy_hop(self):
+        assert us.request_is_direct_loopback(self._request("127.0.0.1"))
+        assert us.request_is_direct_loopback(self._request("::1"))
+        assert not us.request_is_direct_loopback(self._request("127.0.0.1", "192.0.2.10"))
+        assert not us.request_is_direct_loopback(self._request("203.0.113.8"))
 
     def test_direct_client_cannot_spoof_forwarded_address(self):
         request = self._request("203.0.113.8", "198.51.100.27")
@@ -1726,3 +1739,672 @@ class TestGuestTransferLimits:
             assert exc.status_code == 503
         else:
             raise AssertionError('a missing guest group must not fall back to no limit')
+
+
+# ---------------------------------------------------------------------------------------------
+# Shared fakes for the request-path tests below.
+# ---------------------------------------------------------------------------------------------
+
+class _AsyncContext:
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _ScriptedCursor:
+    """Answers fetchone()/fetchall() by the first needle found in the most recent query."""
+
+    def __init__(self, answers=(), all_answers=()):
+        self.answers = list(answers)
+        self.all_answers = list(all_answers)
+        self.queries = []
+        self.rowcount = 1
+        self.lastrowid = 5
+
+    async def execute(self, query, params=None):
+        self.queries.append((query, params))
+
+    def _match(self, table):
+        last = self.queries[-1][0] if self.queries else ""
+        for needle, value in table:
+            if needle in last:
+                return value
+        return None
+
+    async def fetchone(self):
+        return self._match(self.answers)
+
+    async def fetchall(self):
+        return self._match(self.all_answers) or []
+
+
+class _Connection:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def cursor(self):
+        return _AsyncContext(self._cursor)
+
+    async def begin(self):
+        return None
+
+    async def commit(self):
+        return None
+
+    async def rollback(self):
+        return None
+
+
+class _OneConnectionPool:
+    """A pool of exactly one connection that fails loudly on a nested acquire."""
+
+    def __init__(self, cursor):
+        self.connection = _Connection(cursor)
+        self.in_use = 0
+        self.max_in_use = 0
+
+    async def _take(self):
+        if self.in_use:
+            raise AssertionError("a second connection was requested while one is held")
+        self.in_use += 1
+        self.max_in_use = max(self.max_in_use, self.in_use)
+        return self.connection
+
+    def acquire(self):
+        pool = self
+
+        class Acquire:
+            def __await__(self):
+                return pool._take().__await__()
+
+            async def __aenter__(self):
+                return await pool._take()
+
+            async def __aexit__(self, exc_type, exc, tb):
+                pool.release(pool.connection)
+                return False
+
+        return Acquire()
+
+    def release(self, _conn):
+        self.in_use -= 1
+
+
+def _http_request(path="/", query=b"", headers=None, client=("203.0.113.9", 50000),
+                  receive=None, method="GET"):
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": method,
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query,
+        "root_path": "",
+        "headers": [
+            (name.lower().encode("latin-1"), value.encode("latin-1"))
+            for name, value in (headers or {}).items()
+        ],
+        "client": client,
+        "server": ("127.0.0.1", 8001),
+    }
+    return Request(scope) if receive is None else Request(scope, receive)
+
+
+def _receive_chunks(chunks):
+    state = {"calls": 0}
+
+    async def receive():
+        index = state["calls"]
+        state["calls"] += 1
+        if index < len(chunks):
+            return {
+                "type": "http.request",
+                "body": chunks[index],
+                "more_body": index < len(chunks) - 1,
+            }
+        return {"type": "http.disconnect"}
+
+    return receive, state
+
+
+USER_GROUPS = {
+    1: {"slug": "user", "limit_download": 0, "concurrent_downloads": 0,
+        "concurrent_connections_per_file": 0, "transfer_quota_bytes": 0},
+    2: {"slug": "guest", "limit_download": 0, "concurrent_downloads": 0,
+        "concurrent_connections_per_file": 0, "transfer_quota_bytes": 0},
+}
+
+
+class TestBoundedPoolAcquire:
+    """A saturated pool answers 503 instead of parking every request behind it."""
+
+    def test_saturated_pool_answers_503_instead_of_waiting_forever(self):
+        class NeverFreePool:
+            def acquire(self):
+                return asyncio.Event().wait()
+
+            def release(self, _conn):
+                raise AssertionError("nothing was acquired")
+
+        async def scenario():
+            try:
+                await us.acquire_bounded(NeverFreePool(), timeout=0.05)
+            except us.HTTPException as exc:
+                return exc.status_code
+            return None
+
+        assert asyncio.run(scenario()) == 503
+
+    def test_connection_granted_after_the_deadline_goes_back_to_the_pool(self):
+        released = []
+
+        class LatePool:
+            def acquire(self):
+                async def late():
+                    try:
+                        await asyncio.sleep(0.2)
+                    except asyncio.CancelledError:
+                        pass  # the pool handed the connection over just as the waiter gave up
+                    return "connection"
+
+                return late()
+
+            def release(self, conn):
+                released.append(conn)
+
+        async def scenario():
+            try:
+                await us.acquire_bounded(LatePool(), timeout=0.02)
+            except us.HTTPException:
+                pass
+            await asyncio.sleep(0.05)
+
+        asyncio.run(scenario())
+        assert released == ["connection"]
+
+
+class TestDownloadUsesOneConnection:
+    """A signed-in download used to hold one pooled connection while asking for a second;
+    twenty of them at once deadlocked the whole pool."""
+
+    def test_group_lookup_runs_on_the_callers_cursor(self, monkeypatch):
+        async def forbidden():
+            raise AssertionError("nested pool acquire")
+
+        monkeypatch.setattr(us, "get_db_pool", forbidden)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        monkeypatch.setitem(us.settings_cache, "groups", {
+            1: {"slug": "user", "limit_download": 7},
+            2: {"slug": "guest", "limit_download": 0},
+        })
+        monkeypatch.setitem(us.settings_cache, "default_group_id", 1)
+        cursor = _ScriptedCursor([("FROM `fh_users`", (None, None, "user"))])
+
+        limits = asyncio.run(us.get_user_group_limits(42, cursor))
+
+        assert limits["limit_download"] == 7
+        assert "FROM `fh_users`" in cursor.queries[0][0]
+
+    def test_signed_in_download_never_asks_for_a_second_connection(self, monkeypatch, tmp_path):
+        payload = tmp_path / "a.bin"
+        payload.write_bytes(b"abc")
+        cursor = _ScriptedCursor([
+            ("GET_LOCK", (1,)),
+            ("COUNT(", (0,)),
+            ("FROM `fh_download_tokens` WHERE `token`", ("file1", 42)),
+            ("FROM `fh_files` WHERE `id`",
+             ("a.bin", "application/octet-stream", 3, None, None, 0, 0, None, None, 9)),
+            ("FROM `fh_users`", (None, None, "user")),
+        ])
+        pool = _OneConnectionPool(cursor)
+
+        async def no_settings():
+            return None
+
+        async def same_pool(*_args, **_kwargs):
+            return pool
+
+        async def resolved(*_args, **_kwargs):
+            return payload
+
+        monkeypatch.setattr(us, "update_settings", no_settings)
+        monkeypatch.setattr(us, "require_storage_ready", same_pool)
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "resolve_storage_file", resolved)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_", "database": "files"})
+        monkeypatch.setitem(us.settings_cache, "groups", USER_GROUPS)
+        monkeypatch.setitem(us.settings_cache, "default_group_id", 1)
+        request = _http_request("/download", b"token=t")
+
+        response = asyncio.run(us.download_file("t", request, us.BackgroundTasks()))
+
+        assert response.status_code == 200
+        assert pool.max_in_use == 1 and pool.in_use == 0
+        assert any("FROM `fh_users`" in query for query, _ in cursor.queries)
+        assert re.fullmatch(r"[a-f0-9]{32}", request.scope["filehost.traffic"]["reservation_id"])
+
+
+class TestQrBodyIsBounded:
+    def test_oversized_body_is_refused_while_streaming(self):
+        receive, state = _receive_chunks([b"x" * 4096] * 10)
+        request = _http_request("/qr", receive=receive, method="POST")
+
+        try:
+            asyncio.run(us.qr_code_post(request))
+        except us.HTTPException as exc:
+            assert exc.status_code == 413
+        else:
+            raise AssertionError("an unbounded body was buffered")
+        assert state["calls"] < 10
+
+    def test_declared_oversized_body_is_refused_unread(self):
+        receive, state = _receive_chunks([b"{}"])
+        request = _http_request(
+            "/qr", headers={"Content-Length": str(10 ** 9)}, receive=receive, method="POST"
+        )
+
+        try:
+            asyncio.run(us.qr_code_post(request))
+        except us.HTTPException as exc:
+            assert exc.status_code == 413
+        else:
+            raise AssertionError("a declared 1 GB body was accepted")
+        assert state["calls"] == 0
+
+    def test_small_payload_still_renders_and_non_objects_are_rejected(self):
+        body = json.dumps({"data": "otpauth://totp/files?secret=ABCDEF"}).encode()
+        receive, _ = _receive_chunks([body])
+        request = _http_request(
+            "/qr", headers={"Content-Length": str(len(body))}, receive=receive, method="POST"
+        )
+        response = asyncio.run(us.qr_code_post(request))
+        assert response.media_type == "image/svg+xml"
+
+        receive, _ = _receive_chunks([b"[1, 2]"])
+        try:
+            asyncio.run(us.qr_code_post(_http_request("/qr", receive=receive, method="POST")))
+        except us.HTTPException as exc:
+            assert exc.status_code == 400
+        else:
+            raise AssertionError("a JSON list was treated as an object")
+
+
+class TestWebhookDeliveryDeadline:
+    def test_slow_receiver_is_cut_at_the_delivery_deadline(self, monkeypatch):
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        port = server.getsockname()[1]
+        stop = threading.Event()
+
+        def dribble():
+            try:
+                connection, _ = server.accept()
+            except OSError:
+                return
+            try:
+                connection.recv(65536)
+                while not stop.is_set():
+                    connection.sendall(b"H")  # one byte at a time, never a full status line
+                    stop.wait(0.05)
+            except OSError:
+                pass
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=dribble, daemon=True)
+        thread.start()
+        monkeypatch.setattr(
+            us,
+            "_public_webhook_target",
+            lambda url: ("http", "127.0.0.1", port, "127.0.0.1", "/hook"),
+        )
+
+        started = time.monotonic()
+        try:
+            ok, info = us._post_webhook(
+                "http://hooks.example.test/hook", "secret", "event", "upload", "{}",
+                deadline=0.4,
+            )
+        finally:
+            stop.set()
+            server.close()
+            thread.join(timeout=5)
+
+        assert not ok and info == "deadline"
+        assert time.monotonic() - started < 5
+
+    def test_deliveries_run_on_their_own_threads(self):
+        assert us.WEBHOOK_EXECUTOR._max_workers == us.WEBHOOK_CONCURRENCY
+        assert us.WEBHOOK_EXECUTOR is not us.THUMB_EXECUTOR
+
+
+class TestZip64Members:
+    def test_member_over_the_zip64_limit_streams_into_a_valid_archive(self, monkeypatch, tmp_path):
+        # The real limit is 2 GiB; lowering it reproduces the same code path with 3 MiB.
+        monkeypatch.setattr(us.zipfile, "ZIP64_LIMIT", 1024 * 1024)
+        big = tmp_path / "big.bin"
+        big.write_bytes(b"B" * (3 * 1024 * 1024))
+        small = tmp_path / "small.txt"
+        small.write_bytes(b"small")
+
+        archive = b"".join(us._zip_stream([(big, "big.bin"), (small, "small.txt")]))
+
+        with zipfile.ZipFile(io.BytesIO(archive)) as zf:
+            assert zf.namelist() == ["big.bin", "small.txt"]
+            assert zf.read("big.bin") == big.read_bytes()
+            assert zf.read("small.txt") == b"small"
+            assert zf.testzip() is None
+
+
+class TestTokenlessUploadsAreCapped:
+    POLICY = [
+        ("recaptcha_enabled", "0"),
+        ("recaptcha_token_lifetime", "120"),
+        ("recaptcha_max_files_per_session_guest", "5"),
+    ]
+
+    def _run(self, monkeypatch, existing_token, policy=None):
+        cursor = _ScriptedCursor(
+            [("FROM `fh_upload_tokens`", (existing_token,) if existing_token else None)],
+            [("FROM `fh_settings`", policy or self.POLICY)],
+        )
+        pool = _OneConnectionPool(cursor)
+
+        async def ready(*_args, **_kwargs):
+            return pool
+
+        monkeypatch.setattr(us, "require_storage_ready", ready)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        result = asyncio.run(us.authorize_upload_identity(None, "198.51.100.4"))
+        return result, cursor
+
+    def test_first_tokenless_upload_gets_a_counted_guest_session(self, monkeypatch):
+        (allowed, user_id, reservation), cursor = self._run(monkeypatch, None)
+
+        assert allowed is True and user_id is None
+        assert re.fullmatch(r"[a-f0-9]{64}", reservation["token"])
+        assert reservation["ip"] == "198.51.100.4"
+        assert reservation["default_limit"] == 5
+        inserts = [params for query, params in cursor.queries if "INSERT INTO `fh_upload_tokens`" in query]
+        assert inserts and inserts[0][0] == reservation["token"]
+
+    def test_later_tokenless_uploads_count_against_the_same_session(self, monkeypatch):
+        (allowed, _user, reservation), cursor = self._run(monkeypatch, "c" * 64)
+
+        assert allowed is True
+        assert reservation["token"] == "c" * 64
+        assert not any("INSERT INTO" in query for query, _ in cursor.queries)
+
+    def test_captcha_still_requires_a_real_token(self, monkeypatch):
+        policy = [
+            ("recaptcha_enabled", "1"),
+            ("recaptcha_site_key", "site"),
+            ("recaptcha_secret_key", "secret"),
+        ]
+        (allowed, _user, reservation), _cursor = self._run(monkeypatch, None, policy)
+
+        assert allowed is False and reservation is None
+
+
+class TestStoredFilenames:
+    def test_long_cjk_name_fits_one_path_component(self):
+        name = us.sanitize_filename("漢" * 120 + ".mp4", us.BLOCKED_EXTENSIONS)
+
+        assert name.endswith(".mp4")
+        assert len(name.encode("utf-8")) <= us.FILENAME_MAX_BYTES
+        assert us._valid_storage_name(name)
+        name.encode("utf-8").decode("utf-8")  # whole characters only
+
+    def test_dot_names_and_empty_names_become_file(self):
+        for raw in ("", ".", "..", "a/..", "../.."):
+            assert us.sanitize_filename(raw, us.BLOCKED_EXTENSIONS) == "file"
+
+    def test_blocked_extension_survives_truncation(self):
+        name = us.sanitize_filename("x" * 300 + ".php", us.BLOCKED_EXTENSIONS)
+
+        assert name.endswith(".blocked")
+        assert len(name.encode("utf-8")) <= us.FILENAME_MAX_BYTES
+
+    def test_control_characters_never_reach_the_manifest(self):
+        name = us.sanitize_filename("a\x7fb\x01c.txt", us.BLOCKED_EXTENSIONS)
+
+        assert name == "a_b_c.txt"
+        assert us._valid_storage_name(name)
+
+    def test_upload_failure_never_echoes_the_server_path(self, capsys):
+        error = OSError(36, "File name too long", "/srv/files/uploads/.staging/abc/x")
+        response = us._upload_failure(error)
+
+        assert response.status_code == 500
+        assert response.detail == "Upload failed"
+        assert "/srv/files" in capsys.readouterr().out  # the operator still sees it
+
+
+class TestLeaseRenewal:
+    def test_lease_is_renewed_while_a_slow_client_blocks_a_send(self, monkeypatch):
+        beats = []
+
+        async def heartbeat(active_id, reservation_id, sent):
+            beats.append((active_id, reservation_id))
+            return True
+
+        async def no_op(*_args, **_kwargs):
+            return None
+
+        async def finish(*_args):
+            return False
+
+        async def app(scope, receive, send):
+            scope["filehost.traffic"] = {
+                "ip": "203.0.113.30",
+                "file_id": "slow",
+                "active_id": 3,
+                "reservation_id": "a" * 32,
+            }
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"slow", "more_body": False})
+
+        async def slow_send(message):
+            if message["type"] == "http.response.body":
+                await asyncio.sleep(0.4)  # one send held far longer than a renewal period
+
+        monkeypatch.setattr(us, "heartbeat_download", heartbeat)
+        monkeypatch.setattr(us, "mark_download_reservation_started", no_op)
+        monkeypatch.setattr(us, "finish_download_reservation", finish)
+        monkeypatch.setattr(us, "log_traffic", no_op)
+        monkeypatch.setattr(us, "DOWNLOAD_HEARTBEAT_SECONDS", 0.05)
+
+        asyncio.run(us.ActualTransferAccountingMiddleware(app)({"type": "http"}, no_op, slow_send))
+
+        assert len(beats) >= 4
+        assert set(beats) == {(3, "a" * 32)}
+
+    def test_renewal_period_is_well_inside_the_lease(self):
+        assert us.DOWNLOAD_HEARTBEAT_SECONDS * 3 <= max(3.0, us.DOWNLOAD_LEASE_SECONDS)
+
+
+class TestReadinessProbeCache:
+    def test_probe_is_reused_briefly_but_ready_always_probes(self, monkeypatch, tmp_path):
+        cursor = _ScriptedCursor(
+            all_answers=[("'schema_ready'", [("schema_version", "64"), ("schema_ready", "1")])]
+        )
+        pool = _OneConnectionPool(cursor)
+
+        async def same_pool():
+            return pool
+
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        monkeypatch.setattr(us, "STAGING_DIR", tmp_path / "staging")
+        monkeypatch.setattr(us, "THUMBS_DIR", tmp_path / "thumbs")
+        monkeypatch.setitem(us.readiness_cache, "pool", None)
+        monkeypatch.setitem(us.readiness_cache, "checked_at", 0.0)
+
+        async def scenario():
+            await us.require_storage_ready()
+            await us.require_storage_ready()
+            cached = len(cursor.queries)
+            await us.require_storage_ready(force=True)
+            return cached, len(cursor.queries)
+
+        cached, total = asyncio.run(scenario())
+
+        assert cached == 3
+        assert total == 6
+        assert not list((tmp_path / "staging").iterdir())
+
+
+class TestLocalOnlyEndpoints:
+    def test_reload_refuses_anything_that_came_through_the_proxy(self):
+        request = _http_request(
+            "/reload", client=("127.0.0.1", 1), headers={"X-Forwarded-For": "203.0.113.5"}
+        )
+        try:
+            asyncio.run(us.reload_config(request))
+        except us.HTTPException as exc:
+            assert exc.status_code == 403
+        else:
+            raise AssertionError("a proxied caller reloaded the server")
+
+    def test_reload_keeps_the_pool_while_the_configuration_is_unchanged(self, monkeypatch, tmp_path):
+        config_file = tmp_path / "config.local.php"
+        config_file.write_text("<?php\n", encoding="utf-8")
+        settings = {"host": "db", "user": "u", "password": "p", "database": "files", "prefix": "fh_"}
+
+        class Pool:
+            closed = False
+
+            def close(self):
+                self.closed = True
+
+            async def wait_closed(self):
+                return None
+
+        pool = Pool()
+        created = []
+
+        async def create_pool(**kwargs):
+            created.append(kwargs)
+            return object()
+
+        monkeypatch.setattr(us, "CONFIG_FILE", config_file)
+        monkeypatch.setattr(us, "load_php_config", lambda: dict(settings))
+        monkeypatch.setattr(us, "db_config_cache", dict(settings))
+        monkeypatch.setattr(us, "db_pool", pool)
+        monkeypatch.setattr(us, "db_config_mtime", 0)
+        monkeypatch.setattr(us.aiomysql, "create_pool", create_pool)
+        local = _http_request("/reload", client=("127.0.0.1", 1))
+
+        result = asyncio.run(us.reload_config(local))
+        assert result["database_connected"] is True
+        assert pool.closed is False and us.db_pool is pool and created == []
+
+        settings["database"] = "files_moved"
+        asyncio.run(us.reload_config(local))
+        assert pool.closed is True
+        assert created and created[0]["db"] == "files_moved"
+        assert isinstance(us.db_pool, us.BoundedPool)
+
+    def test_metrics_refuse_proxied_requests_without_a_token(self, monkeypatch):
+        async def no_settings():
+            return None
+
+        async def no_pool():
+            return None
+
+        monkeypatch.setattr(us, "update_settings", no_settings)
+        monkeypatch.setattr(us, "get_db_pool", no_pool)
+        monkeypatch.setitem(us.settings_cache, "metrics_token", "")
+        proxied = _http_request(
+            "/metrics", client=("127.0.0.1", 1), headers={"X-Forwarded-For": "203.0.113.5"}
+        )
+        try:
+            asyncio.run(us.metrics(proxied))
+        except us.HTTPException as exc:
+            assert exc.status_code == 403
+        else:
+            raise AssertionError("metrics answered a proxied visitor")
+
+        response = asyncio.run(us.metrics(_http_request("/metrics", client=("127.0.0.1", 1))))
+        assert b"filehost_downloads_total " in response.body
+
+    def test_no_cross_origin_policy_is_installed(self):
+        assert not any(
+            "CORSMiddleware" in getattr(middleware.cls, "__name__", "")
+            for middleware in us.app.user_middleware
+        )
+
+
+class TestThumbnailWorkerKill:
+    def test_timeout_kills_the_workers_whole_process_group(self, monkeypatch):
+        killed = []
+
+        class Process:
+            pid = 4242
+
+            def kill(self):
+                killed.append("worker")
+
+        monkeypatch.setattr(us.os, "killpg", lambda pid, sig: killed.append(("group", pid, sig)), raising=False)
+        monkeypatch.setattr(us.signal, "SIGKILL", 9, raising=False)
+
+        us._kill_worker_tree(Process(), posix=True)
+
+        assert killed == [("group", 4242, 9), "worker"]
+
+    def test_ffmpeg_stays_in_the_workers_group_and_reads_only_local_files(self, monkeypatch, tmp_path):
+        launches = []
+        timeouts = []
+
+        class Process:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                timeouts.append(timeout)
+                return (b"", None)
+
+            def poll(self):
+                return 0
+
+            def kill(self):
+                return None
+
+        def popen(args, **kwargs):
+            launches.append((args, kwargs))
+            return Process()
+
+        monkeypatch.setattr(us.subprocess, "Popen", popen)
+        monkeypatch.setattr(us.imageio_ffmpeg, "get_ffmpeg_exe", lambda: "ffmpeg")
+
+        assert us._extract_video_frame(tmp_path / "clip.mp4", 400) is None
+        assert len(launches) == 2
+        for args, kwargs in launches:
+            assert "start_new_session" not in kwargs
+            assert args[args.index("-protocol_whitelist") + 1] == "file"
+            assert args.index("-protocol_whitelist") < args.index("-i")
+        assert timeouts == [us.THUMB_FFMPEG_ATTEMPT_TIMEOUT] * 2
+        assert 2 * us.THUMB_FFMPEG_ATTEMPT_TIMEOUT < us.THUMB_GENERATION_TIMEOUT
+
+
+class TestStagedUploadSealing:
+    def test_missing_payload_is_never_vouched_for(self, tmp_path):
+        assert not us._seal_staged_upload(tmp_path, "absent.bin", 3, "a" * 64)
+        assert not (tmp_path / us.STORAGE_MANIFEST_NAME).exists()
+
+    def test_payload_is_flushed_then_described(self, tmp_path):
+        (tmp_path / "payload.bin").write_bytes(b"abc")
+        digest = hashlib.sha256(b"abc").hexdigest()
+
+        assert us._seal_staged_upload(tmp_path, "payload.bin", 3, digest)
+        manifest = json.loads((tmp_path / us.STORAGE_MANIFEST_NAME).read_text(encoding="utf-8"))
+        assert manifest["sha256"] == digest
