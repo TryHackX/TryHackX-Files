@@ -10,8 +10,6 @@
 // must land in the log, not inside the panel markup.
 ini_set('display_errors', 0);
 
-define('FILEHOST_CSP_STRICT_SCRIPTS', true);
-
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/FileManager.php';
 // pt 6: the tab bar asks whether premium is on, and the premium views read its settings.
@@ -43,18 +41,8 @@ if (!$loggedIn) {
 	exit;
 }
 
-if (isset($_GET['logout'])) {
-	// Destroying the session is not enough: a "stay signed in" cookie would restore it on the
-	// next request, and the user would watch themselves get signed back in.
-	$rememberCookie = RememberTokenRepository::presentedCookie();
-	if ($rememberCookie !== '') {
-		RememberTokenRepository::forget($rememberCookie);
-		RememberTokenRepository::sendCookie('', 0);
-	}
-	session_destroy();
-	header('Location: ' . $appUrl . '/');
-	exit;
-}
+// Signing out is `POST api.php?action=user_logout` (CSRF-protected; the account menu uses it).
+// The old `panel.php?logout` GET could be triggered by any page linking to it.
 
 // --- Second gate: the panel wants a password, not just a session ---------------------------
 // A valid session says the browser signed in once. It does not say the person here now is the
@@ -76,7 +64,7 @@ $reauthCaptchaRequired = $reauthFails >= 3 && Database::isRecaptchaEnabled();
 
 if (($_POST['action'] ?? '') === 'panel_reauth') {
 	$quota = RateLimiter::hit(
-		'reauth:' . (int) $currentUser['id'] . ':' . getClientIP(),
+		'reauth:' . (int) $currentUser['id'] . ':' . filehostThrottleKey(getClientIP()),
 		'auth'
 	);
 	if (!$quota['allowed']) {
@@ -110,7 +98,16 @@ if (($_POST['action'] ?? '') === 'panel_reauth') {
 		unset($_SESSION['panel_reauth_fails']);
 		$_SESSION['panel_auth_at'] = time();
 		$_SESSION['recent_auth_at'] = time();
-		header('Location: ' . $appUrl . '/panel.php');
+		// Back to the view that was asked for (the form posts to the current URL), keeping only
+		// the panel's own navigation parameters.
+		$return = [];
+		foreach (['tab', 'stab', 'mstab', 'astab'] as $param) {
+			$value = $_GET[$param] ?? null;
+			if (is_string($value) && preg_match('/^[a-z_]{1,32}$/D', $value)) {
+				$return[$param] = $value;
+			}
+		}
+		header('Location: ' . $appUrl . '/panel.php' . ($return ? '?' . http_build_query($return) : ''));
 		exit;
 	}
 }
@@ -229,7 +226,8 @@ if ($tab === 'myads') {
 	}
 }
 
-$stats = $isAdmin ? FileManager::getStats() : [];
+// Whole-table totals: computed only for the two views that print them.
+$stats = $isAdmin && ($tab === 'files' || $tab === 'settings') ? FileManager::getStats() : [];
 $settings = $isAdmin ? Database::getAllSettings() : [];
 
 // "My files" and "Account" show the same three personal counters. They used to render
@@ -370,6 +368,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<?php /* Admin-only modules are not shipped to everyone: panel.js tolerates their absence (`|| {}`). */ ?>
 	<script src="<?= $appUrl ?>/assets/js/util.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/api.js?v=<?= APP_VERSION ?>"></script>
+	<script src="<?= $appUrl ?>/assets/js/reauth.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/file-icons.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>"></script>

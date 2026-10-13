@@ -108,6 +108,9 @@ sudo systemctl reload apache2
 Only `/var/www/filehost/public` may be served. Never point `DocumentRoot` at the project root.
 For production, configure HTTPS and change the forwarded scheme to `https`. If another reverse
 proxy terminates TLS, add only that proxy to `TRUSTED_PROXIES` and preserve the canonical Host.
+The client address is then taken from `X-Forwarded-For`, read from the right past your own
+proxies. A proxy that instead overwrites `CF-Connecting-IP` or `X-Real-IP` can be named with
+`define('TRUSTED_PROXY_HEADER', 'CF-Connecting-IP');` — no other header is believed.
 
 With PHP-FPM instead of `libapache2-mod-php` (`FILEHOST_PHP_SAPI=fpm`), route PHP to the pool of
 this site inside the same `VirtualHost`:

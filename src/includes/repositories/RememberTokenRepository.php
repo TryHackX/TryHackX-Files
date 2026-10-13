@@ -8,10 +8,12 @@
  *
  *   - the cookie carries a *series* identifying the device and a *secret* proving possession;
  *   - only hashes are stored, so a leaked database yields nothing that can be presented back;
- *   - the secret is replaced on every single use, so a copied cookie is good exactly once;
+ *   - the secret is replaced on every single use, so a copied cookie is good exactly once
+ *     (bar a one-minute grace for the same browser racing itself, see ROTATION_GRACE_SECONDS);
  *   - presenting a valid series with a stale secret means two parties hold the same cookie.
- *     There is no way to tell victim from thief, so the whole family is destroyed and both
- *     have to sign in again. That is the point: a silent theft becomes a visible logout.
+ *     There is no way to tell victim from thief, so the whole family is destroyed, every
+ *     session of the account is ended, and both have to sign in again. That is the point: a
+ *     silent theft becomes a visible logout.
  *
  * Restoring a session from a cookie deliberately does *not* count as a fresh credential check.
  * `recent_auth_at` stays unset, so anything gated behind a password — the panel, destructive
@@ -20,6 +22,18 @@
 final class RememberTokenRepository
 {
 	public const COOKIE = 'fh_remember';
+
+	/** consume() could not reach the database: neither valid nor invalid, so keep the cookie. */
+	public const UNAVAILABLE = -1;
+
+	/**
+	 * How long the secret a device has just rotated away from is still honoured.
+	 *
+	 * Rotation is single-use by design, but a browser restoring three tabs at once sends the
+	 * same cookie three times before the first answer arrives. Without a grace period the second
+	 * request looked exactly like a stolen copy and signed every device out.
+	 */
+	private const ROTATION_GRACE_SECONDS = 60;
 
 	/** Nothing may outlive this, whatever the administrator configures. */
 	private const HARD_MAX_DAYS = 365;
@@ -105,10 +119,24 @@ final class RememberTokenRepository
 	}
 
 	/**
+	 * The secret that replaces $secret on rotation.
+	 *
+	 * Derived rather than random, with the application key, so the server can recognise "the
+	 * secret this device held one rotation ago" without storing it: hashing the successor of
+	 * what was presented and finding the stored hash means the presenter is exactly one step
+	 * behind. Without the key nobody can walk the chain forward from an old cookie.
+	 */
+	private static function successor(string $seriesHash, string $secret): string
+	{
+		return Crypto::sign('remember-rotation', $seriesHash . ':' . $secret);
+	}
+
+	/**
 	 * Validate a cookie and rotate it. Returns the user id and the replacement cookie value.
 	 *
 	 * @return array{0:int,1:string,2:int} user id, replacement cookie and the row's own
-	 *         deadline; `[0, '', 0]` when the cookie is worthless and should be cleared
+	 *         deadline; `[0, '', 0]` when the cookie is worthless and should be cleared, and
+	 *         `[UNAVAILABLE, '', 0]` when the database could not be asked
 	 */
 	public static function consume(string $cookie, string $ip, string $userAgent): array
 	{
@@ -121,7 +149,7 @@ final class RememberTokenRepository
 		[$series, $secret] = $parts;
 		$pdo = Database::getInstance();
 		if (!$pdo) {
-			return [0, '', 0];
+			return [self::UNAVAILABLE, '', 0];
 		}
 		$table = Database::table('remember_tokens');
 		$seriesHash = hash('sha256', $series);
@@ -130,7 +158,7 @@ final class RememberTokenRepository
 		try {
 			$pdo->beginTransaction();
 			$read = $pdo->prepare(
-				"SELECT `id`,`user_id`,`token_hash`,`expires_at` FROM `{$table}`
+				"SELECT `id`,`user_id`,`token_hash`,`expires_at`,`last_used_at` FROM `{$table}`
 				 WHERE `series` = ? FOR UPDATE"
 			);
 			$read->execute([$seriesHash]);
@@ -145,16 +173,27 @@ final class RememberTokenRepository
 				return [0, '', 0];
 			}
 			if (!hash_equals((string) $row['token_hash'], hash('sha256', $secret))) {
+				$successor = self::successor($seriesHash, $secret);
+				if ((int) ($row['last_used_at'] ?? 0) >= $now - self::ROTATION_GRACE_SECONDS
+					&& hash_equals((string) $row['token_hash'], hash('sha256', $successor))) {
+					// One rotation behind, moments after the rotation: a parallel request from
+					// the same browser. Hand it the secret the first request was given.
+					$pdo->commit();
+					return [(int) $row['user_id'], $series . ':' . $successor, (int) $row['expires_at']];
+				}
 				// Two parties hold this series. Which one is the owner is unknowable, so
-				// neither keeps it.
+				// neither keeps it — not the token, and not a session either of them may already
+				// have restored with it. Advancing the session generation is what reaches the
+				// browser that got in first.
 				$userId = (int) $row['user_id'];
 				$pdo->prepare("DELETE FROM `{$table}` WHERE `user_id` = ?")->execute([$userId]);
+				UserRepository::advanceSessionVersion($pdo, $userId);
 				$pdo->commit();
 				self::reportReuse($userId, $ip);
 				return [0, '', 0];
 			}
 
-			$replacement = bin2hex(random_bytes(32));
+			$replacement = self::successor($seriesHash, $secret);
 			$pdo->prepare(
 				"UPDATE `{$table}` SET `token_hash` = ?, `last_used_at` = ?, `last_ip` = ?,
 				 `user_agent` = ? WHERE `id` = ?"
@@ -176,7 +215,7 @@ final class RememberTokenRepository
 				// A dropped connection has already rolled this back.
 			}
 			error_log('Persistent sign-in lookup failed: ' . $e->getMessage());
-			return [0, '', 0];
+			return [self::UNAVAILABLE, '', 0];
 		}
 	}
 

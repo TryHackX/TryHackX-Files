@@ -16,6 +16,10 @@ $externalPost = static fn(array $handler, ?string $rate = 'write'): array =>
 	ApiRoutePolicy::route($handler, ['POST'], false, false, null, $rate);
 $checkout = static fn(array $handler): array =>
 	ApiRoutePolicy::route($handler, ['POST'], true, true, null, 'write', true, 303);
+// Writes that hand out privileges, take over accounts or rewire payments and the page policy:
+// they need a password typed in the last few minutes (see bootstrap.php), not just a session.
+$sensitive = static fn(array $handler, string $permission = 'admin'): array =>
+	ApiRoutePolicy::route($handler, ['POST'], true, true, $permission, 'write', false, null, true);
 
 $routes = [
 	// Upload rollback has no public action name; public/api.php selects it only for a
@@ -52,7 +56,6 @@ $routes = [
 	),
 	'list' => $read([FileController::class, 'handleList'], true, 'files.view_all'),
 	'file_facets' => $read([FileController::class, 'handleFileFacets'], true, 'files.advanced_filters'),
-	'stats' => $read([FileController::class, 'handleStats']),
 	// Public and polled by monitors, so it shares the ordinary read budget: every call makes
 	// the upload server run its readiness probe, which must not be free to repeat unthrottled.
 	'health' => $read([FileController::class, 'handleHealth']),
@@ -91,46 +94,46 @@ $routes = [
 	// ---- Auth / account / session ----
 	'user_login' => $write([AuthController::class, 'handleUserLogin'], false, null, 'auth'),
 	'user_register' => $write([AuthController::class, 'handleUserRegister'], false, null, 'auth'),
-	'user_check' => $read([AuthController::class, 'handleUserCheck']),
 	'user_logout' => $write([AuthController::class, 'handleUserLogout'], true),
 	'config' => $read([AuthController::class, 'handleConfig']),
 	'captcha_config' => $read([AuthController::class, 'handleConfig']),
-	'check_username' => $read([AuthController::class, 'handleCheckUsername'], false, null, 'auth'),
-	'check_email' => $read([AuthController::class, 'handleCheckEmail'], false, null, 'auth'),
+	'check_username' => $read([AuthController::class, 'handleCheckUsername'], false, null, 'lookup'),
+	'check_email' => $read([AuthController::class, 'handleCheckEmail'], false, null, 'lookup'),
 	// E-mail links carry high-entropy, one-purpose capabilities and cannot attach a browser
 	// CSRF header. Their token lifecycle is handled by the authentication repository.
 	'verify_email' => $capabilityGet([AuthController::class, 'handleVerifyEmail'], false, null, 'auth'),
 	'resend_verification' => $write([AuthController::class, 'handleResendVerification'], false, null, 'auth'),
 	'user_stats' => $read([AuthController::class, 'handleUserStats'], true),
-	'get_user_stats' => $read([AuthController::class, 'handleGetUserStats'], true),
 	'user_change_password' => $write([AuthController::class, 'handleUserChangePassword'], true, null, 'auth'),
 	'user_request_email_change' => $write([AuthController::class, 'handleUserRequestEmailChange'], true, null, 'auth'),
 	'user_verify_email_change' => $capabilityGet([AuthController::class, 'handleUserVerifyEmailChange'], false, null, 'auth'),
 	'user_delete_account' => $write([AuthController::class, 'handleUserDeleteAccount'], true, null, 'auth'),
 	'recover_password' => $write([AuthController::class, 'handleRecoverPassword'], false, null, 'auth'),
 	'reset_password_submit' => $write([AuthController::class, 'handleResetPasswordSubmit'], false, null, 'auth'),
-	'user_2fa_status' => $read([AuthController::class, 'handleUser2faStatus'], true, null, 'auth'),
+	'user_2fa_status' => $read([AuthController::class, 'handleUser2faStatus'], true),
 	'user_2fa_setup' => $write([AuthController::class, 'handleUser2faSetup'], true, null, 'auth'),
 	'user_2fa_confirm' => $write([AuthController::class, 'handleUser2faConfirm'], true, null, 'auth'),
 	'user_2fa_disable' => $write([AuthController::class, 'handleUser2faDisable'], true, null, 'auth'),
 	'user_2fa_login' => $write([AuthController::class, 'handleUser2faLogin'], false, null, 'auth'),
 	'user_2fa_recovery_codes' => $write([AuthController::class, 'handleUser2faRecoveryCodes'], true, null, 'auth'),
-	'user_remember_devices' => $read([AuthController::class, 'handleUserRememberDevices'], true, null, 'auth'),
+	'user_remember_devices' => $read([AuthController::class, 'handleUserRememberDevices'], true),
 	'user_remember_revoke' => $write([AuthController::class, 'handleUserRememberRevoke'], true, null, 'auth'),
 	'user_set_language' => $write([AuthController::class, 'handleUserSetLanguage'], true),
+	// Re-enter the password from inside the panel when an action answers recent_auth_required.
+	'user_reauth' => $write([AuthController::class, 'handleUserReauth'], true, null, 'auth'),
 
 	// ---- Admin panel ----
 	'admin_users' => $read([AdminController::class, 'handleAdminUsers'], true, 'admin'),
-	'admin_create_user' => $write([AdminController::class, 'handleAdminCreateUser'], true, 'admin'),
+	'admin_create_user' => $sensitive([AdminController::class, 'handleAdminCreateUser']),
 	'admin_user_action' => $write([AdminController::class, 'handleAdminUserAction'], true, 'admin'),
-	'admin_update_user' => $write([AdminController::class, 'handleAdminUpdateUser'], true, 'admin'),
+	'admin_update_user' => $sensitive([AdminController::class, 'handleAdminUpdateUser']),
 	'admin_active_downloads' => $read([AdminController::class, 'handleAdminActiveDownloads'], true, 'admin'),
 	'admin_kill_download' => $write([AdminController::class, 'handleAdminKillDownload'], true, 'admin'),
 	'admin_kill_upload' => $write([AdminController::class, 'handleAdminKillUpload'], true, 'admin'),
 	'admin_groups' => $read([AdminController::class, 'handleAdminGroups'], true, 'admin'),
-	'admin_group_save' => $write([AdminController::class, 'handleAdminGroupSave'], true, 'admin'),
+	'admin_group_save' => $sensitive([AdminController::class, 'handleAdminGroupSave']),
 	'admin_group_delete' => $write([AdminController::class, 'handleAdminGroupDelete'], true, 'admin'),
-	'admin_set_user_group' => $write([AdminController::class, 'handleAdminSetUserGroup'], true, 'admin'),
+	'admin_set_user_group' => $sensitive([AdminController::class, 'handleAdminSetUserGroup']),
 	'admin_dashboard' => $read([AdminController::class, 'handleAdminDashboard'], true, 'admin'),
 	'admin_top_files' => $read([AdminController::class, 'handleAdminTopFiles'], true, 'admin'),
 	'admin_traffic' => $read([AdminController::class, 'handleAdminTraffic'], true, 'moderation.traffic.view'),
@@ -142,13 +145,13 @@ $routes = [
 	'premium_plans' => $read([PremiumController::class, 'handlePremiumPlans']),
 	'premium_activate' => $externalPost([PremiumController::class, 'handlePremiumActivate']),
 	'admin_plans' => $read([PremiumController::class, 'handleAdminPlans'], true, 'admin'),
-	'admin_plan_save' => $write([PremiumController::class, 'handleAdminPlanSave'], true, 'admin'),
+	'admin_plan_save' => $sensitive([PremiumController::class, 'handleAdminPlanSave']),
 	'admin_plan_delete' => $write([PremiumController::class, 'handleAdminPlanDelete'], true, 'admin'),
-	'admin_plan_grant' => $write([PremiumController::class, 'handleAdminPlanGrant'], true, 'premium.grants'),
+	'admin_plan_grant' => $sensitive([PremiumController::class, 'handleAdminPlanGrant'], 'premium.grants'),
 	'admin_premium_settings' => $write([PremiumController::class, 'handleAdminPremiumSettings'], true, 'admin'),
-	'admin_premium_token' => $write([PremiumController::class, 'handleAdminPremiumToken'], true, 'admin'),
+	'admin_premium_token' => $sensitive([PremiumController::class, 'handleAdminPremiumToken']),
 	'admin_payment_plugins' => $read([PremiumController::class, 'handleAdminPaymentPlugins'], true, 'admin'),
-	'admin_payment_plugin_save' => $write([PremiumController::class, 'handleAdminPaymentPluginSave'], true, 'admin'),
+	'admin_payment_plugin_save' => $sensitive([PremiumController::class, 'handleAdminPaymentPluginSave']),
 	'admin_payment_plugin_test' => $write([PremiumController::class, 'handleAdminPaymentPluginTest'], true, 'admin'),
 	'premium_overview' => $read([PremiumController::class, 'handlePremiumOverview'], true, 'premium.metrics'),
 	'premium_payments' => $read([PremiumController::class, 'handlePremiumPayments'], true, 'premium.payments'),
@@ -189,7 +192,7 @@ $routes = [
 	'admin_ad_packages' => $read([AdsController::class, 'handleAdminAdPackages'], true),
 	'admin_ad_package_save' => $write([AdsController::class, 'handleAdminAdPackageSave'], true, 'ads.packages'),
 	'admin_ad_package_delete' => $write([AdsController::class, 'handleAdminAdPackageDelete'], true, 'ads.packages'),
-	'admin_ads_settings' => $write([AdsController::class, 'handleAdminAdsSettings'], true, 'admin'),
+	'admin_ads_settings' => $sensitive([AdsController::class, 'handleAdminAdsSettings']),
 	'admin_ads_stats' => $read([AdsController::class, 'handleAdminAdsStats'], true, 'ads.metrics'),
 
 	// ---- Collections, language and bans (admin) ----
@@ -217,7 +220,7 @@ $routes = [
 	'notification_prefs_save' => $write([NotificationController::class, 'handleNotificationPrefsSave'], true),
 	'admin_notification_defaults' => $read([NotificationController::class, 'handleAdminNotificationDefaults'], true, 'admin'),
 	'admin_notification_defaults_save' => $write([NotificationController::class, 'handleAdminNotificationDefaultsSave'], true, 'admin'),
-	'admin_notification_broadcast' => $write([NotificationController::class, 'handleAdminNotificationBroadcast'], true, 'admin'),
+	'admin_notification_broadcast' => $sensitive([NotificationController::class, 'handleAdminNotificationBroadcast']),
 
 	// ---- Abuse reports ----
 	'report_file' => $write([ReportController::class, 'handleReportFile']),

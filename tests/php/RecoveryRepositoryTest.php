@@ -105,4 +105,22 @@ final class RecoveryRepositoryTest extends RepoTestCase
 			)->fetchColumn()
 		);
 	}
+
+	/** A link issued moments ago is left alone instead of being replaced by every request. */
+	public function testRecentlyIssuedLinkIsRecognisedUntilItAgesOrExpires(): void
+	{
+		$this->assertFalse(RecoveryRepository::issuedWithin(77, 300));
+		$this->assertNotNull(Database::createRecoveryToken(77));
+		$this->assertTrue(RecoveryRepository::issuedWithin(77, 300));
+		$this->assertFalse(RecoveryRepository::issuedWithin(88, 300), 'per account');
+
+		$table = Database::table('recovery_tokens');
+		Database::getInstance()->exec("UPDATE `{$table}` SET `created_at` = `created_at` - 600 WHERE `user_id` = 77");
+		$this->assertFalse(RecoveryRepository::issuedWithin(77, 300), 'old enough to be re-sent');
+
+		Database::getInstance()->exec(
+			"UPDATE `{$table}` SET `created_at` = " . time() . ", `expires_at` = " . (time() - 1) . " WHERE `user_id` = 77"
+		);
+		$this->assertFalse(RecoveryRepository::issuedWithin(77, 300), 'an expired link does not count');
+	}
 }

@@ -632,14 +632,6 @@ final class FileController
 		]);
 	}
 
-	public static function handleStats()
-	{
-		$stats = FileManager::getStats();
-
-		header('Content-Type: application/json');
-		echo json_encode(['success' => true, 'stats' => $stats]);
-	}
-
 	public static function handleHealth()
 	{
 		$pythonHealth = null;

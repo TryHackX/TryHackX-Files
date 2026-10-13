@@ -3,6 +3,20 @@
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
+// Provider webhooks, the premium activation hook and the health probe are called by machines
+// that never return a cookie and are authorised by signatures or shared secrets, not by a
+// browser session — so none is opened for them (see config.php). Every other action keeps its
+// session; the route table still decides what each one requires.
+if (in_array($_GET['action'] ?? null, [
+	'health',
+	'premium_activate',
+	'payu_notify',
+	'p24_notify',
+	'p24_refund_notify',
+], true)) {
+	define('FILEHOST_STATELESS_REQUEST', true);
+}
+
 // Session is started with hardened cookie flags inside config.php.
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/FileManager.php';
@@ -49,9 +63,17 @@ try {
 	} catch (Throwable $idError) {
 		$correlationId = substr(hash('sha256', uniqid('', true)), 0, 24);
 	}
-	$code = $e->getCode() ?: 500;
-	if ($code < 100 || $code > 599)
+	// A request the client got wrong is a 4xx, not a server failure: an oversized body or id
+	// list (LengthException) and a body that is not a JSON object (UnexpectedValueException,
+	// both from readBoundedJsonBody/sanitizeFileIdList) used to answer 500.
+	$code = match (true) {
+		$e instanceof LengthException => 413,
+		$e instanceof UnexpectedValueException => 400,
+		default => is_int($e->getCode()) ? $e->getCode() : 500,
+	};
+	if ($code < 100 || $code > 599) {
 		$code = 500;
+	}
 	error_log(sprintf(
 		'API failure [%s] %s %s: %s in %s:%d',
 		$correlationId,

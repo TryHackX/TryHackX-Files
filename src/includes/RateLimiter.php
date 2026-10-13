@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/Database.php';
+require_once __DIR__ . '/ClientIp.php';
 
 /**
  * Consistent request rate limiting (Faza 4.5).
@@ -16,10 +17,15 @@ class RateLimiter
 {
 	/** Limits as [requests, window seconds] per category. */
 	private const LIMITS = [
-		'auth' => [10, 300],   // login / register / 2FA / recovery — brute-force surface
+		'auth' => [10, 300],   // login / register / 2FA / recovery — brute-force surface, per action
+		'lookup' => [60, 300], // sign-up form availability checks: typed live, one per pause
 		'write' => [60, 60],   // state-changing calls
 		'read' => [300, 60],   // listings, polling, info
 		'api' => [120, 60],    // REST API v1, counted per API key
+		// Failures against one ACCOUNT, whatever address they come from. Only failures are
+		// counted (hit() after a wrong answer, exceeded() before checking the next one).
+		'login_account' => [10, 900],
+		'totp_account' => [10, 900],
 	];
 
 	/** Probability (1 in N) that a request also prunes expired rows — keeps the table small. */
@@ -28,6 +34,52 @@ class RateLimiter
 	public static function limitsFor(string $category): array
 	{
 		return self::LIMITS[$category] ?? self::LIMITS['read'];
+	}
+
+	/**
+	 * The bucket a browser API request is counted in.
+	 *
+	 * Addresses go through filehostThrottleKey(), so an IPv6 client is one client per /64
+	 * rather than 2^64 of them. Credential-checking ('auth') actions are counted per action:
+	 * they used to share one budget, so a sign-up form checking a username as it was typed,
+	 * or the account tab loading its 2FA state, used up the attempts a sign-in needed.
+	 */
+	public static function bucketFor(string $ip, string $category, string $action = ''): string
+	{
+		$subject = 'ip:' . filehostThrottleKey($ip);
+		return $category === 'auth' && $action !== '' ? $subject . '|' . $action : $subject;
+	}
+
+	/**
+	 * Whether $bucket has already used up its allowance in the current window, without counting
+	 * anything. Pairs with hit() for limits that count failures only. Fails open, like hit().
+	 */
+	public static function exceeded(string $bucket, string $category): bool
+	{
+		[$limit, $window] = self::limitsFor($category);
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return false;
+		}
+		$table = (defined('DB_PREFIX') ? DB_PREFIX : '') . 'rate_limits';
+		$windowStart = intdiv(time(), $window) * $window;
+		try {
+			$stmt = $pdo->prepare(
+				"SELECT `hits` FROM `{$table}` WHERE `bucket` = ? AND `window_start` = ?"
+			);
+			$stmt->execute([substr($bucket . '|' . $category, 0, 190), $windowStart]);
+			return (int) $stmt->fetchColumn() >= $limit;
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
+	/** Seconds until the current window of $category ends. */
+	public static function secondsLeft(string $category): int
+	{
+		[, $window] = self::limitsFor($category);
+		$now = time();
+		return max(1, intdiv($now, $window) * $window + $window - $now);
 	}
 
 	/**
@@ -103,7 +155,9 @@ class RateLimiter
 			header('Content-Type: application/json');
 			echo json_encode([
 				'success' => false,
-				'error' => 'Zbyt wiele żądań — spróbuj ponownie za ' . $retry . ' s.',
+				'error' => function_exists('__')
+					? __('api.rate_limited', ['seconds' => $retry])
+					: 'Too many requests. Try again in ' . $retry . ' s.',
 				'retry_after' => $retry,
 			]);
 			exit;

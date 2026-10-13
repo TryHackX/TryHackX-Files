@@ -32,17 +32,26 @@ final class UserRepository
 	}
 
 	/**
-	 * Advance the browser-session generation and revoke all independent bearer credentials.
-	 * The caller must already own a transaction.
+	 * End every browser session of an account and nothing else: API keys, device tokens and
+	 * pending links are left to the caller. Signed-in browsers notice on their next request.
 	 */
-	public static function invalidateAccessInTransaction(PDO $pdo, int $userId): bool
+	public static function advanceSessionVersion(PDO $pdo, int $userId): bool
 	{
 		$users = Database::table('users');
 		$stmt = $pdo->prepare(
 			"UPDATE `{$users}` SET `session_version` = `session_version` + 1 WHERE `id` = ?"
 		);
 		$stmt->execute([$userId]);
-		if ($stmt->rowCount() !== 1) {
+		return $stmt->rowCount() === 1;
+	}
+
+	/**
+	 * Advance the browser-session generation and revoke all independent bearer credentials.
+	 * The caller must already own a transaction.
+	 */
+	public static function invalidateAccessInTransaction(PDO $pdo, int $userId): bool
+	{
+		if (!self::advanceSessionVersion($pdo, $userId)) {
 			return false;
 		}
 		self::revokeAuthenticationArtifacts($pdo, $userId);
@@ -352,6 +361,11 @@ final class UserRepository
 		if (!filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
 			return ['success' => false, 'error' => __('api.bad_email')];
 		}
+		// The administrator's e-mail ban applies to a change exactly as it does to sign-up;
+		// otherwise a banned address simply moves onto a second account.
+		if (Database::isBlacklisted('email', $newEmail)) {
+			return ['success' => false, 'error' => __('api.email_blocked')];
+		}
 		$blocked = RegistrationGuard::checkEmail($newEmail);
 		if ($blocked !== null) {
 			return ['success' => false, 'error' => $blocked];
@@ -474,6 +488,12 @@ final class UserRepository
 			if (!$user || !filter_var($user['pending_email'], FILTER_VALIDATE_EMAIL)) {
 				$pdo->rollBack();
 				return ['success' => false, 'error' => __('api.link_expired')];
+			}
+			// Banned while the change was pending: the address still may not be taken over.
+			if (Database::isBlacklisted('email', (string) $user['pending_email'])) {
+				$pdo->rollBack();
+				self::cancelEmailChange((int) $user['id']);
+				return ['success' => false, 'error' => __('api.email_blocked')];
 			}
 
 			// Stage one: the address on file has agreed. Nothing changes yet — a second link
@@ -626,15 +646,14 @@ final class UserRepository
 	 *
 	 * Deliberately `MIN(id)` rather than a hardcoded 1: an install restored from a dump, or one
 	 * whose auto-increment starts elsewhere, has no id 1 — and then the "primary admin is
-	 * protected" rule silently protected nobody. Cached per request; the value only changes
-	 * when the owner account is deleted, which is exactly what this guards against.
+	 * protected" rule silently protected nobody.
+	 *
+	 * Not cached: MIN() of the primary key is an index lookup, and a process-wide cache was
+	 * wrong in every long-lived process (workers, the test suite) once the table changed under
+	 * it — the owner checks then guarded whichever account happened to be first earlier.
 	 */
 	public static function rootAdminId(): int
 	{
-		static $cached = null;
-		if ($cached !== null) {
-			return $cached;
-		}
 		$pdo = Database::getInstance();
 		if (!$pdo) {
 			return 0; // no connection — do not claim anyone is the owner
@@ -642,7 +661,7 @@ final class UserRepository
 		try {
 			$table = Database::table('users');
 			$id = $pdo->query("SELECT MIN(`id`) FROM `{$table}`")->fetchColumn();
-			return $cached = (int) $id;
+			return (int) $id;
 		} catch (PDOException $e) {
 			return 0;
 		}
@@ -756,6 +775,25 @@ final class UserRepository
 	 * (with resend metadata, kept out of the response to avoid enumeration — the pending
 	 * id goes to the session instead), and an IP ban. On success returns the public user.
 	 */
+	/** The id behind a sign-in name, or 0 — so failures can be counted per account. */
+	public static function idForUsername(string $username): int
+	{
+		if ($username === '' || strlen($username) > InputLimits::HARD_USERNAME_MAX) {
+			return 0;
+		}
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return 0;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT `id` FROM `" . Database::table('users') . "` WHERE `username` = ?");
+			$stmt->execute([$username]);
+			return (int) ($stmt->fetchColumn() ?: 0);
+		} catch (PDOException $e) {
+			return 0;
+		}
+	}
+
 	public static function login(string $username, string $password): array
 	{
 		if (strlen($username) > InputLimits::HARD_USERNAME_MAX || strlen($password) > InputLimits::HARD_PASSWORD_MAX) {
@@ -827,7 +865,7 @@ final class UserRepository
 				];
 			}
 
-			return ['success' => false, 'error' => __('api.bad_credentials')];
+			return ['success' => false, 'error' => __('api.bad_credentials'), 'reason' => 'credentials'];
 		} catch (PDOException $e) {
 			return ['success' => false, 'error' => __('api.db_error')];
 		}
@@ -1017,29 +1055,84 @@ final class UserRepository
 		}
 	}
 
-	/** Returns ['secret' => ?string, 'enabled' => bool] for a user. */
+	/**
+	 * Returns ['secret' => ?string, 'enabled' => bool, 'unavailable' => bool] for a user.
+	 *
+	 * Fails closed. When the account has 2FA switched on but its secret cannot be read — the
+	 * application key is missing or was replaced, the ciphertext is damaged, the row cannot be
+	 * fetched — the answer is "enabled, secret unavailable", never "disabled". Reporting it as
+	 * disabled used to let such an account (administrators included) sign in with the password
+	 * alone. A recovery code still works, and switching 2FA off and on again repairs it.
+	 */
 	public static function getTotpState(int $userId): array
 	{
+		$unavailable = ['secret' => null, 'enabled' => true, 'unavailable' => true];
 		$pdo = Database::getInstance();
 		if (!$pdo) {
-			return ['secret' => null, 'enabled' => false];
+			return $unavailable;
 		}
 		$table = Database::table('users');
 		try {
 			$stmt = $pdo->prepare("SELECT `totp_secret`, `totp_enabled` FROM `{$table}` WHERE `id` = ?");
 			$stmt->execute([$userId]);
 			$row = $stmt->fetch(PDO::FETCH_ASSOC);
-			if (!$row) {
-				return ['secret' => null, 'enabled' => false];
-			}
-			$stored = (string) ($row['totp_secret'] ?? '');
-			$secret = $stored === '' ? null : Crypto::decrypt($stored);
-			if ($stored !== '' && ($secret === '' || !preg_match('/\A[A-Z2-7]{16,128}\z/D', $secret))) {
-				return ['secret' => null, 'enabled' => false];
-			}
-			return ['secret' => $secret, 'enabled' => !empty($row['totp_enabled'])];
 		} catch (Throwable $e) {
-			return ['secret' => null, 'enabled' => false];
+			error_log('2FA state could not be read for user #' . $userId . ': ' . $e->getMessage());
+			return $unavailable;
+		}
+		if (!$row) {
+			return ['secret' => null, 'enabled' => false, 'unavailable' => false];
+		}
+		$enabled = !empty($row['totp_enabled']);
+		$stored = (string) ($row['totp_secret'] ?? '');
+		try {
+			$secret = $stored === '' ? null : Crypto::decrypt($stored);
+		} catch (Throwable $e) {
+			$secret = '';
+		}
+		if ($stored !== '' && ($secret === '' || !preg_match('/\A[A-Z2-7]{16,128}\z/D', (string) $secret))) {
+			if ($enabled) {
+				error_log('2FA secret of user #' . $userId . ' cannot be decrypted; refusing code sign-in.');
+				return $unavailable;
+			}
+			// A half-finished setup with an unreadable secret: simply start setup again.
+			return ['secret' => null, 'enabled' => false, 'unavailable' => false];
+		}
+		if ($enabled && $secret === null) {
+			return $unavailable;
+		}
+		return ['secret' => $secret, 'enabled' => $enabled, 'unavailable' => false];
+	}
+
+	/**
+	 * Record that a TOTP code from time step $counter was just accepted for $userId, unless a
+	 * code from that step (or a later one) already was. Returns false for a replay.
+	 *
+	 * Kept in security_events (one row per account) rather than in a new users column, so no
+	 * schema change is needed; an expired row only ever holds a step that is already too old to
+	 * matter.
+	 */
+	public static function claimTotpCounter(int $userId, int $counter): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $userId < 1 || $counter < 0) {
+			return false;
+		}
+		$table = Database::table('security_events');
+		try {
+			// last_updated_at is assigned first: it must compare against the OLD counter.
+			$stmt = $pdo->prepare(
+				"INSERT INTO `{$table}` (`ip_address`, `event_type`, `counter`, `last_updated_at`)
+				 VALUES (?, 'totp_last_step', ?, ?)
+				 ON DUPLICATE KEY UPDATE
+				  `last_updated_at` = IF(`counter` < VALUES(`counter`), VALUES(`last_updated_at`), `last_updated_at`),
+				  `counter` = IF(`counter` < VALUES(`counter`), VALUES(`counter`), `counter`)"
+			);
+			$stmt->execute(['user:' . $userId, $counter, time()]);
+			return $stmt->rowCount() > 0;
+		} catch (PDOException $e) {
+			error_log('TOTP step could not be recorded: ' . $e->getMessage());
+			return false;
 		}
 	}
 
@@ -1202,8 +1295,11 @@ final class UserRepository
 			$sortSql = implode(', ', $sortParts);
 			$groupsTable = Database::table('groups');
 
+			// An explicit column list, never u.*: this answer goes to the browser, and u.* used to
+			// carry every account's password hash, encrypted TOTP secret and pending tokens.
 			$sql = "SELECT
-						u.*,
+						u.`id`, u.`username`, u.`email`, u.`role`, u.`is_active`, u.`created_at`,
+						u.`group_id`, u.`staff_group_id`, u.`storage_limit`, u.`group_expires_at`,
 						(SELECT COUNT(*) FROM `{$filesTable}` f WHERE f.user_id = u.id) as files_count,
 						(SELECT COALESCE(SUM(size), 0) FROM `{$filesTable}` f WHERE f.user_id = u.id) as storage_used,
 						(SELECT uploaded_ip FROM `{$filesTable}` f WHERE f.user_id = u.id ORDER BY uploaded_at DESC LIMIT 1) as last_ip,
@@ -1279,7 +1375,7 @@ final class UserRepository
 	 * password reset. The moderator role automatically attaches the system Moderator group;
 	 * that permission group is independent from the paid-plan group.
 	 */
-	public static function adminUpdate(int $id, array $data): array
+	public static function adminUpdate(int $id, array $data, ?int $actorId = null): array
 	{
 		$pdo = Database::getInstance();
 		if (!$pdo) {
@@ -1304,17 +1400,23 @@ final class UserRepository
 			$params[] = max(0, (int) $data['storage_limit']);
 		}
 
-		if (!empty($data['password'])) {
-			$passwordViolation = PasswordPolicy::violation((string) $data['password']);
-			if ($passwordViolation === 'length') {
-				return ['success' => false, 'error' => __('api.pass_min_configured', ['min' => InputLimits::accountPasswordMin()])];
-			}
-			if ($passwordViolation === 'maximum') {
-				return ['success' => false, 'error' => __('api.password_too_long')];
+		$passwordReset = !empty($data['password']);
+		if ($passwordReset) {
+			// The full policy, the same one the account holder is held to: an administrator
+			// choosing a password for someone is not a reason for a weaker one.
+			$passwordError = PasswordPolicy::errorMessage(PasswordPolicy::violation((string) $data['password']));
+			if ($passwordError !== null) {
+				return ['success' => false, 'error' => $passwordError];
 			}
 			$sets[] = '`password_hash` = ?';
-			$params[] = password_hash($data['password'], PASSWORD_DEFAULT);
+			$params[] = password_hash((string) $data['password'], PASSWORD_DEFAULT);
 			$securityChange = true;
+		}
+
+		// Who is asking. In a web request that is the signed-in administrator; from the command
+		// line (an operator with shell access, recovering an install) there is no one to check.
+		if ($actorId === null && PHP_SAPI !== 'cli') {
+			$actorId = (int) ($_SESSION['user_id'] ?? 0);
 		}
 
 		try {
@@ -1328,6 +1430,17 @@ final class UserRepository
 			if (!$current) {
 				$pdo->rollBack();
 				return ['success' => false, 'error' => __('api.user_not_found')];
+			}
+			// Setting an administrator's password is taking over that administrator. The owner
+			// account could not be deleted, deactivated or demoted by another admin, yet anyone
+			// with the admin role could simply give it a new password and sign in as it. Only
+			// the owner may set another administrator's password, and nobody but the owner the
+			// owner's own; everyone sets their own in the account tab.
+			if ($passwordReset && $actorId !== null && $actorId !== $id
+				&& (string) $current['role'] === 'admin'
+				&& (self::isRootAdmin($id) || !self::isRootAdmin($actorId))) {
+				$pdo->rollBack();
+				return ['success' => false, 'error' => __('api.admin_password_owner_only')];
 			}
 			if (isset($data['role']) && $data['role'] !== 'admin'
 				&& (string) $current['role'] === 'admin' && self::isRootAdmin($id)) {
@@ -1392,6 +1505,13 @@ final class UserRepository
 				return ['success' => false, 'error' => __('api.revoke_access_failed')];
 			}
 			$pdo->commit();
+			if ($passwordReset && $actorId !== $id) {
+				// Someone else set this password; the account holder hears about it the same way
+				// as when they change it themselves.
+				Notifications::send($id, 'security.password', [
+					'data' => ['ip' => function_exists('getClientIP') ? getClientIP() : 'cli'],
+				]);
+			}
 			return ['success' => true];
 		} catch (Throwable $e) {
 			if ($pdo->inTransaction()) {

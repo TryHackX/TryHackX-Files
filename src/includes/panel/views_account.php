@@ -16,7 +16,13 @@ if ($accountMessage === 'email_changed') {
 } elseif ($accountMessage === 'email_change_stage_two') {
 	$accountNotice = __('panel.acct.email_stage_two');
 } elseif (isset($_GET['err']) && is_string($_GET['err'])) {
-	$accountNotice = mb_substr((string) $_GET['err'], 0, 300);
+	// Codes only. Echoing the parameter itself let any link put arbitrary "official" text into
+	// the signed-in account tab.
+	$accountNotice = [
+		'email_link_expired' => __('api.link_expired'),
+		'email_change_send_failed' => __('mail.change_send_failed'),
+		'email_blocked' => __('api.email_blocked'),
+	][$_GET['err']] ?? '';
 	$accountNoticeKind = 'error';
 }
 ?>

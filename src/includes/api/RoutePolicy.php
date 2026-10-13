@@ -27,7 +27,7 @@ final class ApiRoutePolicy
 		'DELETE',
 	];
 
-	private const RATE_LIMITS = ['auth', 'read', 'write'];
+	private const RATE_LIMITS = ['auth', 'lookup', 'read', 'write'];
 
 	/**
 	 * Build one route descriptor.  All policy fields are always present, including fields
@@ -43,7 +43,8 @@ final class ApiRoutePolicy
 	 *   permission: ?string,
 	 *   rate_limit: ?string,
 	 *   idempotency: bool,
-	 *   redirect_status: ?int
+	 *   redirect_status: ?int,
+	 *   recent_auth: bool
 	 * }
 	 */
 	public static function route(
@@ -54,7 +55,8 @@ final class ApiRoutePolicy
 		?string $permission = null,
 		?string $rateLimit = 'read',
 		bool $idempotency = false,
-		?int $redirectStatus = null
+		?int $redirectStatus = null,
+		bool $recentAuth = false
 	): array {
 		$normalised = array_values(array_unique(array_map(
 			static fn($method): string => strtoupper(trim((string) $method)),
@@ -70,6 +72,7 @@ final class ApiRoutePolicy
 			'rate_limit' => $rateLimit,
 			'idempotency' => $idempotency,
 			'redirect_status' => $redirectStatus,
+			'recent_auth' => $recentAuth,
 		];
 		self::assertDescriptor($route);
 		return $route;
@@ -120,6 +123,14 @@ final class ApiRoutePolicy
 			&& !in_array((int) $route['redirect_status'], [303, 307, 308], true)
 		) {
 			throw new LogicException('Unsupported redirect status in API route descriptor');
+		}
+		// Optional for hand-built descriptors; a fresh credential check only means something on
+		// a signed-in, CSRF-protected write.
+		if (array_key_exists('recent_auth', $route) && !is_bool($route['recent_auth'])) {
+			throw new LogicException('API route recent_auth policy must be boolean');
+		}
+		if (!empty($route['recent_auth']) && (!$route['auth'] || !$route['csrf'])) {
+			throw new LogicException('A recent-authentication route must be a signed-in, CSRF-protected write');
 		}
 	}
 

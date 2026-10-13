@@ -1,7 +1,5 @@
 <?php
-// This page has no executable inline scripts or HTML event handlers. Keep it as the first
-// enforced CSP island while the larger panel/download templates are migrated incrementally.
-define('FILEHOST_CSP_STRICT_SCRIPTS', true);
+// No executable inline scripts or HTML event handlers here: the CSP refuses both everywhere.
 // Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
 $i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
@@ -77,6 +75,14 @@ $blockedExtList = array_values(array_filter(array_map(
 	'trim',
 	explode(',', strtolower(Database::getSetting('blocked_extensions', '')))
 )));
+
+// The activation link lands here with a fixed outcome code. Only codes listed here are ever
+// shown, so the parameter cannot be used to print text of a stranger's choosing.
+$homeNotice = [
+	'verified' => ['success', __('api.verification_success')],
+	'verify_failed' => ['error', __('api.verification_failed')],
+	'verify_missing' => ['error', __('api.verification_token_missing')],
+][is_string($_GET['msg'] ?? null) ? $_GET['msg'] : ''] ?? null;
 ?>
 <!DOCTYPE html>
 <html lang="<?= Lang::current() ?>">
@@ -99,6 +105,10 @@ $blockedExtList = array_values(array_filter(array_map(
 		<?php require_once __DIR__ . '/../src/includes/header_ui.php'; ?>
 
 		<?= AdRenderer::zone('home_top') ?>
+
+		<?php if ($homeNotice !== null): ?>
+			<div class="auth-message show <?= $homeNotice[0] ?>" role="status"><?= htmlspecialchars($homeNotice[1], ENT_QUOTES, 'UTF-8') ?></div>
+		<?php endif; ?>
 
 		<div class="hero">
 			<h1><?= _h('home.hero_1') ?><br><span><?= _h('home.hero_2') ?></span></h1>

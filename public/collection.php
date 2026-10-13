@@ -1,6 +1,4 @@
 <?php
-
-define('FILEHOST_CSP_STRICT_SCRIPTS', true);
 // Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
 $i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';

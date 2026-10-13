@@ -19,6 +19,9 @@
 
 ini_set('display_errors', 0);
 
+// Authenticated by API key alone: no browser session is opened (see config.php).
+define('FILEHOST_STATELESS_REQUEST', true);
+
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/FileManager.php';
 require_once __DIR__ . '/../src/includes/Database.php';
@@ -46,10 +49,6 @@ function apiv1_respond($data, int $status = 200): never
 function apiv1_error(string $message, int $status): never
 {
 	apiv1_respond(['error' => $message], $status);
-}
-
-if (defined('INSTALL_MODE') && INSTALL_MODE) {
-	apiv1_error('Service not configured', 503);
 }
 
 // --- Authenticate ---------------------------------------------------------

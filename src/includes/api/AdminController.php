@@ -70,9 +70,10 @@ final class AdminController
 		}
 
 		$data = json_decode(file_get_contents('php://input'), true);
-		$username = trim($data['username'] ?? '');
-		$email = trim($data['email'] ?? '');
-		$password = $data['password'] ?? '';
+		$data = is_array($data) ? $data : [];
+		$username = trim(is_string($data['username'] ?? null) ? $data['username'] : '');
+		$email = trim(is_string($data['email'] ?? null) ? $data['email'] : '');
+		$password = is_string($data['password'] ?? null) ? $data['password'] : '';
 		$role = $data['role'] ?? 'user';
 		$autoActivate = $data['auto_activate'] ?? false;
 
@@ -93,12 +94,10 @@ final class AdminController
 			echo json_encode(['success' => false, 'error' => __('api.email_invalid')]);
 			return;
 		}
-		if (strlen($password) < InputLimits::accountPasswordMin()) {
-			echo json_encode(['success' => false, 'error' => __('api.pw_short_configured', ['min' => InputLimits::accountPasswordMin()])]);
-			return;
-		}
-		if (strlen($password) > InputLimits::accountPasswordMax()) {
-			echo json_encode(['success' => false, 'error' => __('api.password_too_long')]);
+		// The full password policy, as for a self-registered account.
+		$passwordError = PasswordPolicy::errorMessage(PasswordPolicy::violation($password));
+		if ($passwordError !== null) {
+			echo json_encode(['success' => false, 'error' => $passwordError]);
 			return;
 		}
 		if (!in_array($role, ['user', 'moderator', 'admin'], true)) {

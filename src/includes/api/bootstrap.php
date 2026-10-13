@@ -10,13 +10,13 @@
 $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $requestedAction = is_string($_GET['action'] ?? null) ? (string) $_GET['action'] : '';
 
-$gateError = static function (int $status, string $message, array $headers = []): never {
+$gateError = static function (int $status, string $message, array $headers = [], array $extra = []): never {
 	http_response_code($status);
 	foreach ($headers as $name => $value) {
 		header($name . ': ' . $value);
 	}
 	header('Content-Type: application/json; charset=utf-8');
-	echo json_encode(['success' => false, 'error' => $message]);
+	echo json_encode(['success' => false, 'error' => $message] + $extra);
 	exit;
 };
 
@@ -95,13 +95,33 @@ if ($route['permission'] !== null) {
 	}
 }
 
+// Actions that hand out privileges or rewire payments and the page policy need a password typed
+// in the last few minutes, not merely a session. A session restored from a "stay signed in"
+// cookie, or a tab left open for hours, has not proved who is at the keyboard — that is what the
+// panel gate asks, and it must hold for the API behind the panel too. The panel answers this
+// code with a password prompt and retries (assets/js/reauth.js).
+if (!empty($route['recent_auth']) && !hasRecentAuthentication()) {
+	$gateError(403, __('api.recent_auth_required'), [], ['code' => 'recent_auth_required']);
+}
+
 if (!ApiRoutePolicy::reserveIdempotencyKey($route)) {
 	$gateError(409, 'Missing or reused idempotency key');
 }
 
-// Maintenance mode admits only login, health, and an already validated administrator.
+// Maintenance mode admits only an already validated administrator, plus everything signing in
+// takes: the password step, the 2FA step, the configuration the sign-in form loads (captcha
+// provider) and signing out. Without the 2FA step an administrator using it could not get back
+// in to switch maintenance off again.
 $maintenanceMode = Database::getSetting('maintenance_mode', '0') === '1';
-if ($maintenanceMode && empty($_SESSION['is_admin']) && $action !== 'user_login' && $action !== 'health') {
+$maintenanceOpenActions = [
+	'user_login',
+	'user_2fa_login',
+	'user_logout',
+	'config',
+	'captcha_config',
+	'health',
+];
+if ($maintenanceMode && empty($_SESSION['is_admin']) && !in_array($action, $maintenanceOpenActions, true)) {
 	http_response_code(503);
 	$maintMsg = trim((string) Database::getSetting('maintenance_message', ''));
 	header('Content-Type: application/json; charset=utf-8');
@@ -121,6 +141,12 @@ try {
 	// Installation/readiness owns the database-unavailable response.
 }
 
-if (!INSTALL_MODE && $route['rate_limit'] !== null) {
-	RateLimiter::enforce('ip:' . getClientIP(), $route['rate_limit']);
+// Counted per network (IPv6 /64), see RateLimiter::bucketFor(). Credential-checking actions
+// each get their own budget, so typing a username in the sign-up form or opening the account
+// tab never spends the budget a sign-in needs.
+if ($route['rate_limit'] !== null) {
+	RateLimiter::enforce(
+		RateLimiter::bucketFor(getClientIP(), $route['rate_limit'], $action),
+		$route['rate_limit']
+	);
 }

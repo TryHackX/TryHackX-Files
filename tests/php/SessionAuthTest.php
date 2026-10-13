@@ -67,4 +67,45 @@ final class SessionAuthTest extends RepoTestCase
 		$this->assertFalse($_SESSION['is_admin']);
 		$this->assertSame('user', $_SESSION['user_role']);
 	}
+
+	/**
+	 * A database that cannot answer makes the request anonymous — and nothing more. It used to
+	 * tear the session down and delete the device's "stay signed in" token, so a database
+	 * restart signed out everyone who loaded a page during it.
+	 */
+	public function testAnUnanswerableDatabaseDoesNotDestroyTheSessionOrTheDeviceToken(): void
+	{
+		$user = $this->user();
+		$this->truncate('remember_tokens');
+		Database::setSetting('login_remember_enabled', '1');
+		$cookie = RememberTokenRepository::issue((int) $user['id'], 86400, '203.0.113.9', 'Test/1.0');
+		$this->assertNotSame('', $cookie);
+		$_COOKIE[RememberTokenRepository::COOKIE] = $cookie;
+		SessionAuth::establish($user);
+		$_SESSION['is_admin'] = true; // a stale privilege flag must not survive the outage
+
+		// A connection whose `users` table does not exist: every lookup fails.
+		$instance = new ReflectionProperty(Database::class, 'instance');
+		$working = $instance->getValue();
+		$broken = new PDO(
+			'mysql:host=' . DB_HOST . ';dbname=information_schema;charset=utf8mb4',
+			DB_USER,
+			DB_PASS,
+			[PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+		);
+		try {
+			$instance->setValue(null, $broken);
+			$this->assertNull(SessionAuth::current());
+			$this->assertArrayNotHasKey('user_id', $_SESSION, 'nothing in this request may use it');
+			$this->assertArrayNotHasKey('is_admin', $_SESSION);
+		} finally {
+			$instance->setValue(null, $working);
+			unset($_COOKIE[RememberTokenRepository::COOKIE]);
+		}
+
+		$tokens = (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('remember_tokens') . "`"
+		)->fetchColumn();
+		$this->assertSame(1, $tokens, 'the device token is still there for the next request');
+	}
 }

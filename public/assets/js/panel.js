@@ -409,7 +409,7 @@
 		try {
 			await FHApi.post('user_logout', {});
 		} finally {
-			window.location.href = appUrl + '/?logout=1';
+			window.location.href = appUrl + '/';
 		}
 	}
 
@@ -874,10 +874,10 @@
 		resetCcPw = wirePwStrength({ pass: 'ccPassword', bar: 'ccPwdBar', len: 'ccReqLen', upper: 'ccReqUpper', digit: 'ccReqDigit', spec: 'ccReqSpec', confirm: 'ccPassword2', match: 'ccPassMatch' });
 		resetCsPw = wirePwStrength({ pass: 'csPassword', bar: 'csPwdBar', len: 'csReqLen', upper: 'csReqUpper', digit: 'csReqDigit', spec: 'csReqSpec', confirm: 'csPassword2', match: 'csPassMatch' });
 
-		// Surface email-change results carried back as query params.
+		// Surface email-change results carried back as query params. Failures are rendered by
+		// the account tab from a whitelisted code; the raw parameter is never shown.
 		const params = new URLSearchParams(window.location.search);
 		if (params.get('msg') === 'email_changed') showNotification(t('panel.acct.email_changed'), 'success');
-		if (params.has('err')) showNotification(t('panel.modal.bans_error', { msg: params.get('err') }), 'error');
 
 		switch (PANEL.tab) {
 			case 'dashboard':

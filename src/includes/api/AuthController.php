@@ -9,24 +9,63 @@
  */
 final class AuthController
 {
+	/** A recovery link is re-sent for the same account at most this often. */
+	private const RECOVERY_RESEND_SECONDS = 300;
+
+	/** A string field of the JSON request body; anything that is not a string reads as ''. */
+	private static function inputString(string $key): string
+	{
+		$input = json_decode((string) file_get_contents('php://input'), true);
+		return is_array($input) && is_string($input[$key] ?? null) ? $input[$key] : '';
+	}
+
 	public static function handleUserLogin()
 	{
 		header('Content-Type: application/json');
 
 		$input = json_decode(file_get_contents('php://input'), true);
-		$username = $input['username'] ?? '';
-		$password = $input['password'] ?? '';
-		$captchaResponse = $input['captcha_response'] ?? '';
+		$input = is_array($input) ? $input : [];
+		$username = is_string($input['username'] ?? null) ? $input['username'] : '';
+		$password = is_string($input['password'] ?? null) ? $input['password'] : '';
+		$captchaResponse = is_string($input['captcha_response'] ?? null) ? $input['captcha_response'] : '';
 		$ip = getClientIP();
+		$ipKey = filehostThrottleKey($ip);
 
-		// Check Security Threshold
-		$failCount = Database::getSecurityEvent($ip, 'login_fail');
+		if ($username === '' || $password === '') {
+			echo json_encode(['success' => false, 'error' => __('api.give_login_pass')]);
+			return;
+		}
+		if (strlen($username) > InputLimits::HARD_USERNAME_MAX
+			|| strlen($password) > InputLimits::HARD_PASSWORD_MAX) {
+			echo json_encode(['success' => false, 'error' => __('api.bad_credentials')]);
+			return;
+		}
+
+		// Two counters. The address one (per /64 for IPv6) decides when the operator's captcha
+		// is shown. The account one is what stops a spray from many addresses at one account:
+		// after 10 wrong passwords in 15 minutes the account needs a solved captcha for every
+		// further attempt, or — with no captcha configured — waits out the window.
+		$failCount = Database::getSecurityEvent($ipKey, 'login_fail');
 		$threshold = (int) Database::getSetting('recaptcha_login_attempt_threshold', 1);
 		$loginProtectionEnabled = (Database::getSetting('recaptcha_on_admin', '0') === '1');
 		$requireCaptcha = ($threshold >= 0 && $failCount >= $threshold);
+		$accountId = UserRepository::idForUsername($username);
+		$accountBucket = 'acct:' . $accountId;
+		$accountThrottled = $accountId > 0 && RateLimiter::exceeded($accountBucket, 'login_account');
+		$captchaAvailable = Database::isRecaptchaEnabled();
 
-		if ($loginProtectionEnabled && $requireCaptcha && Database::isRecaptchaEnabled()) {
-			if (empty($captchaResponse)) {
+		if ($accountThrottled && !$captchaAvailable) {
+			http_response_code(429);
+			echo json_encode([
+				'success' => false,
+				'error' => __('api.too_many_attempts_minutes', [
+					'minutes' => (int) ceil(RateLimiter::secondsLeft('login_account') / 60),
+				]),
+			]);
+			return;
+		}
+		if ($captchaAvailable && ($accountThrottled || ($loginProtectionEnabled && $requireCaptcha))) {
+			if ($captchaResponse === '') {
 				http_response_code(400);
 				echo json_encode(['success' => false, 'error' => __('api.captcha_required'), 'require_captcha' => true]);
 				return;
@@ -38,24 +77,13 @@ final class AuthController
 			}
 		}
 
-		if (empty($username) || empty($password)) {
-			echo json_encode(['success' => false, 'error' => __('api.give_login_pass')]);
-			return;
-		}
-		if (strlen((string) $username) > InputLimits::HARD_USERNAME_MAX
-			|| strlen((string) $password) > InputLimits::HARD_PASSWORD_MAX) {
-			echo json_encode(['success' => false, 'error' => __('api.bad_credentials')]);
-			return;
-		}
-
 		$result = Database::loginUser($username, $password);
 
 		if ($result['success']) {
 			// Reset attempts on success
-			Database::clearSecurityEvent($ip, 'login_fail');
-			unset($_SESSION['login_attempts']); // Cleanup legacy
+			Database::clearSecurityEvent($ipKey, 'login_fail');
 
-			$uploadToken = $input['upload_token'] ?? '';
+			$uploadToken = is_string($input['upload_token'] ?? null) ? $input['upload_token'] : '';
 			// Only durations the form actually offers; anything else is treated as
 			// "this browser session only", which is the safe reading of a bad request.
 			$remember = (int) ($input['remember'] ?? 0);
@@ -64,7 +92,9 @@ final class AuthController
 			}
 
 			// 2FA: the password alone doesn't grant a session — park the login and ask for a
-			// TOTP code (handleUser2faLogin finishes it). Nothing privileged is set yet.
+			// TOTP code (handleUser2faLogin finishes it). Nothing privileged is set yet. An
+			// account whose secret cannot be read right now (see getTotpState) still counts as
+			// protected: it is parked too, and only a recovery code can finish the sign-in.
 			$totp = Database::getTotpState((int) $result['user']['id']);
 			if ($totp['enabled']) {
 				$_SESSION['pending_2fa'] = [
@@ -72,6 +102,7 @@ final class AuthController
 					'at' => time(),
 					'upload_token' => $uploadToken,
 					'remember' => $remember,
+					'fails' => 0,
 				];
 				echo json_encode(['success' => false, 'require_2fa' => true]);
 				return;
@@ -80,7 +111,13 @@ final class AuthController
 			completeLogin($result['user'], $uploadToken, $remember);
 		} else {
 			// Increment attempts
-			Database::incrementSecurityEvent($ip, 'login_fail');
+			Database::incrementSecurityEvent($ipKey, 'login_fail');
+			// Only a wrong password counts against the account — not an unactivated or banned
+			// one answering correctly.
+			if ($accountId > 0 && ($result['reason'] ?? '') === 'credentials') {
+				RateLimiter::hit($accountBucket, 'login_account');
+			}
+			unset($result['reason']);
 			$failCount++; // Update local for response check
 			if ($threshold >= 0 && $failCount >= $threshold) {
 				$result['require_captcha'] = true;
@@ -119,8 +156,7 @@ final class AuthController
 			return;
 		}
 		$userId = (int) $_SESSION['user_id'];
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$password = (string) ($input['password'] ?? '');
+		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
@@ -164,8 +200,7 @@ final class AuthController
 			return;
 		}
 		$userId = (int) $_SESSION['user_id'];
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$code = (string) ($input['code'] ?? '');
+		$code = self::inputString('code');
 		$pending = $_SESSION['pending_2fa_setup'] ?? null;
 		if (
 			!is_array($pending)
@@ -209,8 +244,7 @@ final class AuthController
 			return;
 		}
 		$userId = (int) $_SESSION['user_id'];
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$password = (string) ($input['password'] ?? '');
+		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
@@ -246,8 +280,7 @@ final class AuthController
 			return;
 		}
 
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$lang = strtolower(trim((string) ($input['language'] ?? '')));
+		$lang = strtolower(trim(self::inputString('language')));
 
 		// An empty value clears the preference and returns the user to automatic resolution.
 		// pt 6: the check is against forUsers(), the set the admin offers here, not merely what
@@ -311,8 +344,7 @@ final class AuthController
 			return;
 		}
 
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$password = (string) ($input['password'] ?? '');
+		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
@@ -339,35 +371,60 @@ final class AuthController
 		header('Content-Type: application/json');
 
 		$pending = $_SESSION['pending_2fa'] ?? null;
-		if (!$pending || (time() - (int) $pending['at']) > 300) {
+		if (!is_array($pending) || (time() - (int) ($pending['at'] ?? 0)) > 300) {
 			unset($_SESSION['pending_2fa']);
 			echo json_encode(['success' => false, 'error' => __('api.2fa_session_expired')]);
 			return;
 		}
 
-		$ip = getClientIP();
-		if (Database::getSecurityEvent($ip, 'totp_fail') >= 10) {
+		$ipKey = filehostThrottleKey(getClientIP());
+		$userId = (int) $pending['user_id'];
+		$accountBucket = 'acct:' . $userId;
+		// Three limits, because addresses are cheap: per network, per account (whatever the
+		// address), and per parked sign-in — five wrong codes and the password has to be typed
+		// again, so one password check can no longer feed an unbounded run of code guesses.
+		if (Database::getSecurityEvent($ipKey, 'totp_fail') >= 10
+			|| RateLimiter::exceeded($accountBucket, 'totp_account')) {
 			echo json_encode(['success' => false, 'error' => __('api.too_many_attempts')]);
 			return;
 		}
 
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$code = (string) ($input['code'] ?? '');
-		$userId = (int) $pending['user_id'];
+		$input = json_decode(file_get_contents('php://input'), true);
+		$code = is_array($input) && is_string($input['code'] ?? null) ? $input['code'] : '';
 		$state = Database::getTotpState($userId);
 
-		// A 6-digit authenticator code is the normal path; anything else is tried as a
-		// single-use recovery code, so a lost phone doesn't lock the account out. Both are
-		// gated by the same per-IP failure counter checked above.
+		// A 6-digit authenticator code is the normal path; an 8-character code is tried as a
+		// single-use recovery code, so a lost phone doesn't lock the account out. (Trying every
+		// wrong 6-digit code against the bcrypt-hashed recovery codes too cost ten hash checks
+		// per typo.) A code accepted once is refused for the rest of its time step.
 		$usedRecoveryCode = false;
-		$totpOk = $state['enabled'] && $state['secret'] && Totp::verify($state['secret'], $code);
-		if (!$totpOk && $state['enabled']) {
+		$totpOk = false;
+		if ($state['enabled'] && $state['secret']) {
+			$counter = Totp::match($state['secret'], $code);
+			$totpOk = $counter !== null && UserRepository::claimTotpCounter($userId, $counter);
+		}
+		if (!$totpOk && $state['enabled'] && RecoveryCodeRepository::looksLikeCode($code)) {
 			$usedRecoveryCode = Database::consumeRecoveryCode($userId, $code);
 		}
 
 		if (!$totpOk && !$usedRecoveryCode) {
-			Database::incrementSecurityEvent($ip, 'totp_fail');
-			echo json_encode(['success' => false, 'error' => __('api.2fa_bad_code'), 'require_2fa' => true]);
+			Database::incrementSecurityEvent($ipKey, 'totp_fail');
+			RateLimiter::hit($accountBucket, 'totp_account');
+			$fails = (int) ($pending['fails'] ?? 0) + 1;
+			if ($fails >= 5) {
+				unset($_SESSION['pending_2fa']);
+				echo json_encode(['success' => false, 'error' => __('api.2fa_session_expired')]);
+				return;
+			}
+			$_SESSION['pending_2fa']['fails'] = $fails;
+			echo json_encode([
+				'success' => false,
+				// The secret could not be read (key missing or changed): say so, because no
+				// authenticator code can work until an administrator fixes it — only a
+				// recovery code can.
+				'error' => !empty($state['unavailable']) ? __('api.2fa_unavailable') : __('api.2fa_bad_code'),
+				'require_2fa' => true,
+			]);
 			return;
 		}
 
@@ -383,7 +440,7 @@ final class AuthController
 			Database::logAudit('2fa_recovery_used', "codes left: $left", $userId, $user['username'] ?? null);
 		}
 
-		Database::clearSecurityEvent($ip, 'totp_fail');
+		Database::clearSecurityEvent($ipKey, 'totp_fail');
 		$user['is_admin'] = ($user['role'] === 'admin');
 		completeLogin($user, (string) ($pending['upload_token'] ?? ''), (int) ($pending['remember'] ?? 0));
 
@@ -404,23 +461,24 @@ final class AuthController
 		}
 
 		$input = json_decode(file_get_contents('php://input'), true);
-		$username = $input['username'] ?? '';
-		$email = $input['email'] ?? '';
-		$password = $input['password'] ?? '';
-		$captchaResponse = $input['captcha_response'] ?? '';
+		$input = is_array($input) ? $input : [];
+		$username = is_string($input['username'] ?? null) ? $input['username'] : '';
+		$email = is_string($input['email'] ?? null) ? $input['email'] : '';
+		$password = is_string($input['password'] ?? null) ? $input['password'] : '';
+		$captchaResponse = is_string($input['captcha_response'] ?? null) ? $input['captcha_response'] : '';
 
 		// Registration always requires CAPTCHA if enabled and configured
 		$alwaysRequire = (Database::getSetting('recaptcha_register_always', '1') === '1');
 
 		if ($alwaysRequire && Database::isRecaptchaEnabled()) {
-			if (empty($captchaResponse) || !Database::verifyRecaptcha($captchaResponse, getClientIP())) {
+			if ($captchaResponse === '' || !Database::verifyRecaptcha($captchaResponse, getClientIP())) {
 				http_response_code(400);
 				echo json_encode(['success' => false, 'error' => __('api.captcha_required')]);
 				return;
 			}
 		}
 
-		if (empty($username) || empty($email) || empty($password)) {
+		if ($username === '' || $email === '' || $password === '') {
 			echo json_encode(['success' => false, 'error' => __('api.fill_all_fields')]);
 			return;
 		}
@@ -429,24 +487,54 @@ final class AuthController
 		echo json_encode($result);
 	}
 
-	public static function handleUserCheck()
+	/**
+	 * Re-enter the password from inside the panel.
+	 *
+	 * Actions that grant privileges or rewire payments answer `recent_auth_required` when the
+	 * last password check is more than a few minutes old (bootstrap.php). The panel then asks
+	 * for the password, sends it here, and retries the action. Wrong guesses are capped per
+	 * account and network, the same budget the panel's own gate uses.
+	 */
+	public static function handleUserReauth()
 	{
 		header('Content-Type: application/json');
-		// Session already started at the top of api.php
-
-		if (isset($_SESSION['user_id'])) {
-			echo json_encode([
-				'success' => true,
-				'logged_in' => true,
-				'user' => [
-					'id' => $_SESSION['user_id'],
-					'username' => $_SESSION['user_name'],
-					'is_admin' => $_SESSION['is_admin'] ?? false
-				]
-			]);
-		} else {
-			echo json_encode(['success' => true, 'logged_in' => false]);
+		$userId = (int) ($_SESSION['user_id'] ?? 0);
+		if ($userId < 1) {
+			http_response_code(401);
+			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
+			return;
 		}
+		$quota = RateLimiter::hit(
+			'reauth:' . $userId . ':' . filehostThrottleKey(getClientIP()),
+			'auth'
+		);
+		if (!$quota['allowed']) {
+			http_response_code(429);
+			echo json_encode([
+				'success' => false,
+				'error' => __('panel.reauth.throttled', [
+					'minutes' => (string) max(1, (int) ceil(($quota['reset'] - time()) / 60)),
+				]),
+			]);
+			return;
+		}
+
+		$input = json_decode(file_get_contents('php://input'), true);
+		$password = is_array($input) && is_string($input['password'] ?? null) ? $input['password'] : '';
+		if ($password === '' || !Database::verifyUserPassword($userId, $password)) {
+			Database::logAudit(
+				'panel_reauth_failed',
+				'wrong password when re-confirming an action',
+				$userId,
+				(string) ($_SESSION['user_name'] ?? '')
+			);
+			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
+			return;
+		}
+
+		$_SESSION['recent_auth_at'] = time();
+		$_SESSION['panel_auth_at'] = time();
+		echo json_encode(['success' => true]);
 	}
 
 	/**
@@ -506,8 +594,7 @@ final class AuthController
 		}
 		// The password, here and now — the same rule the rest of the account tab follows. A
 		// hijacked session must not be able to quietly cut the owner's other devices loose.
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$password = (string) ($input['password'] ?? '');
+		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::HARD_PASSWORD_MAX
 			|| !Database::verifyUserPassword($userId, $password)) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
@@ -520,6 +607,14 @@ final class AuthController
 		if ($current === '') {
 			RememberTokenRepository::sendCookie('', 0);
 		}
+		// Deleting the device tokens only stops future sign-ins. A browser that is signed in
+		// right now — the lost laptop this button exists for — is ended by advancing the
+		// session generation; this browser is then re-established on the new one.
+		$pdo = Database::getInstance();
+		if ($pdo) {
+			UserRepository::advanceSessionVersion($pdo, $userId);
+		}
+		self::refreshSessionAfterReauthentication($userId);
 		Database::logAudit(
 			'remember_tokens_revoked',
 			"user revoked {$revoked} persistent sign-in(s) from other devices",
@@ -567,11 +662,11 @@ final class AuthController
 	{
 		header('Content-Type: application/json');
 
-		$ip = getClientIP();
-		// Check login threshold for current IP
-		$failCount = Database::getSecurityEvent($ip, 'login_fail');
+		// Check login threshold for current address (the same key handleUserLogin counts under).
+		// -1 means "never ask", exactly as the login handler reads it.
+		$failCount = Database::getSecurityEvent(filehostThrottleKey(getClientIP()), 'login_fail');
 		$threshold = (int) Database::getSetting('recaptcha_login_attempt_threshold', 1);
-		$loginCaptchaRequired = ($failCount >= $threshold);
+		$loginCaptchaRequired = $threshold >= 0 && $failCount >= $threshold;
 
 		// Expose only safe public settings
 		$config = [
@@ -634,18 +729,16 @@ final class AuthController
 
 	public static function handleVerifyEmail()
 	{
+		// The home page shows the outcome from a fixed code (see index.php); it used to receive
+		// a translated sentence in `?msg=` that nothing ever displayed.
 		$token = $_GET['token'] ?? '';
-		if (!$token) {
-			header("Location: " . APP_URL . "/index.php?msg=" . urlencode(__('api.verification_token_missing')));
+		if (!is_string($token) || $token === '') {
+			header('Location: ' . APP_URL . '/index.php?msg=verify_missing');
 			exit;
 		}
 
 		$result = Database::verifyUserByToken($token);
-		if ($result['success']) {
-			header("Location: " . APP_URL . "/index.php?msg=" . urlencode(__('api.verification_success')));
-		} else {
-			header("Location: " . APP_URL . "/index.php?msg=" . urlencode(__('api.verification_failed')));
-		}
+		header('Location: ' . APP_URL . '/index.php?msg=' . ($result['success'] ? 'verified' : 'verify_failed'));
 		exit;
 	}
 
@@ -693,9 +786,8 @@ final class AuthController
 			return;
 		}
 
-		$input = json_decode(file_get_contents('php://input'), true);
-		$currentPass = $input['current_password'] ?? '';
-		$newPass = $input['new_password'] ?? '';
+		$currentPass = self::inputString('current_password');
+		$newPass = self::inputString('new_password');
 
 		if (!is_string($currentPass) || strlen($currentPass) > InputLimits::PASSWORD_MAX) {
 			incrementRateLimit('change_password');
@@ -722,16 +814,21 @@ final class AuthController
 			return;
 		}
 
-		if (Database::updateUserPassword($_SESSION['user_id'], $newPass)) {
+		$userId = (int) $_SESSION['user_id'];
+		if (Database::updateUserPassword($userId, $newPass)) {
 			// Clear rate limit on success
-			unset($_SESSION['rate_limits']['change_password_' . $_SESSION['user_id']]);
+			unset($_SESSION['rate_limits']['change_password_' . $userId]);
+			// The change ended every session and revoked every device token and API key. This
+			// browser is the one that just proved the old password, so — exactly like the 2FA
+			// flows — it is the one kept signed in; everything else has to sign in again.
+			self::refreshSessionAfterReauthentication($userId);
 			// A password change the account holder did not make is the thing they most need to
 			// hear about, so this one is announced on both channels by default.
-			Notifications::send((int) $_SESSION['user_id'], 'security.password', [
+			Notifications::send($userId, 'security.password', [
 				'data' => ['ip' => getClientIP()],
 				'link' => APP_URL . '/panel.php?tab=user',
 			]);
-			echo json_encode(['success' => true]);
+			echo json_encode(['success' => true, 'message' => __('panel.acct.pw_updated')]);
 		} else {
 			echo json_encode(['success' => false, 'error' => __('api.pass_update_failed')]);
 		}
@@ -751,9 +848,8 @@ final class AuthController
 			return;
 		}
 
-		$input = json_decode(file_get_contents('php://input'), true);
-		$currentPass = $input['password'] ?? ''; // Note: frontend sends 'password'
-		$newEmail = $input['new_email'] ?? '';
+		$currentPass = self::inputString('password'); // Note: frontend sends 'password'
+		$newEmail = self::inputString('new_email');
 
 		if (!is_string($currentPass) || strlen($currentPass) > InputLimits::PASSWORD_MAX) {
 			incrementRateLimit('change_email');
@@ -785,10 +881,17 @@ final class AuthController
 	public static function handleUserVerifyEmailChange()
 	{
 		$token = $_GET['token'] ?? '';
-		$result = Database::confirmEmailChange($token);
+		$result = Database::confirmEmailChange(is_string($token) ? $token : '');
 
 		if (!$result['success']) {
-			header('Location: panel.php?tab=user&err=' . urlencode($result['error']));
+			// A code, never the message itself: the panel only ever prints texts it owns, so a
+			// crafted link cannot put words of its choosing into the account tab.
+			$code = match ($result['error'] ?? '') {
+				__('mail.change_send_failed') => 'email_change_send_failed',
+				__('api.email_blocked') => 'email_blocked',
+				default => 'email_link_expired',
+			};
+			header('Location: panel.php?tab=user&err=' . $code);
 			exit;
 		}
 
@@ -800,12 +903,27 @@ final class AuthController
 		}
 
 		// Confirmed from the new address, so the account holder should see it in the app
-		// too — the old address is no longer where anything arrives.
-		if (isset($_SESSION['user_id'])) {
-			Notifications::send((int) $_SESSION['user_id'], 'security.email', [
+		// too — the old address is no longer where anything arrives. Addressed to the account
+		// that changed, not to whoever happens to be signed in in the browser that opened it.
+		$ownerId = (int) ($result['user_id'] ?? 0);
+		if ($ownerId > 0) {
+			Notifications::send($ownerId, 'security.email', [
 				'subject' => (string) ($result['email'] ?? ''),
 				'link' => APP_URL . '/panel.php?tab=user',
 			]);
+		}
+		// The change ended every session of the account. If this browser is signed in to that
+		// same account it stays signed in, so the confirmation lands on the account tab rather
+		// than on a sign-in form with no explanation. It is not a fresh password check, so no
+		// recent-authentication window is opened by it.
+		if ($ownerId > 0 && (int) ($_SESSION['user_id'] ?? 0) === $ownerId) {
+			$user = Database::getUserById($ownerId);
+			if ($user && (int) ($user['is_active'] ?? 0) === 1) {
+				if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+					session_regenerate_id(true);
+				}
+				SessionAuth::establish($user);
+			}
 		}
 		header('Location: panel.php?tab=user&msg=email_changed');
 		exit;
@@ -829,9 +947,9 @@ final class AuthController
 		}
 
 		$input = json_decode(file_get_contents('php://input'), true);
-		$password = $input['password'] ?? '';
+		$password = is_array($input) && is_string($input['password'] ?? null) ? $input['password'] : '';
 
-		if (!Database::verifyUserPassword($_SESSION['user_id'], $password)) {
+		if ($password === '' || !Database::verifyUserPassword((int) $_SESSION['user_id'], $password)) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password2')]);
 			return;
 		}
@@ -848,38 +966,13 @@ final class AuthController
 		}
 	}
 
-	public static function handleGetUserStats()
-	{
-		header('Content-Type: application/json');
-		if (!isset($_SESSION['user_id'])) {
-			http_response_code(403);
-			echo json_encode(['success' => false, 'error' => __('api.not_logged_in2')]);
-			return;
-		}
-
-		$pdo = Database::getInstance();
-		$prefix = defined('DB_PREFIX') ? DB_PREFIX : '';
-		$stmt = $pdo->prepare("SELECT COUNT(*) as count, COALESCE(SUM(size), 0) as size, COALESCE(SUM(downloads), 0) as downloads FROM `{$prefix}files` WHERE user_id = ?");
-		$stmt->execute([$_SESSION['user_id']]);
-		$stats = $stmt->fetch();
-
-		echo json_encode([
-			'success' => true,
-			'stats' => [
-				'files' => (int) $stats['count'],
-				'storage' => (int) $stats['size'],
-				'downloads' => (int) $stats['downloads']
-			]
-		]);
-	}
-
 	public static function handleRecoverPassword()
 	{
 		header('Content-Type: application/json');
 		$input = json_decode(file_get_contents('php://input'), true);
-		$userParam = trim($input['input'] ?? '');
+		$userParam = is_array($input) && is_string($input['input'] ?? null) ? trim($input['input']) : '';
 
-		if (empty($userParam)) {
+		if ($userParam === '') {
 			echo json_encode(['success' => false, 'error' => __('api.give_email_or_login')]);
 			return;
 		}
@@ -888,7 +981,7 @@ final class AuthController
 			return;
 		}
 
-		$ip = getClientIP();
+		$ip = filehostThrottleKey(getClientIP());
 		$limit = (int) Database::getSetting('recovery_attempts_limit', 5);
 		$window = (int) Database::getSetting('recovery_window_hours', 48);
 
@@ -902,15 +995,23 @@ final class AuthController
 		// Always log attempt
 		Database::logRecoveryAttempt($ip);
 		$remaining = $limit - ($attempts + 1);
+		$sent = ['success' => true, 'message' => __('api.recovery_sent'), 'remaining_attempts' => $remaining];
 
-		// Find user
+		// Find user. An unknown name gets the same answer, straight away: the one-second sleep
+		// that used to sit here made unknown accounts the SLOW ones, which is exactly the
+		// difference an enumerator times.
 		$user = Database::getUserByEmailOrUsername($userParam);
-
 		if (!$user) {
-			// Mock success to prevent enumeration, but show remaining attempts
-			// Delay slightly
-			sleep(1);
-			echo json_encode(['success' => true, 'message' => __('api.recovery_sent'), 'remaining_attempts' => $remaining]);
+			echo json_encode($sent);
+			return;
+		}
+
+		// One live link per account, re-sent at most every few minutes. Every request used to
+		// mint a new token — invalidating the link the owner had just received — and queue
+		// another mail, so anyone could keep a victim's genuine reset link dead and their inbox
+		// full from a handful of addresses.
+		if (RecoveryRepository::issuedWithin((int) $user['id'], self::RECOVERY_RESEND_SECONDS)) {
+			echo json_encode($sent);
 			return;
 		}
 
@@ -956,7 +1057,7 @@ final class AuthController
 			$body,
 			'recovery:' . hash('sha256', $token)
 		)) {
-			echo json_encode(['success' => true, 'message' => __('api.recovery_sent'), 'remaining_attempts' => $remaining]);
+			echo json_encode($sent);
 		} else {
 			echo json_encode(['success' => false, 'error' => __('api.email_send_error'), 'remaining_attempts' => $remaining]);
 		}
@@ -966,10 +1067,11 @@ final class AuthController
 	{
 		header('Content-Type: application/json');
 		$input = json_decode(file_get_contents('php://input'), true);
-		$token = $input['token'] ?? '';
-		$password = $input['password'] ?? '';
+		$input = is_array($input) ? $input : [];
+		$token = is_string($input['token'] ?? null) ? $input['token'] : '';
+		$password = is_string($input['password'] ?? null) ? $input['password'] : '';
 
-		if (empty($token) || empty($password)) {
+		if ($token === '' || $password === '') {
 			echo json_encode(['success' => false, 'error' => __('api.missing_data')]);
 			return;
 		}

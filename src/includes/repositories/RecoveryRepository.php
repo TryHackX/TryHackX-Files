@@ -40,6 +40,29 @@ final class RecoveryRepository
 		}
 	}
 
+	/**
+	 * Whether a still-valid reset link was issued for this account in the last $seconds. The
+	 * recovery endpoint then leaves that link alone instead of replacing it with a new one.
+	 */
+	public static function issuedWithin(int $userId, int $seconds): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $userId < 1) {
+			return false;
+		}
+		$table = Database::table('recovery_tokens');
+		$now = time();
+		try {
+			$stmt = $pdo->prepare(
+				"SELECT 1 FROM `{$table}` WHERE `user_id` = ? AND `created_at` > ? AND `expires_at` > ?"
+			);
+			$stmt->execute([$userId, $now - $seconds, $now]);
+			return (bool) $stmt->fetchColumn();
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
 	/** Issue a fresh 15-minute reset token, replacing any prior token for this user. */
 	public static function createToken(int $userId): ?string
 	{

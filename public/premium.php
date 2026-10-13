@@ -7,7 +7,6 @@
  * they pasted in (a provider's button, an embed, a bank-transfer note). Fulfilment happens
  * afterwards, through `?action=premium_activate`.
  */
-define('FILEHOST_CSP_STRICT_SCRIPTS', true);
 // Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
 $i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
@@ -40,7 +39,9 @@ if (!PremiumController::isEnabled()) {
 }
 
 $settings = PremiumController::settings();
-$plans = array_map([PremiumController::class, 'publicView'], PlanRepository::enabled());
+// One read of the plan list for the whole page (it used to be queried four times).
+$enabledPlans = PlanRepository::enabled();
+$plans = array_map([PremiumController::class, 'publicView'], $enabledPlans);
 $theme = $_COOKIE['theme'] ?? 'dark';
 $title = $settings['premium_title'] !== '' ? $settings['premium_title'] : __('premium.title');
 
@@ -58,7 +59,7 @@ if (isset($_SESSION['user_id'])) {
 	$currentExpiry = isset($me['group_expires_at']) ? (int) $me['group_expires_at'] : null;
 }
 $ownedPlanIds = [];
-foreach (PlanRepository::enabled() as $p) {
+foreach ($enabledPlans as $p) {
 	// A guest card is nobody's plan — it exists to describe having no account at all, so a
 	// signed-in visitor never "owns" it however the groups line up.
 	if (($p['kind'] ?? 'paid') === 'guest') {
@@ -73,7 +74,7 @@ foreach (PlanRepository::enabled() as $p) {
 // A free tier is where everyone starts, so holding it is not holding a plan — the paid cards
 // must still say "Kup", not "Zmień plan".
 $hasAnyPlan = false;
-foreach (PlanRepository::enabled() as $p) {
+foreach ($enabledPlans as $p) {
 	if (($p['kind'] ?? 'paid') === 'paid' && in_array((int) $p['id'], $ownedPlanIds, true)) {
 		$hasAnyPlan = true;
 	}
@@ -112,7 +113,7 @@ if ($errCode !== '' && Lang::has('premium.err_' . $errCode)) {
 			$currentGroupId = isset($me['group_id']) ? (int) $me['group_id'] : null;
 			$currentExpiry = isset($me['group_expires_at']) ? (int) $me['group_expires_at'] : null;
 			$ownedPlanIds = [];
-			foreach (PlanRepository::enabled() as $p) {
+			foreach ($enabledPlans as $p) {
 				if ($currentGroupId && (int) $p['group_id'] === $currentGroupId) {
 					$ownedPlanIds[] = (int) $p['id'];
 				}

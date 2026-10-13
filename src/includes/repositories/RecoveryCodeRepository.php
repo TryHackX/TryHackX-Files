@@ -172,6 +172,15 @@ final class RecoveryCodeRepository
 		}
 	}
 
+	/**
+	 * Whether input could be a recovery code at all (8 characters once normalised). Anything
+	 * else is not worth ten bcrypt comparisons.
+	 */
+	public static function looksLikeCode(string $code): bool
+	{
+		return strlen(self::canonical($code)) === 8;
+	}
+
 	/** A code in its display form: two dash-separated groups, e.g. "7KFD-Q2WM". */
 	private static function makeCode(): string
 	{

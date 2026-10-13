@@ -1018,4 +1018,283 @@ final class HttpApiTest extends TestCase
 		$d = self::getJson('/api.php?action=definitely_not_a_route');
 		$this->assertFalse($d['success'] ?? true);
 	}
+
+	/** An active account of its own, so a scenario does not depend on what earlier ones did. */
+	private static function freshUser(string $name, string $password = 'Fresh1Pass!'): int
+	{
+		$result = Database::registerUser($name, $name . '@example.pl', $password);
+		self::assertTrue($result['success'] ?? false, json_encode($result));
+		$id = (int) Database::getUserByEmailOrUsername($name)['id'];
+		Database::getInstance()->exec(
+			"UPDATE `" . Database::table('users') . "` SET `is_active` = 1 WHERE `id` = " . $id
+		);
+		return $id;
+	}
+
+	/** The server process keeps its own settings cache; drop it after changing a setting. */
+	private static function serverSettingsChanged(): void
+	{
+		$cache = PROJECT_ROOT . '/tests/php/.tmp-data-http/settings.cache.json';
+		if (is_file($cache)) {
+			unlink($cache);
+		}
+	}
+
+	private static function signIn(string $username, string $password, int $remember = 0): array
+	{
+		self::$cookies = [];
+		self::$csrf = '';
+		self::refreshCsrf();
+		return self::postJson('/api.php?action=user_login', [
+			'username' => $username,
+			'password' => $password,
+			'remember' => $remember,
+		]);
+	}
+
+	/**
+	 * "Stay signed in" has to work wherever the visitor comes back, not only on the panel:
+	 * the home page and every API call restore the session from the device cookie.
+	 */
+	public function testADeviceCookieRestoresTheSessionOnPublicPagesAndTheApi(): void
+	{
+		Database::setSetting('login_remember_enabled', '1');
+		self::serverSettingsChanged();
+		self::freshUser('httpremember');
+		$signedIn = self::signIn('httpremember', 'Fresh1Pass!', 3600);
+		$this->assertTrue($signedIn['success'] ?? false, json_encode($signedIn));
+		$device = self::$cookies['fh_remember'] ?? '';
+		$this->assertNotSame('', $device);
+
+		// The browser was closed: only the device cookie is left.
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+		$count = self::getJson('/api.php?action=notification_count');
+		$this->assertSame(200, $count['status'], 'an API call restores the session');
+		$this->assertTrue($count['success'] ?? false);
+		$this->assertNotSame($device, self::$cookies['fh_remember'] ?? '', 'and rotates the device secret');
+
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+		$home = self::rawRequest('GET', '/index.php');
+		$this->assertSame(200, $home['status']);
+		$this->assertNotSame('', self::$cookies['PHPSESSID'] ?? (self::$cookies[session_name()] ?? ''));
+		$this->assertTrue(self::getJson('/api.php?action=notification_count')['success'] ?? false);
+	}
+
+	/**
+	 * A session restored from a device cookie has not proved who is at the keyboard. The
+	 * actions that create administrators, take accounts over or rewire payments ask for the
+	 * password first — in the API, not only on the panel page — and accept it from the panel's
+	 * inline prompt (`user_reauth`).
+	 */
+	public function testPrivilegeGrantingActionsNeedAFreshPassword(): void
+	{
+		Database::setSetting('login_remember_enabled', '1');
+		self::serverSettingsChanged();
+		$signedIn = self::signIn('httpadmin', 'HttpAdmin1!', 3600);
+		$this->assertTrue($signedIn['success'] ?? false, json_encode($signedIn));
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+		self::refreshCsrf(); // restores the session from the device cookie
+
+		$payload = [
+			'username' => 'httpgranted',
+			'email' => 'httpgranted@example.pl',
+			'password' => 'Granted1Pass!',
+			'role' => 'admin',
+			'auto_activate' => true,
+		];
+		$refused = self::postJson('/api.php?action=admin_create_user', $payload);
+		$this->assertSame(403, $refused['status']);
+		$this->assertSame('recent_auth_required', $refused['code'] ?? null);
+		$this->assertNull(Database::getUserByEmailOrUsername('httpgranted'));
+
+		$wrong = self::postJson('/api.php?action=user_reauth', ['password' => 'NotIt1Pass!']);
+		$this->assertFalse($wrong['success'] ?? true);
+		$right = self::postJson('/api.php?action=user_reauth', ['password' => 'HttpAdmin1!']);
+		$this->assertTrue($right['success'] ?? false, json_encode($right));
+
+		$created = self::postJson('/api.php?action=admin_create_user', $payload);
+		$this->assertTrue($created['success'] ?? false, json_encode($created));
+		$this->assertNotNull(Database::getUserByEmailOrUsername('httpgranted'));
+	}
+
+	/**
+	 * "Sign out other devices" ends the other browsers' sessions, not only their device
+	 * tokens: a laptop that is signed in right now is the case the button exists for.
+	 */
+	public function testSigningOutOtherDevicesEndsTheirLiveSessions(): void
+	{
+		self::freshUser('httptwodevices', 'TwoDevices1!');
+		$laptop = self::signIn('httptwodevices', 'TwoDevices1!');
+		$this->assertTrue($laptop['success'] ?? false, json_encode($laptop));
+		$laptopJar = self::$cookies;
+
+		$phone = self::signIn('httptwodevices', 'TwoDevices1!');
+		$this->assertTrue($phone['success'] ?? false);
+		$revoked = self::postJson('/api.php?action=user_remember_revoke', ['password' => 'TwoDevices1!']);
+		$this->assertTrue($revoked['success'] ?? false, json_encode($revoked));
+		$this->assertTrue(
+			self::getJson('/api.php?action=notification_count')['success'] ?? false,
+			'the device that pressed the button stays signed in'
+		);
+
+		$phoneJar = self::$cookies;
+		self::$cookies = $laptopJar;
+		$this->assertNotSame(200, self::getJson('/api.php?action=notification_count')['status']);
+		self::$cookies = $phoneJar;
+	}
+
+	/** Changing the password keeps the browser that did it signed in, like the 2FA flows do. */
+	public function testChangingThePasswordKeepsThisBrowserSignedIn(): void
+	{
+		self::freshUser('httppwchange', 'Before1Pass!');
+		$this->assertTrue(self::signIn('httppwchange', 'Before1Pass!')['success'] ?? false);
+		$changed = self::postJson('/api.php?action=user_change_password', [
+			'current_password' => 'Before1Pass!',
+			'new_password' => 'After1Pass!',
+		]);
+		$this->assertTrue($changed['success'] ?? false, json_encode($changed));
+		$this->assertTrue(self::getJson('/api.php?action=notification_count')['success'] ?? false);
+	}
+
+	/** Maintenance keeps every step of signing in open, or a 2FA administrator is locked out. */
+	public function testMaintenanceLeavesTheWholeSignInOpen(): void
+	{
+		self::$cookies = [];
+		self::refreshCsrf();
+		Database::setSetting('maintenance_mode', '1');
+		self::serverSettingsChanged();
+		try {
+			$this->assertSame(200, self::getJson('/api.php?action=config')['status']);
+			$this->assertSame(200, self::getJson('/api.php?action=captcha_config')['status']);
+			$twoFactor = self::postJson('/api.php?action=user_2fa_login', ['code' => '123456']);
+			$this->assertSame(200, $twoFactor['status'], 'the 2FA step is reachable');
+			$this->assertSame(503, self::getJson('/api.php?action=check_username&username=someone')['status']);
+		} finally {
+			Database::setSetting('maintenance_mode', '0');
+			self::serverSettingsChanged();
+		}
+	}
+
+	/** Pages print outcome messages they own, chosen by code; never the query string itself. */
+	public function testOutcomeMessagesComeFromCodesNotFromTheQueryString(): void
+	{
+		$verified = self::rawRequest('GET', '/index.php?msg=verified');
+		$this->assertStringContainsString('class="auth-message show success"', $verified['body']);
+		$forged = self::rawRequest('GET', '/index.php?msg=' . rawurlencode('<b>Call +48 000</b>'));
+		$this->assertStringNotContainsString('auth-message show', $forged['body']);
+		$this->assertStringNotContainsString('Call +48 000', $forged['body']);
+
+		$failed = self::rawRequest('GET', '/api.php?action=verify_email&token=' . str_repeat('a', 64));
+		$this->assertStringContainsString('class="auth-message show error"', $failed['body']);
+
+		self::freshUser('httpnotice');
+		$this->assertTrue(self::signIn('httpnotice', 'Fresh1Pass!')['success'] ?? false);
+		$tab = self::rawRequest('GET', '/panel.php?tab=user&err=' . rawurlencode('Your account is suspended, call us'));
+		$this->assertSame(200, $tab['status']);
+		$this->assertStringNotContainsString('Your account is suspended', $tab['body']);
+	}
+
+	/** A second recovery request moments later leaves the first link alone and mails nothing. */
+	public function testRecoveryIsNotResentForTheSameAccountWithinMinutes(): void
+	{
+		self::freshUser('httprecover');
+		$mails = static fn(): int => (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('mail_outbox') . "` WHERE `to_email` = 'httprecover@example.pl'"
+		)->fetchColumn();
+		self::$cookies = [];
+		self::refreshCsrf();
+		$first = self::postJson('/api.php?action=recover_password', ['input' => 'httprecover']);
+		$this->assertTrue($first['success'] ?? false, json_encode($first));
+		$this->assertSame(1, $mails());
+		$second = self::postJson('/api.php?action=recover_password', ['input' => 'httprecover']);
+		$this->assertTrue($second['success'] ?? false, 'the answer looks the same');
+		$this->assertSame(1, $mails(), 'but nothing new was queued');
+	}
+
+	/** Availability checks typed live in the sign-up form have their own, looser budget. */
+	public function testAvailabilityChecksDoNotSpendTheSignInBudget(): void
+	{
+		Database::getInstance()->exec('TRUNCATE TABLE `' . Database::table('rate_limits') . '`');
+		for ($i = 0; $i < 12; $i++) {
+			$check = self::getJson('/api.php?action=check_username&username=someone' . $i);
+			$this->assertSame(200, $check['status'], 'check ' . $i);
+		}
+		$this->assertNotSame(429, self::signIn('httpadmin', 'HttpAdmin1!')['status']);
+	}
+
+	/**
+	 * html, svg, xml and friends stay blocked whatever is saved: they are kept on the list at
+	 * save time instead of being put back silently by the schema check minutes later.
+	 */
+	public function testSavingStorageSettingsKeepsActiveDocumentTypesBlocked(): void
+	{
+		$original = [
+			'blocked_extensions' => (string) Database::getSetting('blocked_extensions', ''),
+			'system_max_file_size_mb' => (string) Database::getSetting('system_max_file_size_mb', '5120'),
+		];
+		$this->assertTrue(self::signIn('httpadmin', 'HttpAdmin1!')['success'] ?? false);
+		try {
+			$saved = self::rawRequest(
+				'POST',
+				'/panel.php?tab=settings&stab=storage',
+				http_build_query([
+					'action' => 'save_settings',
+					'setting_group' => 'storage',
+					'_csrf' => self::$csrf,
+					'blocked_extensions' => 'exe, .SVG',
+					'max_upload_folder_mb' => '0',
+					'upload_folder_unit' => 'MB',
+					'system_max_file_size_mb' => '10240',
+					'system_max_unit' => 'MB',
+					'auto_delete_days' => '0',
+					'thumbnail_max_px' => (string) Database::getSetting('thumbnail_max_px', 400),
+				]),
+				['Content-Type: application/x-www-form-urlencoded']
+			);
+			$this->assertSame(200, $saved['status']);
+			Database::invalidateSettingsCache();
+			$blocked = explode(',', (string) Database::getSetting('blocked_extensions', ''));
+			foreach (array_merge(['exe', 'svg'], Database::ACTIVE_DOCUMENT_EXTENSIONS) as $extension) {
+				$this->assertContains($extension, $blocked);
+			}
+		} finally {
+			foreach ($original as $key => $value) {
+				Database::setSetting($key, $value);
+			}
+			self::serverSettingsChanged();
+		}
+	}
+
+	/** The panel gate sends the administrator back to the view they asked for. */
+	public function testThePanelGateReturnsToTheRequestedView(): void
+	{
+		Database::setSetting('login_remember_enabled', '1');
+		self::serverSettingsChanged();
+		$this->assertTrue(self::signIn('httpadmin', 'HttpAdmin1!', 3600)['success'] ?? false);
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+		$gate = self::rawRequest('GET', '/panel.php?tab=users');
+		$this->assertStringContainsString('value="panel_reauth"', $gate['body']);
+		self::refreshCsrf();
+		$back = self::rawRequest(
+			'POST',
+			'/panel.php?tab=users',
+			http_build_query(['action' => 'panel_reauth', '_csrf' => self::$csrf, 'password' => 'HttpAdmin1!']),
+			['Content-Type: application/x-www-form-urlencoded']
+		);
+		$this->assertSame(200, $back['status']);
+		$this->assertStringContainsString('id="usersBody"', $back['body']);
+
+		// And a GET can no longer sign anyone out: logging out is a CSRF-protected POST.
+		$stillIn = self::rawRequest('GET', '/panel.php?logout=1&tab=users');
+		$this->assertStringContainsString('id="usersBody"', $stillIn['body']);
+	}
+
+	/** Key-authenticated API calls open no browser session. */
+	public function testTheKeyAuthenticatedApiSetsNoSessionCookie(): void
+	{
+		self::$cookies = [];
+		$res = self::rawRequest('GET', '/api/v1/whoami', null, ['Authorization: Bearer ' . self::$apiKeyTwo]);
+		$this->assertContains($res['status'], [200, 401]);
+		$this->assertSame([], preg_grep('/^Set-Cookie:/i', $res['headers']));
+	}
 }

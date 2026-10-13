@@ -110,12 +110,22 @@ final class RememberTokenTest extends RepoTestCase
 
 		[, $rotated] = RememberTokenRepository::consume($laptop, '203.0.113.9', 'Laptop/1.0');
 		$this->assertNotSame('', $rotated);
+		$versionBefore = (int) Database::getUserById($this->userId)['session_version'];
 
-		// The stolen copy still carries the previous secret.
+		// The stolen copy still carries the previous secret, presented once the one-minute
+		// grace for a browser racing itself is over.
+		Database::getInstance()->exec(
+			"UPDATE `" . Database::table('remember_tokens') . "` SET `last_used_at` = " . (time() - 120)
+		);
 		[$userId, $reissued] = RememberTokenRepository::consume($laptop, '198.51.100.7', 'Thief/1.0');
 		$this->assertSame(0, $userId, 'a replayed cookie authenticates nobody');
 		$this->assertSame('', $reissued);
 		$this->assertSame([], $this->rows(), 'and neither party keeps a token');
+		$this->assertSame(
+			$versionBefore + 1,
+			(int) Database::getUserById($this->userId)['session_version'],
+			'nor a session: whichever browser restored one with the cookie is signed out too'
+		);
 
 		[$phoneUser] = RememberTokenRepository::consume($phone, '203.0.113.10', 'Phone/1.0');
 		$this->assertSame(0, $phoneUser, 'the whole family goes, not just the copied device');
@@ -125,6 +135,40 @@ final class RememberTokenTest extends RepoTestCase
 			 WHERE `action` = 'remember_token_reuse'"
 		)->fetchColumn();
 		$this->assertSame(1, (int) $audit, 'a theft leaves a trace');
+	}
+
+	/**
+	 * A browser restoring several tabs at once sends the same cookie several times before the
+	 * first answer arrives. That is not a theft and must not sign every device out.
+	 */
+	public function testParallelRequestsFromOneBrowserShareTheRotation(): void
+	{
+		$cookie = RememberTokenRepository::issue($this->userId, 86400, '203.0.113.9', 'Tabs/1.0');
+		$versionBefore = (int) Database::getUserById($this->userId)['session_version'];
+		$reuseRows = static fn(): int => (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('audit_log') . "` WHERE `action` = 'remember_token_reuse'"
+		)->fetchColumn();
+		$reuseBefore = $reuseRows();
+
+		[$first, $rotated] = RememberTokenRepository::consume($cookie, '203.0.113.9', 'Tabs/1.0');
+		[$second, $sameRotation] = RememberTokenRepository::consume($cookie, '203.0.113.9', 'Tabs/1.0');
+
+		$this->assertSame($this->userId, $first);
+		$this->assertSame($this->userId, $second, 'the racing tab is let in');
+		$this->assertSame($rotated, $sameRotation, 'and handed the secret the first tab got');
+		$this->assertCount(1, $this->rows());
+		$this->assertSame($versionBefore, (int) Database::getUserById($this->userId)['session_version']);
+		$this->assertSame($reuseBefore, $reuseRows(), 'no theft is reported');
+
+		// The rotation chain continues normally from there.
+		[$third, $next] = RememberTokenRepository::consume($sameRotation, '203.0.113.9', 'Tabs/1.0');
+		$this->assertSame($this->userId, $third);
+		$this->assertNotSame($rotated, $next);
+
+		// Two steps behind is not a race any more.
+		[$stale] = RememberTokenRepository::consume($cookie, '203.0.113.9', 'Tabs/1.0');
+		$this->assertSame(0, $stale);
+		$this->assertSame([], $this->rows());
 	}
 
 	public function testAnExpiredTokenIsRefusedAndRemoved(): void
@@ -323,7 +367,7 @@ final class RememberTokenTest extends RepoTestCase
 
 		// Exactly the state SessionAuth leaves behind after restoring from a cookie: signed in,
 		// with no record of a credential check.
-		$_SESSION = ['user_id' => 1, 'restored_from_cookie_at' => time()];
+		$_SESSION = ['user_id' => 1];
 
 		$this->assertFalse(panelAuthorizationValid($admin));
 		$this->assertFalse(hasRecentAuthentication(), 'nor may it satisfy a destructive action');

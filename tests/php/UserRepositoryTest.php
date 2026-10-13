@@ -5,6 +5,8 @@
  * Registration runs in the default 'auto' activation mode (no settings row → account active,
  * no email sent), so these stay DB-only.
  */
+require_once PROJECT_ROOT . '/src/includes/Totp.php';
+
 final class UserRepositoryTest extends RepoTestCase
 {
 	protected function setUp(): void
@@ -257,6 +259,106 @@ final class UserRepositoryTest extends RepoTestCase
 
 		$this->assertTrue(Database::setTotpEnabled($uid, false));
 		$this->assertSame(0, Database::countRecoveryCodes($uid));
+	}
+
+	/**
+	 * 2FA fails closed: an account with 2FA on whose secret cannot be read (key changed, data
+	 * damaged) is reported as "enabled, unavailable" — never as "disabled", which used to let
+	 * it sign in with the password alone.
+	 */
+	public function testUnreadableTotpSecretKeepsTwoFactorEnabled(): void
+	{
+		$this->register();
+		$uid = (int) Database::getUserByEmailOrUsername('alice')['id'];
+		$this->assertTrue(Database::setTotpSecret($uid, 'JBSWY3DPEHPK3PXP'));
+		$this->assertTrue(Database::setTotpEnabled($uid, true));
+
+		// Ciphertext that no key opens: what a changed APP_SECRET_KEY looks like.
+		Database::getInstance()->prepare(
+			"UPDATE `" . Database::table('users') . "` SET `totp_secret` = ? WHERE `id` = ?"
+		)->execute(['enc:v1:' . base64_encode(random_bytes(48)), $uid]);
+
+		$state = Database::getTotpState($uid);
+		$this->assertTrue($state['enabled']);
+		$this->assertTrue($state['unavailable']);
+		$this->assertNull($state['secret']);
+
+		// A pending (not yet enabled) setup with an unreadable secret just starts over.
+		Database::getInstance()->prepare(
+			"UPDATE `" . Database::table('users') . "` SET `totp_enabled` = 0 WHERE `id` = ?"
+		)->execute([$uid]);
+		$pending = Database::getTotpState($uid);
+		$this->assertFalse($pending['enabled']);
+		$this->assertNull($pending['secret']);
+	}
+
+	/** An accepted authenticator code cannot be used again within its drift window. */
+	public function testTotpTimeStepIsAcceptedOnlyOnce(): void
+	{
+		$this->register();
+		$uid = (int) Database::getUserByEmailOrUsername('alice')['id'];
+		$secret = 'JBSWY3DPEHPK3PXP';
+		$now = 1_700_000_000;
+		$code = Totp::codeAt($secret, $now);
+		$step = Totp::match($secret, $code, 1, $now);
+		$this->assertSame(intdiv($now, Totp::PERIOD), $step);
+		$this->assertSame($step, Totp::match($secret, $code, 1, $now + Totp::PERIOD), 'drift still matches');
+		$this->assertNull(Totp::match($secret, '12345', 1, $now), 'five digits is not a code');
+
+		$this->assertTrue(UserRepository::claimTotpCounter($uid, $step));
+		$this->assertFalse(UserRepository::claimTotpCounter($uid, $step), 'replay of the same step');
+		$this->assertFalse(UserRepository::claimTotpCounter($uid, $step - 1), 'or an older one');
+		$this->assertTrue(UserRepository::claimTotpCounter($uid, $step + 1));
+		$this->assertTrue(RecoveryCodeRepository::looksLikeCode('7kfd-q2wm'));
+		$this->assertFalse(RecoveryCodeRepository::looksLikeCode('123456'));
+	}
+
+	/**
+	 * Setting an administrator's password is taking that administrator over. Only the install
+	 * owner may do it to another admin, nobody may do it to the owner, and anyone setting a
+	 * password for someone is held to the full password policy.
+	 */
+	public function testOnlyTheOwnerMaySetAnotherAdministratorsPassword(): void
+	{
+		$this->assertTrue(Database::createAdmin('owner', 'OwnerPass1!', 'owner@example.pl')['success']);
+		$ownerId = (int) Database::getUserByEmailOrUsername('owner')['id'];
+		foreach (['second', 'third', 'plain'] as $name) {
+			$this->register($name, $name . '@example.pl');
+		}
+		$second = (int) Database::getUserByEmailOrUsername('second')['id'];
+		$third = (int) Database::getUserByEmailOrUsername('third')['id'];
+		$plain = (int) Database::getUserByEmailOrUsername('plain')['id'];
+		$this->assertTrue(Database::adminUpdateUser($second, ['role' => 'admin'], $ownerId)['success']);
+		$this->assertTrue(Database::adminUpdateUser($third, ['role' => 'admin'], $ownerId)['success']);
+
+		$takeover = Database::adminUpdateUser($ownerId, ['password' => 'Taken0ver!'], $second);
+		$this->assertFalse($takeover['success']);
+		$this->assertSame('api.admin_password_owner_only', $takeover['error']);
+		$this->assertTrue(Database::verifyUserPassword($ownerId, 'OwnerPass1!'), 'the owner keeps the password');
+
+		$this->assertFalse(Database::adminUpdateUser($third, ['password' => 'Taken0ver!'], $second)['success']);
+		$this->assertTrue(Database::adminUpdateUser($third, ['password' => 'ByOwner1!'], $ownerId)['success']);
+		$this->assertTrue(Database::adminUpdateUser($plain, ['password' => 'ByAdmin1!'], $second)['success']);
+		$this->assertTrue(Database::adminUpdateUser($second, ['password' => 'MyOwn123!'], $second)['success']);
+
+		$weak = Database::adminUpdateUser($plain, ['password' => 'nouppercase1!'], $ownerId);
+		$this->assertFalse($weak['success'], 'the full policy applies to a password chosen for someone');
+		$this->assertSame('api.password_uppercase', $weak['error']);
+	}
+
+	public function testIdForUsernameAndBannedAddressCannotBeTakenByAnEmailChange(): void
+	{
+		$this->register();
+		$uid = (int) Database::getUserByEmailOrUsername('alice')['id'];
+		$this->assertSame($uid, UserRepository::idForUsername('alice'));
+		$this->assertSame(0, UserRepository::idForUsername('nobody-here'));
+
+		$this->truncate('blacklists');
+		$this->assertTrue(Database::addToBlacklist('email', 'banned@example.pl', null, 'test'));
+		$change = Database::requestEmailChange($uid, 'banned@example.pl');
+		$this->assertFalse($change['success']);
+		$this->assertSame('api.email_blocked', $change['error']);
+		$this->truncate('blacklists');
 	}
 
 	public function testDeleteUser(): void

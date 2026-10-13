@@ -81,17 +81,29 @@ class Totp
 	 */
 	public static function verify(string $secretB32, string $code, int $window = 1, ?int $time = null): bool
 	{
+		return self::match($secretB32, $code, $window, $time) !== null;
+	}
+
+	/**
+	 * Like verify(), but return the time step the code belongs to (null when it matches none).
+	 *
+	 * The step is what makes a code single-use: the caller records the last accepted step per
+	 * account and refuses a code from that step or an earlier one, so a code read over a
+	 * shoulder or phished cannot be replayed during the ±1-step drift window.
+	 */
+	public static function match(string $secretB32, string $code, int $window = 1, ?int $time = null): ?int
+	{
 		$code = preg_replace('/\D/', '', (string) $code);
 		if (strlen($code) !== self::DIGITS) {
-			return false;
+			return null;
 		}
 		$counter = intdiv($time ?? time(), self::PERIOD);
 		for ($i = -$window; $i <= $window; $i++) {
 			if (hash_equals(self::hotp($secretB32, $counter + $i), $code)) {
-				return true;
+				return $counter + $i;
 			}
 		}
-		return false;
+		return null;
 	}
 
 	/** otpauth:// URI that authenticator apps read from the QR code. */

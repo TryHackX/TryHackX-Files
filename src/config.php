@@ -17,6 +17,7 @@ $configLocalPath = PROJECT_ROOT . '/config/config.local.php';
 $hasLocalConfig = file_exists($configLocalPath);
 
 require_once APP_ROOT . '/includes/CanonicalUrl.php';
+require_once APP_ROOT . '/includes/ClientIp.php';
 require_once APP_ROOT . '/includes/ContentSecurityPolicy.php';
 
 // --- HTTP test harness (runda 10) ---
@@ -81,7 +82,6 @@ unset($canonicalSource);
 
 define('APP_URL', $baseUrl);
 unset($baseUrl);
-define('INSTALL_MODE', false);
 
 // Trusted-Host gate: reject a foreign scheme, hostname or port before opening the session,
 // connecting to the database or dispatching a route. X-Forwarded-Proto is considered only by
@@ -132,10 +132,20 @@ if ($fhTestMode) {
 	unset($testSessionDir);
 }
 
-startSecureSession();
+// Machine-to-machine entry points (the key-authenticated REST API, ads.txt, payment webhooks,
+// the health probe) define FILEHOST_STATELESS_REQUEST before loading this file. They never
+// read a browser session, so none is opened: no session file per call, no Set-Cookie on a
+// response a crawler or provider will never send back, and no session lock to wait on.
+if (defined('FILEHOST_STATELESS_REQUEST') && FILEHOST_STATELESS_REQUEST === true) {
+	$_SESSION = [];
+} else {
+	startSecureSession();
+}
 
 require_once APP_ROOT . '/includes/Database.php';
 require_once APP_ROOT . '/includes/SessionAuth.php';
+
+emitStrictTransportSecurity();
 
 $db = Database::getInstance();
 if ($db) {
@@ -215,6 +225,22 @@ function emitContentSecurityPolicy(array $settings): void
 	header('Content-Security-Policy: ' . buildContentSecurityPolicy($settings));
 }
 
+/**
+ * HSTS for documents, and only on a request that really arrived over HTTPS (directly, or from
+ * a trusted proxy that says so). Sent on plain HTTP it would be ignored at best; static files
+ * get the same header from public/.htaccess under the same condition.
+ *
+ * No includeSubDomains: this host's parent domain carries other sites this application has no
+ * say over.
+ */
+function emitStrictTransportSecurity(): void
+{
+	if (PHP_SAPI === 'cli' || headers_sent() || !isRequestSecure()) {
+		return;
+	}
+	header('Strict-Transport-Security: max-age=31536000');
+}
+
 function formatSize($bytes): string
 {
 	$bytes = (int) ($bytes ?? 0);
@@ -228,36 +254,27 @@ function formatSize($bytes): string
 /**
  * Resolve the real client IP.
  *
- * Proxy headers (X-Forwarded-For, CF-Connecting-IP, X-Real-IP) are trusted ONLY when the
- * direct peer (REMOTE_ADDR) is a configured reverse proxy. Define TRUSTED_PROXIES in
- * config.local.php as a comma-separated list of proxy IPs to enable them. Without it, only
- * REMOTE_ADDR is used, which prevents clients from spoofing their IP to bypass bans/limits.
+ * Proxy headers are considered ONLY when the direct peer (REMOTE_ADDR) is a configured
+ * reverse proxy: define TRUSTED_PROXIES in config.local.php as a comma-separated list of proxy
+ * IPs. X-Forwarded-For is then read from the right, skipping those proxies. A proxy that sets
+ * CF-Connecting-IP or X-Real-IP instead can be named in TRUSTED_PROXY_HEADER. Without
+ * TRUSTED_PROXIES only REMOTE_ADDR is used. See filehostResolveClientIp().
  */
 function getClientIP(): string
 {
-	$remote = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-
-	$trusted = [];
-	if (defined('TRUSTED_PROXIES') && TRUSTED_PROXIES !== '') {
-		$trusted = array_map('trim', explode(',', TRUSTED_PROXIES));
-	}
-
-	if ($trusted && in_array($remote, $trusted, true)) {
-		foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR'] as $h) {
-			if (!empty($_SERVER[$h])) {
-				$ip = trim(explode(',', $_SERVER[$h])[0]);
-				if (filter_var($ip, FILTER_VALIDATE_IP)) {
-					return $ip;
-				}
-			}
-		}
-	}
-
-	return $remote;
+	$trusted = defined('TRUSTED_PROXIES') && TRUSTED_PROXIES !== ''
+		? explode(',', (string) TRUSTED_PROXIES)
+		: [];
+	$header = defined('TRUSTED_PROXY_HEADER') ? (string) TRUSTED_PROXY_HEADER : '';
+	return filehostResolveClientIp($_SERVER, $trusted, $header);
 }
 
 /**
  * Start the session with hardened cookie flags. Safe to call multiple times.
+ *
+ * Strict mode makes PHP refuse a session id it did not issue itself, so a planted cookie
+ * cannot pre-select the id a visitor will later sign in under; only-cookies keeps ids out of
+ * URLs.
  */
 function startSecureSession(): void
 {
@@ -265,6 +282,9 @@ function startSecureSession(): void
 		return;
 	}
 
+	ini_set('session.use_strict_mode', '1');
+	ini_set('session.use_only_cookies', '1');
+	ini_set('session.use_trans_sid', '0');
 	session_set_cookie_params([
 		'lifetime' => 0,
 		'path' => '/',
@@ -311,7 +331,10 @@ function csrfToken(): string
 function csrfValidate(): bool
 {
 	$token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $_POST['_csrf'] ?? '';
-	if (empty($token) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $token)) {
+	// `_csrf[]=…` arrives as an array; it is simply not a token (hash_equals would throw).
+	if (!is_string($token) || $token === ''
+		|| !is_string($_SESSION['csrf_token'] ?? null) || $_SESSION['csrf_token'] === ''
+		|| !hash_equals($_SESSION['csrf_token'], $token)) {
 		return false;
 	}
 
@@ -346,6 +369,12 @@ function getCurrentUser(): ?array
 
 // Validate and synchronize a logged-in session before any public entry point can trust
 // `$_SESSION['is_admin']`, `user_role` or merely the presence of `user_id`.
-if (isset($_SESSION['user_id'])) {
+//
+// The same call is what turns a "stay signed in" cookie back into a session, so it has to run
+// whenever such a cookie is presented as well — not only once something happens to ask for the
+// current user. Before, only panel.php asked: the home, download, collection and premium pages
+// and every API call treated a remembered visitor as a guest (their uploads included).
+if (!defined('FILEHOST_STATELESS_REQUEST')
+	&& (isset($_SESSION['user_id']) || RememberTokenRepository::presentedCookie() !== '')) {
 	getCurrentUser();
 }

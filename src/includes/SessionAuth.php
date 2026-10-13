@@ -10,6 +10,28 @@
 final class SessionAuth
 {
 	private const VERSION_KEY = 'auth_version';
+
+	/**
+	 * Every session value that says who the browser is or what it has proved. `panel_auth_at`
+	 * belongs here too: a panel window opened by one sign-in must not survive into the next
+	 * identity this browser takes on.
+	 */
+	private const IDENTITY_KEYS = [
+		'user_id',
+		'user_name',
+		'user_language',
+		'user_role',
+		'is_admin',
+		'is_moderator',
+		self::VERSION_KEY,
+		'pending_2fa',
+		'pending_2fa_setup',
+		'recent_auth_at',
+		'panel_auth_at',
+		'pending_activation_user_id',
+		'preview_grants',
+	];
+
 	private static bool $resolved = false;
 	private static bool $restoredFromCookie = false;
 	private static ?array $cachedUser = null;
@@ -29,20 +51,7 @@ final class SessionAuth
 			Permissions::resetCurrentUserCache();
 		}
 
-		foreach ([
-			'user_id',
-			'user_name',
-			'user_language',
-			'user_role',
-			'is_admin',
-			'is_moderator',
-			self::VERSION_KEY,
-			'pending_2fa',
-			'pending_2fa_setup',
-			'recent_auth_at',
-			'pending_activation_user_id',
-			'preview_grants',
-		] as $key) {
+		foreach (self::IDENTITY_KEYS as $key) {
 			unset($_SESSION[$key]);
 		}
 
@@ -104,8 +113,7 @@ final class SessionAuth
 
 		$pdo = Database::getInstance();
 		if (!$pdo) {
-			self::invalidate();
-			return null;
+			return self::unverifiable();
 		}
 
 		try {
@@ -114,8 +122,7 @@ final class SessionAuth
 			$stmt->execute([(int) $userId]);
 			$user = $stmt->fetch(PDO::FETCH_ASSOC);
 		} catch (Throwable $e) {
-			self::invalidate();
-			return null;
+			return self::unverifiable();
 		}
 
 		if (!$user || (int) ($user['is_active'] ?? 0) !== 1) {
@@ -153,6 +160,33 @@ final class SessionAuth
 	}
 
 	/**
+	 * The database could not answer, so this request cannot be authenticated — but nothing is
+	 * known to be wrong with the session either.
+	 *
+	 * Failing closed used to mean tearing the session down and deleting the device cookie, so a
+	 * MariaDB restart signed out everyone who happened to load a page during it, "stay signed in"
+	 * included. Now only this request is treated as anonymous: the stored session is left
+	 * untouched (the write is abandoned) and the identity keys are dropped from memory, so
+	 * nothing later in the request can act on a cached administrator flag.
+	 */
+	private static function unverifiable(): ?array
+	{
+		self::$resolved = true;
+		self::$cachedUser = null;
+		self::$restoredFromCookie = false;
+		if (class_exists('Permissions', false)) {
+			Permissions::resetCurrentUserCache();
+		}
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			session_abort();
+		}
+		foreach (self::IDENTITY_KEYS as $key) {
+			unset($_SESSION[$key]);
+		}
+		return null;
+	}
+
+	/**
 	 * Rebuild a session from a persistent sign-in cookie, if one was presented and holds up.
 	 *
 	 * The user row is not trusted from here — the caller re-reads it from the users table and
@@ -177,6 +211,11 @@ final class SessionAuth
 			function_exists('getClientIP') ? getClientIP() : '',
 			(string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
 		);
+		if ($userId === RememberTokenRepository::UNAVAILABLE) {
+			// The database did not answer. The cookie may be perfectly good; keep it for the
+			// next request instead of signing the device out over an outage.
+			return null;
+		}
 		if ($userId < 1) {
 			RememberTokenRepository::sendCookie('', 0);
 			return null;
@@ -191,7 +230,6 @@ final class SessionAuth
 		// window the user actually asked for.
 		RememberTokenRepository::sendCookie($rotated, max(60, $expiresAt - time()));
 		$_SESSION['user_id'] = $userId;
-		$_SESSION['restored_from_cookie_at'] = time();
 		self::$restoredFromCookie = true;
 		return $userId;
 	}

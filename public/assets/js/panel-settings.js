@@ -245,11 +245,11 @@
 	function loadUserStats() {
 		loadRememberDevices();
 		if (!document.getElementById('uStatFiles')) return;
-		FHApi.get('get_user_stats').then(data => {
-			if (data.success) {
-				document.getElementById('uStatFiles').textContent = data.stats.files;
-				document.getElementById('uStatStorage').textContent = formatSize(data.stats.storage);
-				document.getElementById('uStatDownloads').textContent = data.stats.downloads;
+		FHApi.get('user_stats').then(data => {
+			if (data.success && data.stats) {
+				document.getElementById('uStatFiles').textContent = data.stats.files_count;
+				document.getElementById('uStatStorage').textContent = formatSize(data.stats.total_size);
+				document.getElementById('uStatDownloads').textContent = data.stats.total_downloads;
 			}
 		});
 	}

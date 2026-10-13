@@ -134,6 +134,59 @@ final class ApiRoutePolicyTest extends RepoTestCase
 		$this->assertFalse(ApiRoutePolicy::reserveIdempotencyKey($route));
 	}
 
+	/**
+	 * Actions that hand out privileges, take accounts over or rewire payments and the page
+	 * policy need a password typed in the last few minutes — enforced by the route table, so a
+	 * session restored from a device cookie cannot reach them through the API either.
+	 */
+	public function testPrivilegeAndPaymentConfigurationRoutesRequireRecentAuthentication(): void
+	{
+		$sensitive = [
+			'admin_create_user',
+			'admin_update_user',
+			'admin_group_save',
+			'admin_set_user_group',
+			'admin_plan_save',
+			'admin_plan_grant',
+			'admin_premium_token',
+			'admin_payment_plugin_save',
+			'admin_ads_settings',
+			'admin_notification_broadcast',
+		];
+		foreach ($this->routes as $action => $route) {
+			$this->assertSame(
+				in_array($action, $sensitive, true),
+				!empty($route['recent_auth']),
+				$action
+			);
+		}
+		foreach ($sensitive as $action) {
+			$this->assertSame(['POST'], $this->routes[$action]['methods'], $action);
+			$this->assertTrue($this->routes[$action]['auth'], $action);
+			$this->assertTrue($this->routes[$action]['csrf'], $action);
+		}
+		$this->assertTrue($this->routes['user_reauth']['csrf']);
+		$this->assertTrue($this->routes['user_reauth']['auth']);
+		$this->assertSame('auth', $this->routes['user_reauth']['rate_limit']);
+	}
+
+	public function testRecentAuthenticationOnlyFitsASignedInProtectedWrite(): void
+	{
+		$this->expectException(LogicException::class);
+		ApiRoutePolicy::route([AuthController::class, 'handleConfig'], ['POST'], true, false, null, 'write', false, null, true);
+	}
+
+	public function testReadOnlyChecksNoLongerSpendTheSignInBudget(): void
+	{
+		$this->assertSame('lookup', $this->routes['check_username']['rate_limit']);
+		$this->assertSame('lookup', $this->routes['check_email']['rate_limit']);
+		$this->assertSame('read', $this->routes['user_2fa_status']['rate_limit']);
+		$this->assertSame('read', $this->routes['user_remember_devices']['rate_limit']);
+		foreach (['user_check', 'stats', 'get_user_stats'] as $removed) {
+			$this->assertArrayNotHasKey($removed, $this->routes, $removed . ' had no caller and is gone');
+		}
+	}
+
 	public function testDestructiveActionsRequireFreshAuthentication(): void
 	{
 		$previous = $_SESSION['recent_auth_at'] ?? null;

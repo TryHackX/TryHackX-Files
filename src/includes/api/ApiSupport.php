@@ -244,9 +244,9 @@ function webhookAllowedEvents(): array
 }
 
 /**
- * Basic SSRF guard for a webhook target. Requires http/https and blocks link-local /
- * cloud-metadata addresses (169.254.0.0/16). Loopback/private are allowed on purpose —
- * self-hosted setups often deliver to LAN services — but that's a deployment trust choice.
+ * SSRF guard for a webhook target address: only public unicast addresses pass. Private,
+ * loopback, link-local/cloud-metadata (169.254.0.0/16), shared CGNAT (100.64.0.0/10),
+ * multicast/reserved and IPv6 multicast are all refused.
  */
 function webhookIpIsPublic(string $ip): bool
 {

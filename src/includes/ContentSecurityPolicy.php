@@ -15,9 +15,10 @@
 
 function buildContentSecurityPolicy(array $settings): string
 {
-	$strictScripts = defined('FILEHOST_CSP_STRICT_SCRIPTS')
-		&& FILEHOST_CSP_STRICT_SCRIPTS === true;
-	$script = "'self'" . ($strictScripts ? '' : " 'unsafe-inline'");
+	// Scripts come from files only, on every document: no inline <script> blocks and no on*=
+	// attributes anywhere (script-src-attr 'none'). Pages used to opt in one at a time; every
+	// page now complies, so the permissive branch and its switch are gone.
+	$script = "'self'";
 	// blob: is same-origin object URLs only — the panel's banner cropper previews the
 	// picked file through URL.createObjectURL, which img-src would otherwise block.
 	$img = "'self' data: blob:";
@@ -64,7 +65,7 @@ function buildContentSecurityPolicy(array $settings): string
 	}
 
 	return "default-src 'self'; script-src {$script}; "
-		. ($strictScripts ? "script-src-attr 'none'; " : '')
+		. "script-src-attr 'none'; "
 		. "style-src 'self' 'unsafe-inline'; img-src {$img}; connect-src {$connect}; "
 		. "font-src 'self'; frame-src {$frame}; object-src 'none'; base-uri 'self'; "
 		. "form-action 'self'; frame-ancestors 'self'";
