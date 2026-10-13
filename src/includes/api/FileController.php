@@ -655,22 +655,35 @@ final class FileController
 		$response = curl_exec($ch);
 		$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
-		if ($httpCode === 200 && $response) {
-			$pythonHealth = json_decode($response, true);
+		if ($httpCode === 200 && is_string($response) && $response !== '') {
+			$decoded = json_decode($response, true);
+			$pythonHealth = is_array($decoded) ? $decoded : null;
 		}
 
-		$dbConnected = Database::getInstance() !== null;
-
 		header('Content-Type: application/json');
-		echo json_encode([
+		echo json_encode(self::publicHealthPayload($pythonHealth, Database::getInstance() !== null));
+	}
+
+	/**
+	 * What the public health check may say: up or down, and nothing an attacker can use.
+	 *
+	 * The sidecar's own /health is loopback-only and was relayed verbatim, which published the
+	 * absolute uploads path, the config-file state and the exact PHP version to anyone.
+	 *
+	 * @param array<string, mixed>|null $python Decoded sidecar /health body, null when it is down.
+	 * @return array{success: true, php: array{database_connected: bool}, python: array{status: string, database_connected: bool}|null, python_running: bool}
+	 */
+	public static function publicHealthPayload(?array $python, bool $dbConnected): array
+	{
+		return [
 			'success' => true,
-			'php' => [
-				'version' => phpversion(),
-				'database_connected' => $dbConnected,
+			'php' => ['database_connected' => $dbConnected],
+			'python' => $python === null ? null : [
+				'status' => is_string($python['status'] ?? null) ? $python['status'] : 'unknown',
+				'database_connected' => !empty($python['database_connected']),
 			],
-			'python' => $pythonHealth,
-			'python_running' => $pythonHealth !== null,
-		]);
+			'python_running' => $python !== null,
+		];
 	}
 
 	public static function handleVerifyCaptcha()

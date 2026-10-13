@@ -53,7 +53,9 @@ $routes = [
 	'list' => $read([FileController::class, 'handleList'], true, 'files.view_all'),
 	'file_facets' => $read([FileController::class, 'handleFileFacets'], true, 'files.advanced_filters'),
 	'stats' => $read([FileController::class, 'handleStats']),
-	'health' => $read([FileController::class, 'handleHealth'], false, null, null),
+	// Public and polled by monitors, so it shares the ordinary read budget: every call makes
+	// the upload server run its readiness probe, which must not be free to repeat unthrottled.
+	'health' => $read([FileController::class, 'handleHealth']),
 	'verify_captcha' => $write([FileController::class, 'handleVerifyCaptcha'], false, null, 'auth'),
 	'verify_token' => $read([FileController::class, 'handleVerifyToken']),
 	'upload_status' => $read([FileController::class, 'handleUploadStatus']),

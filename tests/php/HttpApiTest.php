@@ -163,10 +163,14 @@ final class HttpApiTest extends TestCase
 			usleep(150000);
 			$res = self::rawRequest('GET', '/api.php?action=health');
 			if ($res['status'] === 200) {
-				// `action=health` answers {success, php:{version,...}, python, python_running}.
+				// `action=health` answers {success, php:{database_connected}, python, python_running}.
 				// Match on that shape, not on a bare 200, so a stranger's page cannot pass.
 				$decoded = json_decode((string) ($res['body'] ?? ''), true);
-				if (is_array($decoded) && isset($decoded['php']['version'])) {
+				if (is_array($decoded)
+					&& is_array($decoded['php'] ?? null)
+					&& array_key_exists('database_connected', $decoded['php'])
+					&& array_key_exists('python_running', $decoded)
+				) {
 					return;
 				}
 				$last = 'HTTP 200 but the body is not this app\'s health JSON: '
@@ -321,6 +325,18 @@ final class HttpApiTest extends TestCase
 	{
 		$d = self::getJson('/api.php?action=health');
 		$this->assertSame(200, $d['status']);
+	}
+
+	public function testPublicHealthSaysUpOrDownAndNothingElse(): void
+	{
+		$res = self::rawRequest('GET', '/api.php?action=health');
+		$this->assertSame(200, $res['status']);
+		$body = (string) ($res['body'] ?? '');
+		$decoded = json_decode($body, true);
+		$this->assertIsArray($decoded);
+		$this->assertArrayNotHasKey('version', $decoded['php']);
+		$this->assertStringNotContainsString('uploads_dir', $body);
+		$this->assertStringNotContainsString('config_exists', $body);
 	}
 
 	public function testHomePageEnforcesTheInlineScriptFreeCspIsland(): void
