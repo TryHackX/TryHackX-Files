@@ -7,6 +7,27 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.80.1] - 2026-10-14
+
+### Fixed
+
+- Finished downloads are counted again, and download caps hold. Behind Apache's proxy rules the
+  connection to the upload server is not kept alive: once Apache has every byte the response
+  promised, it closes the socket. The upload server cancelled the stream at that moment, and its
+  accounting only marked a transfer complete after one more, final message that a cancelled
+  stream never sends, so nearly every full download was filed as "released". Download counters
+  stayed at zero, `max_downloads` never refused a second download, "delete after the last
+  download" never deleted, and owners got no download notifications or webhooks. One-time links
+  and transfer quotas were not affected. A response with a known length now counts as complete
+  once every promised byte has been handed over; a transfer that ends short, or one an
+  administrator stops, is still released without counting. This had been the case since before
+  2.80.0; the Docker smoke test, which now runs end to end, is what caught it.
+
+### Upgrade notes
+
+- Files that already received more downloads than their cap allowed start refusing further
+  downloads after the update, because the counter starts moving again. No schema change.
+
 ## [2.80.0] - 2026-10-14
 
 ### Security
