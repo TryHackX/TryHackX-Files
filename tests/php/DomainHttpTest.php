@@ -108,7 +108,7 @@ final class DomainHttpTest extends TestCase
 			usleep(150000);
 			$res = self::request('GET', '/api.php?action=health');
 			$decoded = json_decode($res['body'], true);
-			if ($res['status'] === 200 && is_array($decoded) && isset($decoded['php']['version'])) {
+			if ($res['status'] === 200 && is_array($decoded) && is_array($decoded['php'] ?? null) && array_key_exists('database_connected', $decoded['php'])) {
 				return;
 			}
 		} while (microtime(true) < $deadline);
