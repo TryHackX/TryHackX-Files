@@ -31,19 +31,19 @@
 	// Upload/captcha token lives in sessionStorage, not localStorage: it's a
 	// short-lived, per-session credential, so it shouldn't outlive the tab or be
 	// readable across sessions if the page is ever hit by XSS. Migrate + purge any
-	// legacy localStorage copy from older builds.
-	if (localStorage.getItem('uploadToken')) {
-		try {
-			if (!sessionStorage.getItem('uploadToken')) {
-				sessionStorage.setItem('uploadToken', localStorage.getItem('uploadToken'));
-				sessionStorage.setItem('uploadTokenExpiry', localStorage.getItem('uploadTokenExpiry') || '0');
-			}
-		} catch (e) { }
-		localStorage.removeItem('uploadToken');
-		localStorage.removeItem('uploadTokenExpiry');
+	// legacy localStorage copy from older builds. FHStorage (bootstrap.js) never throws, so
+	// blocked site data degrades to an in-memory token instead of killing this whole script.
+	const storage = window.FHStorage;
+	if (storage.local.get('uploadToken')) {
+		if (!storage.session.get('uploadToken')) {
+			storage.session.set('uploadToken', storage.local.get('uploadToken'));
+			storage.session.set('uploadTokenExpiry', storage.local.get('uploadTokenExpiry') || '0');
+		}
+		storage.local.remove('uploadToken');
+		storage.local.remove('uploadTokenExpiry');
 	}
-	let uploadToken = sessionStorage.getItem('uploadToken') || null;
-	let uploadTokenExpiry = parseInt(sessionStorage.getItem('uploadTokenExpiry') || '0');
+	let uploadToken = storage.session.get('uploadToken') || null;
+	let uploadTokenExpiry = parseInt(storage.session.get('uploadTokenExpiry') || '0');
 	let captchaEnabled = false;
 	let captchaSiteKey = '';
 	let captchaTokenLifetimeMs = 120 * 60 * 1000;
@@ -85,7 +85,7 @@
 
 	function renderQrImage(holder, value) {
 		const image = makeNode('img');
-		image.alt = 'QR';
+		image.alt = t('qr.alt');
 		image.width = 240;
 		image.height = 240;
 		image.src = appUrl + '/api/qr?scale=6&data=' + encodeURIComponent(value);
@@ -102,17 +102,6 @@
 		window.FHUi.toast(text);
 	}
 
-	function toggleTheme() {
-		document.body.classList.toggle('light');
-		const isLight = document.body.classList.contains('light');
-		localStorage.setItem('theme', isLight ? 'light' : 'dark');
-		document.cookie = 'theme=' + (isLight ? 'light' : 'dark') + '; path=/; max-age=31536000';
-	}
-
-	if (localStorage.getItem('theme') === 'light' && !document.body.classList.contains('light')) {
-		document.body.classList.add('light');
-	}
-
 	function isTokenValid() {
 		return uploadToken && uploadTokenExpiry > Date.now();
 	}
@@ -120,17 +109,32 @@
 	function persistToken(token) {
 		uploadToken = token;
 		uploadTokenExpiry = Date.now() + captchaTokenLifetimeMs;
-		sessionStorage.setItem('uploadToken', uploadToken);
-		sessionStorage.setItem('uploadTokenExpiry', uploadTokenExpiry.toString());
+		storage.session.set('uploadToken', uploadToken);
+		storage.session.set('uploadTokenExpiry', uploadTokenExpiry.toString());
 	}
 
 	function clearToken() {
 		uploadToken = null;
-		sessionStorage.removeItem('uploadToken');
-		sessionStorage.removeItem('uploadTokenExpiry');
+		storage.session.remove('uploadToken');
+		storage.session.remove('uploadTokenExpiry');
 	}
 
 	/* ---------- captcha / upload session ---------- */
+
+	/**
+	 * Without a captcha the upload token is only a tracking token, handed out on request. It is
+	 * also what ties an upload to the signed-in account, so an upload must never start without one.
+	 * Returns whether a valid token is available afterwards.
+	 */
+	async function ensureTrackingToken() {
+		if (captchaEnabled || isTokenValid()) return Boolean(isTokenValid());
+		try {
+			const tData = await FHApi.post('verify_captcha', {});
+			if (tData && tData.success && tData.token) persistToken(tData.token);
+		} catch (e) { console.error('Auto-token fetch failed', e); }
+		return Boolean(isTokenValid());
+	}
+
 	async function initCaptcha() {
 		try {
 			const data = await FHApi.get('config');
@@ -166,12 +170,7 @@
 				}, 10000);
 			} else {
 				// Captcha disabled: obtain a tracking token automatically.
-				if (!isTokenValid()) {
-					try {
-						const tData = await FHApi.post('verify_captcha', {});
-						if (tData.success && tData.token) persistToken(tData.token);
-					} catch (e) { console.error('Auto-token fetch failed', e); }
-				}
+				await ensureTrackingToken();
 				await updateSessionInfo();
 			}
 		} catch (e) {
@@ -206,6 +205,7 @@
 				persistToken(data.token);
 				document.getElementById('captchaOverlay').classList.remove('show');
 				await updateSessionInfo();
+				waitingForCaptcha.splice(0).forEach(entry => startUpload(entry.id, entry.file));
 			} else {
 				onCaptchaError();
 			}
@@ -244,7 +244,11 @@
 					if (filesRemaining <= 0) showCaptchaRequired();
 				}
 				sessionInfo.replaceChildren(...parts);
-			} else {
+			} else if (data.valid === false) {
+				// Only the server's explicit "this token is not valid" ends the session. A
+				// rate-limit (429) or error body carries no `valid` flag: that is "unknown", and
+				// clearing the token on it threw a working upload session — and its captcha
+				// solve — away mid-batch.
 				showCaptchaRequired();
 			}
 		} catch (e) {
@@ -346,7 +350,7 @@
 				return;
 			}
 			if (file.size > maxFileSize) {
-				addFileItem(id, file.name, file.size, 'error', t('up.too_big'), 'Max ' + formatSize(maxFileSize));
+				addFileItem(id, file.name, file.size, 'error', t('up.too_big'), t('up.max_size', { size: formatSize(maxFileSize) }));
 				return;
 			}
 			if (uploadQueue.size >= maxFiles) {
@@ -371,12 +375,63 @@
 		}
 		buttons.push(makeActionButton(
 			'file-btn remove',
-			t('up.remove'),
+			removeTitle(id),
 			'fa-xmark',
-			() => removeFile(id)
+			event => onRemoveClick(id, event.currentTarget)
 		));
 		actions.replaceChildren(...buttons);
 	}
+
+	/** Does removing this row also delete the file from the server? (only finished uploads) */
+	function deletesServerFile(id) {
+		const entry = uploadQueue.get(id);
+		return Boolean(entry && entry.status === 'success' && entry.serverId && entry.deleteToken);
+	}
+
+	function removeTitle(id) {
+		return deletesServerFile(id) ? t('up.remove_delete') : t('up.remove');
+	}
+
+	/**
+	 * For a finished upload the "×" is a delete: the link may already have been copied or sent.
+	 * The first click arms the button (icon turns into a trash can, tip says so); only a second
+	 * click within a few seconds deletes. Anything else just drops the row.
+	 */
+	function onRemoveClick(id, button) {
+		if (!deletesServerFile(id)) {
+			removeFile(id);
+			return;
+		}
+		if (button.dataset.armed === '1') {
+			removeFile(id);
+			return;
+		}
+		button.dataset.armed = '1';
+		button.title = t('up.remove_confirm');
+		const glyph = button.querySelector('i');
+		if (glyph) glyph.className = 'fa-solid fa-trash';
+		showCopiedTip(button, t('up.remove_confirm'));
+		setTimeout(() => {
+			if (!button.isConnected) return;
+			delete button.dataset.armed;
+			button.title = removeTitle(id);
+			const icon = button.querySelector('i');
+			if (icon) icon.className = 'fa-solid fa-xmark';
+		}, 4000);
+	}
+
+	// Closing the tab or following a link while a transfer is running throws it away without a
+	// word; ask first (browsers show their own generic text).
+	window.addEventListener('beforeunload', event => {
+		for (const entry of uploadQueue.values()) {
+			if (entry.status === 'uploading') {
+				event.preventDefault();
+				event.returnValue = '';
+				return '';
+			}
+		}
+		return undefined;
+	});
 
 	function addFileItem(id, name, size, status, statusMain, statusSub) {
 		const list = document.getElementById('fileList');
@@ -455,14 +510,97 @@
 		uploadFile(id, queueItem.file);
 	}
 
+	/*
+	 * Has an administrator cut one of our transfers from the dashboard?
+	 *
+	 * One shared timer asks about every running upload in turn. It used to be one 750 ms
+	 * interval per file — 80 requests a minute each — so a handful of parallel uploads spent the
+	 * whole per-IP `read` budget (300/min) and the rest of the page started getting 429s. A cut
+	 * transfer is noticed within a few seconds now, which is all that feature needs, and the
+	 * loop backs off when the server says "slow down".
+	 */
+	const STATUS_POLL_MS = 4000;
+	const STATUS_POLL_MAX_MS = 30000;
+	const polledUploads = new Set();
+	let statusPollMs = STATUS_POLL_MS;
+	let statusPollTimer = null;
+
+	function scheduleStatusPoll() {
+		if (statusPollTimer === null) statusPollTimer = setTimeout(runStatusPoll, statusPollMs);
+	}
+
+	function startStatusPolling(entry) {
+		polledUploads.add(entry);
+		scheduleStatusPoll();
+	}
+
+	function stopStatusPolling(entry) {
+		polledUploads.delete(entry);
+	}
+
+	async function runStatusPoll() {
+		statusPollTimer = null;
+		try {
+			for (const entry of Array.from(polledUploads)) {
+				if (entry.status !== 'uploading') {
+					polledUploads.delete(entry);
+					continue;
+				}
+				const status = await FHApi.get('upload_status', { id: entry.clientId });
+				if (status && status.retry_after) {
+					// Rate limited: wait at least as long as the server asks, then ease back.
+					statusPollMs = Math.min(
+						STATUS_POLL_MAX_MS,
+						Math.max(statusPollMs * 2, Number(status.retry_after) * 1000 || 0)
+					);
+					break;
+				}
+				statusPollMs = STATUS_POLL_MS;
+				if (status && status.success && status.status === 'cancelled' && entry.status === 'uploading') {
+					entry.cancelledByAdmin = true;
+					entry.xhr.abort();
+				}
+			}
+		} catch (e) {
+			/* a transient status check must not fail an upload */
+			statusPollMs = Math.min(STATUS_POLL_MAX_MS, statusPollMs * 2);
+		}
+		if (polledUploads.size > 0) scheduleStatusPoll();
+	}
+
+	// Uploads that had to wait for the captcha: resumed when it is solved.
+	const waitingForCaptcha = [];
+
+	/**
+	 * Start (or retry) one upload — but only once the upload session is settled. Files picked
+	 * while the page was still fetching its config / token used to start immediately, carry no
+	 * `X-Upload-Token` and be stored as a guest's even for a signed-in user.
+	 */
 	function uploadFile(id, file) {
+		return sessionReady.then(() => startUpload(id, file));
+	}
+
+	async function startUpload(id, file) {
+		if (!uploadQueue.has(id)) return; // removed while it waited
 		if (captchaEnabled) {
 			if (!isTokenValid() || (filesLimit > 0 && filesUploaded >= filesLimit)) {
+				if (!waitingForCaptcha.some(entry => entry.id === id)) waitingForCaptcha.push({ id, file });
 				showCaptchaRequired();
 				return;
 			}
+		} else if (!isTokenValid() && !(await ensureTrackingToken()) && APP.loggedIn) {
+			// Signed in but no session token: uploading now would silently make it an anonymous
+			// upload (no quota, not in "My files"). Say so and let the user retry.
+			updateFileItem(id, 'error-network', t('up.session_failed'), t('up.click_retry'), 0);
+			const failed = uploadQueue.get(id);
+			if (failed) failed.status = 'error';
+			return;
 		}
+		if (!uploadQueue.has(id)) return;
+		sendUpload(id, file);
+	}
 
+	function sendUpload(id, file) {
 		const xhr = new XMLHttpRequest();
 		const random = new Uint8Array(16);
 		window.crypto.getRandomValues(random);
@@ -472,28 +610,12 @@
 			xhr,
 			status: 'uploading',
 			clientId,
-			cancelledByAdmin: false,
-			statusTimer: null
+			cancelledByAdmin: false
 		};
 		uploadQueue.set(id, queueEntry);
 		updateFileItem(id, 'uploading', t('up.uploading'), '0%', 0);
-		const stopStatusPolling = () => {
-			if (queueEntry.statusTimer) {
-				clearInterval(queueEntry.statusTimer);
-				queueEntry.statusTimer = null;
-			}
-		};
-		const checkAdminCancellation = async () => {
-			if (queueEntry.status !== 'uploading') return;
-			try {
-				const status = await FHApi.get('upload_status', { id: clientId });
-				if (status.success && status.status === 'cancelled') {
-					queueEntry.cancelledByAdmin = true;
-					xhr.abort();
-				}
-			} catch (e) { /* a transient status check must not fail the upload */ }
-		};
-		queueEntry.statusTimer = setInterval(checkAdminCancellation, 750);
+		const stopPolling = () => stopStatusPolling(queueEntry);
+		startStatusPolling(queueEntry);
 
 		// Upload speed + ETA readout.
 		let startTime = Date.now();
@@ -511,7 +633,7 @@
 		};
 
 		xhr.onload = async () => {
-			stopStatusPolling();
+			stopPolling();
 			if (xhr.status >= 200 && xhr.status < 300) {
 				const parts = xhr.responseText.split(':');
 				const fileId = parts[0];
@@ -523,6 +645,8 @@
 					queueItem.deleteToken = deleteToken;
 				}
 				updateFileItem(id, 'success', t('up.done'), t('up.uploaded'), 100);
+				const removeButton = document.getElementById(id)?.querySelector('.remove');
+				if (removeButton && deletesServerFile(id)) removeButton.title = t('up.remove_delete');
 				if (captchaEnabled && uploadToken) {
 					try { await updateSessionInfo(); } catch (e) { }
 				}
@@ -548,7 +672,7 @@
 		};
 
 		xhr.onerror = () => {
-			stopStatusPolling();
+			stopPolling();
 			if (queueEntry.cancelledByAdmin) {
 				updateFileItem(id, 'error', t('up.cancelled_admin'), t('up.cancelled_admin_sub'), 0);
 			} else {
@@ -557,7 +681,7 @@
 			queueEntry.status = 'error';
 		};
 		xhr.onabort = () => {
-			stopStatusPolling();
+			stopPolling();
 			queueEntry.status = 'error';
 			updateFileItem(
 				id,
@@ -723,26 +847,26 @@
 		return e.target && e.target.closest ? e.target.closest('button, a') : null;
 	}
 
+	/** Copy, then say so — and only say "copied" when the clipboard really took it. */
+	async function copyWithTip(target, text, doneLabel) {
+		const ok = await window.FHUtil.copyText(text);
+		if (ok) showCopiedTip(target, doneLabel);
+		else showToast(t('download.copy_failed'));
+	}
+
 	function copy(e, id) {
 		const f = resultFiles.get(id);
-		if (f) {
-			navigator.clipboard.writeText(f.url);
-			showCopiedTip(copyBtnTarget(e), t('common.copied'));
-		}
+		if (f) copyWithTip(copyBtnTarget(e), f.url, t('common.copied'));
 	}
 
 	function copyTok(e, id) {
 		const f = resultFiles.get(id);
-		if (f && f.token) {
-			navigator.clipboard.writeText(f.token);
-			showCopiedTip(copyBtnTarget(e), t('common.copied'));
-		}
+		if (f && f.token) copyWithTip(copyBtnTarget(e), f.token, t('common.copied'));
 	}
 
 	function copyAll(e) {
 		const urls = Array.from(resultFiles.values()).map(f => f.url).join('\n');
-		navigator.clipboard.writeText(urls);
-		showCopiedTip(copyBtnTarget(e), t('up.copied_all'));
+		copyWithTip(copyBtnTarget(e), urls, t('up.copied_all'));
 	}
 
 	/* ---------- C1: create a collection from the just-uploaded files (logged-in only) ---------- */
@@ -803,8 +927,14 @@
 		document.getElementById('collOverlay').classList.remove('show');
 	}
 
-	async function submitCollectionHome(ev) {
+	/** Form submit: one in flight at a time, so a double click cannot create two collections. */
+	function submitCollectionHome(ev) {
 		if (ev) ev.preventDefault();
+		const button = (ev && ev.submitter) || document.querySelector('#collForm button[type="submit"]');
+		return window.FHUi.singleFlight('index-collection-create', createCollectionFromForm, button);
+	}
+
+	async function createCollectionFromForm() {
 		const ids = Array.from(resultFiles.keys());
 		if (ids.length < 2) return;
 
@@ -895,14 +1025,13 @@
 			edit.style.display = 'none';
 		}
 
-		navigator.clipboard.writeText(url).catch(() => { });
+		window.FHUtil.copyText(url);
 		overlay.classList.add('show');
 	}
 
 	function copyQrLink(e) {
 		if (!qrCurrentUrl) return;
-		navigator.clipboard.writeText(qrCurrentUrl).catch(() => { });
-		showCopiedTip(e ? e.currentTarget : null, t('home.toast_copied'));
+		copyWithTip(e ? e.currentTarget : null, qrCurrentUrl, t('home.toast_copied'));
 	}
 
 	/* ---------- QR code (rendered server-side by the Python upload server) ---------- */
@@ -1049,14 +1178,6 @@
 		err.style.display = 'block';
 	}
 
-	async function pwSetRequest(body) {
-		const f = resultFiles.get(pwSetId);
-		if (!f) return null;
-		body.id = f.id;
-		body.token = f.token;
-		return FHApi.post('set_file_password', body);
-	}
-
 	function markPwBtn(id, on) {
 		const btn = document.getElementById('pwbtn-' + id);
 		if (!btn) return;
@@ -1088,8 +1209,13 @@
 		return ok;
 	}
 
-	async function submitPwSet(e) {
+	function submitPwSet(e) {
 		if (e) e.preventDefault();
+		const button = (e && e.submitter) || document.querySelector('#pwSetForm button[type="submit"]');
+		return window.FHUi.singleFlight('index-pw-set', applyPasswordFromForm, button);
+	}
+
+	async function applyPasswordFromForm() {
 		const pw = document.getElementById('pwSetInput').value;
 		const pw2 = document.getElementById('pwSetInput2').value;
 		if (!pw) { pwSetError(t('up.pw_required')); return; }
@@ -1163,9 +1289,6 @@
 		});
 	})();
 
-	function goToMyFiles() { if (typeof currentUser !== 'undefined' && currentUser) window.location.href = 'panel.php?tab=myfiles'; }
-	function goToAdmin() { if (typeof currentUser !== 'undefined' && currentUser && currentUser.is_admin) window.location.href = 'panel.php'; }
-
 	function wireStaticActions() {
 		const click = (id, handler) => {
 			const element = document.getElementById(id);
@@ -1191,11 +1314,10 @@
 
 	/* ---------- init ---------- */
 	wireStaticActions();
-	initCaptcha();
+	// Resolves once the config and (captcha-less) upload token have arrived; uploadFile() waits on it.
+	const sessionReady = initCaptcha();
 	if (typeof updateAuthUI === 'function') updateAuthUI();
 
-	// Cross-script hooks used by auth_scripts.php, the shared header and reCAPTCHA.
-	Object.assign(window, {
-		onCaptchaLoad, updateLimits, toggleTheme, showToast, goToMyFiles, goToAdmin
-	});
+	// Cross-script hook: auth.js re-applies the per-account limits after a sign-in or sign-out.
+	window.updateLimits = updateLimits;
 })();
