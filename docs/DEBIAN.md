@@ -16,15 +16,63 @@ sudo bash scripts/install-debian.sh
 
 The script:
 
-- installs Apache, MariaDB, PHP extensions and Python;
-- installs hash-locked Python dependencies into `venv/`;
+- installs Apache, PHP with the extensions the application uses (`mysql`, `curl`, `mbstring`,
+  `gd`, `xml`), Python 3.11+ and, unless `FILEHOST_INSTALL_DB=0` is set, MariaDB;
+- enables the Apache modules `proxy`, `proxy_http`, `rewrite`, `headers` and `expires` (the
+  long-cache rules in `public/.htaccess` do nothing without the last one);
+- installs hash-locked Python dependencies into `venv/` (it stops early on Python older than 3.11);
 - creates private runtime directories;
 - installs and enables (but does not start before configuration) the upload and mail systemd
-  units;
+  units, hardened as described in [Service sandbox](#service-sandbox);
 - creates `/etc/default/filehost` with the logging switch.
 
 Review the script before running it on an existing server. It does not create a database or
-overwrite `config/config.local.php`.
+overwrite `config/config.local.php`. It is idempotent: running it again re-renders both units
+from `scripts/*.service`, which is how a release that changes the units is applied.
+
+Two switches change what it installs: `FILEHOST_INSTALL_DB=0` skips `mariadb-server` (MySQL or a
+remote database), and `FILEHOST_PHP_SAPI=fpm` installs `php-fpm`, `proxy_fcgi` and `setenvif`
+instead of `libapache2-mod-php`. The FPM pool and the `SetHandler` for the virtual host are then
+configured by hand (see Service account below).
+
+### Service account
+
+Both services run as `www-data` by default, which is also the user of the default PHP-FPM pool
+and of every other site on the machine. On a shared host give the application its own account so
+that another site cannot read `config/config.local.php` (database credentials and
+`APP_SECRET_KEY`), the stored files or `data/`:
+
+```bash
+sudo adduser --system --group --no-create-home filehost
+# a dedicated PHP-FPM pool running as that user, with its own socket for this virtual host
+# (pool.d/filehost.conf: user = filehost, group = filehost, listen = /run/php/filehost.sock,
+#  php_admin_value[open_basedir] limited to /var/www/filehost and the temp directory)
+sudo FILEHOST_SERVICE_USER=filehost FILEHOST_SERVICE_GROUP=filehost \
+    bash scripts/install-debian.sh
+```
+
+`FILEHOST_SERVICE_USER` and `FILEHOST_SERVICE_GROUP` set `User=` and `Group=` of both units and
+the owner of `config/`, `uploads/` and `data/`; Apache itself only needs to reach `public/`.
+Changing the account of an existing installation additionally needs
+`sudo chown -R filehost:filehost uploads data config` before the services are restarted.
+
+### Service sandbox
+
+`filehost-upload.service` runs with `ProtectSystem=strict`: the whole file system is read-only
+for the service except `uploads/` and `data/`, so a compromised process cannot modify the code,
+the virtual environment or `config/`. It also drops every capability, filters system calls to the
+ordinary service set, hides `/home`, `/root` and other users' processes, restricts address
+families and namespaces, and is bounded to 65 536 open files, 512 tasks and 75 % of the machine's
+RAM (an out-of-memory condition kills and restarts only this unit). `systemd-analyze security
+filehost-upload.service` shows the resulting exposure.
+
+If the application directory is below `/home` or `/root`, the installer uses
+`ProtectHome=read-only` instead. When uploads, generated data or the quarantine live outside the
+application directory (`UPLOADS_PATH`, `DATA_PATH`, `FILE_QUARANTINE_PATH` in
+`config/config.local.php`, see [STORAGE.md](STORAGE.md)), the installer writes a drop-in
+`/etc/systemd/system/filehost-upload.service.d/10-storage.conf` that opens exactly those paths for
+writing; re-run it after changing them. Without the drop-in the service would stop with
+"read-only file system" errors.
 
 ## 2. Configure Apache
 
@@ -61,7 +109,24 @@ Only `/var/www/filehost/public` may be served. Never point `DocumentRoot` at the
 For production, configure HTTPS and change the forwarded scheme to `https`. If another reverse
 proxy terminates TLS, add only that proxy to `TRUSTED_PROXIES` and preserve the canonical Host.
 
+With PHP-FPM instead of `libapache2-mod-php` (`FILEHOST_PHP_SAPI=fpm`), route PHP to the pool of
+this site inside the same `VirtualHost`:
+
+```apache
+    <FilesMatch "\.php$">
+        SetHandler "proxy:unix:/run/php/filehost.sock|fcgi://localhost"
+    </FilesMatch>
+```
+
+`php_flag` and `php_value` lines in `.htaccess` files are ignored under FPM, so PHP settings
+belong in the pool (`php_admin_value[...]`) or in `php.ini`. `public/.htaccess` already restricts
+its `Content-Security-Policy` fallback to static files because PHP emits its own.
+
 ## 3. Prepare the database
+
+TryHackX Files needs MySQL 8.0.1+ or MariaDB 10.6+ (Debian 12 and 13 ship MariaDB 10.11 and
+11.8). The e-mail outbox claims rows with `SELECT ... FOR UPDATE SKIP LOCKED`, which older servers
+reject; the installer's connection test refuses them with a message naming the version.
 
 Use a dedicated database account:
 
@@ -150,7 +215,9 @@ sudo journalctl -u filehost-mail-worker --since "10 min ago"
 
 The unit reports liveness to systemd every few seconds (`WatchdogSec=120`). A delivery that
 blocks anyway is killed and restarted instead of stalling the queue, and `systemctl status` shows
-the current queue depth.
+the current queue depth. The worker exits when the database is unreachable or the schema is not
+ready; the unit retries every ten seconds without a start limit, so a database restart or a
+migration never leaves it permanently `failed`.
 
 ### Choosing the worker's sandbox
 

@@ -8,8 +8,11 @@
 [Unit]
 Description=TryHackX Files E-mail Outbox Worker
 After=network.target mysql.service mariadb.service postfix.service
-StartLimitIntervalSec=300
-StartLimitBurst=10
+# The worker exits when the database is unreachable or the schema is mid-migration. A start
+# limit turned a minute of database downtime into a unit that stayed "failed" until someone ran
+# `systemctl reset-failed`, and the queue silently stopped. Keep retrying instead; the journal
+# rate limit below bounds the noise of a long outage.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -19,7 +22,7 @@ WorkingDirectory=__APP_DIR__
 EnvironmentFile=-/etc/default/filehost
 ExecStart=/usr/bin/php __APP_DIR__/scripts/mail-worker.php --loop --limit=25 --sleep=5
 Restart=always
-RestartSec=5
+RestartSec=10
 
 # A blocked transport used to leave the process "active (running)" while it delivered nothing.
 # The worker reports liveness between messages, so a stuck delivery is restarted, not endured.
@@ -30,15 +33,34 @@ WatchdogSec=120
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=200
 
+# Resource limits
+LimitNOFILE=4096
+TasksMax=64
+MemoryMax=512M
+
 # Hardening
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+# "full", not "strict": the relaxed mode of scripts/mail-worker-hardening.sh lets PHP mail() reach
+# the setgid postdrop helper, which writes to /var/spool/postfix/maildrop.
 ProtectSystem=full
+# install-debian.sh switches this to read-only when the application lives under /home or /root.
 ProtectHome=true
 ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
 RestrictSUIDSGID=true
 RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 # AF_UNIX carries the database socket and the watchdog datagrams, AF_NETLINK is what glibc
 # resolves host names with.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK

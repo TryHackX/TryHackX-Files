@@ -1,4 +1,14 @@
 # TryHackX Files upload service template; install-debian.sh replaces the placeholders.
+#
+# Storage kept outside the application directory (UPLOADS_PATH, DATA_PATH or
+# FILE_QUARANTINE_PATH in config/config.local.php) has to be listed for ProtectSystem=strict,
+# otherwise writes fail with "read-only file system". Add a drop-in, for example
+# /etc/systemd/system/filehost-upload.service.d/storage.conf:
+#
+#   [Service]
+#   ReadWritePaths=-/mnt/storage/uploads -/mnt/storage/data
+#
+# (the leading "-" makes systemd ignore a path that does not exist instead of refusing to start).
 [Unit]
 Description=TryHackX Files Python Upload Server
 After=network.target mysql.service mariadb.service
@@ -9,16 +19,56 @@ User=__USER__
 Group=__GROUP__
 WorkingDirectory=__APP_DIR__
 EnvironmentFile=-/etc/default/filehost
+# print() output goes to a pipe, where Python buffers 8 KiB; warnings must reach the journal now.
+Environment=PYTHONUNBUFFERED=1
 ExecStart=__APP_DIR__/venv/bin/python __APP_DIR__/upload_server.py
 Restart=on-failure
 RestartSec=5
 
+# Resource limits. Every transfer holds a client socket plus a file descriptor, the soft default
+# of 1024 is reached at roughly 500 simultaneous downloads. The memory cap is a share of the
+# machine's RAM so it stays correct on any host: past MemoryHigh the unit is throttled, past
+# MemoryMax only this unit is OOM-killed (and restarted) instead of MariaDB or PHP-FPM.
+LimitNOFILE=65536
+TasksMax=512
+MemoryHigh=60%
+MemoryMax=75%
+
 # Hardening
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+# strict = the whole file system is read-only for the service except ReadWritePaths. The code,
+# the virtual environment and config/ cannot be modified by a compromised process.
+ProtectSystem=strict
+# install-debian.sh switches this to read-only when the application lives under /home or /root.
+ProtectHome=true
 ReadWritePaths=__APP_DIR__/uploads __APP_DIR__/data
 UMask=0027
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The service listens on 127.0.0.1:8001 and needs no capability at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+# AF_UNIX: MariaDB socket, journald, asyncio. AF_INET/AF_INET6: listener, TCP database and
+# webhook delivery. AF_NETLINK: glibc name resolution and interface enumeration.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+# The standard "ordinary daemon" system call set (covers Python, Pillow, the bundled ffmpeg and
+# the PHP cleanup child). A call outside it returns EPERM and is reported by the program instead
+# of killing it with SIGSYS. MemoryDenyWriteExecute is deliberately not set: ffmpeg and cffi
+# may map writable+executable memory.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
 
 [Install]
 WantedBy=multi-user.target

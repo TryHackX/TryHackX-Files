@@ -18,14 +18,35 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "[TryHackX Files] Installing Apache, PHP, MariaDB and Python prerequisites..."
+# Optional switches (all default to the behaviour described in docs/DEBIAN.md):
+#   FILEHOST_INSTALL_DB=0     do not install mariadb-server (MySQL or a remote database is used)
+#   FILEHOST_PHP_SAPI=fpm     install php-fpm + proxy_fcgi instead of libapache2-mod-php; the FPM
+#                             pool and the handler for the virtual host are configured by hand
+packages=(apache2 ca-certificates curl
+    php php-cli php-mysql php-curl php-mbstring php-gd php-xml
+    python3 python3-venv)
+modules=(proxy proxy_http rewrite headers expires)
+if [[ "${FILEHOST_INSTALL_DB:-1}" != "0" ]]; then
+    packages+=(mariadb-server)
+fi
+if [[ "${FILEHOST_PHP_SAPI:-mod_php}" == "fpm" ]]; then
+    packages+=(php-fpm)
+    modules+=(proxy_fcgi setenvif)
+else
+    packages+=(libapache2-mod-php)
+fi
+
+echo "[TryHackX Files] Installing Apache, PHP, database and Python prerequisites..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y \
-    apache2 mariadb-server ca-certificates curl \
-    php libapache2-mod-php php-cli php-mysql php-curl php-mbstring php-xml php-intl \
-    python3 python3-venv python3-pip
-a2enmod proxy proxy_http rewrite headers
+apt-get install -y "${packages[@]}"
+a2enmod "${modules[@]}"
+
+# The hash-locked environment is compiled for Python 3.11 and newer.
+if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
+    echo "[TryHackX Files] Python 3.11 or newer is required (found $(python3 -V 2>&1))." >&2
+    exit 1
+fi
 
 echo "[TryHackX Files] Creating the verified Python environment..."
 python3 -m venv "$APP_DIR/venv"
@@ -39,14 +60,55 @@ echo "[TryHackX Files] Installing systemd units..."
 escaped_app_dir="$(printf '%s' "$APP_DIR" | sed 's/[&|\\]/\\&/g')"
 escaped_user="$(printf '%s' "$SERVICE_USER" | sed 's/[&|\\]/\\&/g')"
 escaped_group="$(printf '%s' "$SERVICE_GROUP" | sed 's/[&|\\]/\\&/g')"
-sed -e "s|__APP_DIR__|$escaped_app_dir|g" \
-    -e "s|__USER__|$escaped_user|g" \
-    -e "s|__GROUP__|$escaped_group|g" \
-    scripts/filehost-upload.service > /etc/systemd/system/filehost-upload.service
-sed -e "s|__APP_DIR__|$escaped_app_dir|g" \
-    -e "s|__USER__|$escaped_user|g" \
-    -e "s|__GROUP__|$escaped_group|g" \
-    scripts/filehost-mail-worker.service > /etc/systemd/system/filehost-mail-worker.service
+# ProtectHome=true hides /home and /root from the services, which would make an application
+# directory below them unreachable. Fall back to read-only there (ReadWritePaths still opens
+# uploads/ and data/).
+protect_home="true"
+case "$APP_DIR" in
+    /home/*|/root/*)
+        protect_home="read-only"
+        echo "[TryHackX Files] $APP_DIR is below /home or /root: using ProtectHome=read-only." >&2
+        echo "[TryHackX Files] A directory such as /var/www/filehost is recommended." >&2
+        ;;
+esac
+for unit in filehost-upload filehost-mail-worker; do
+    sed -e "s|__APP_DIR__|$escaped_app_dir|g" \
+        -e "s|__USER__|$escaped_user|g" \
+        -e "s|__GROUP__|$escaped_group|g" \
+        -e "s|^ProtectHome=true\$|ProtectHome=$protect_home|" \
+        "scripts/$unit.service" > "/etc/systemd/system/$unit.service"
+done
+
+# ProtectSystem=strict makes everything read-only except uploads/ and data/. Storage moved out of
+# the application directory (docs/STORAGE.md) therefore has to be opened explicitly; derive that
+# from config/config.local.php so an update cannot silently turn uploads into a read-only error.
+storage_dropin_dir="/etc/systemd/system/filehost-upload.service.d"
+storage_dropin="$storage_dropin_dir/10-storage.conf"
+storage_paths=()
+if [[ -f "$APP_DIR/config/config.local.php" ]]; then
+    for constant in UPLOADS_PATH DATA_PATH FILE_QUARANTINE_PATH; do
+        value="$(sed -n "s/^[[:space:]]*define([[:space:]]*['\"]${constant}['\"][[:space:]]*,[[:space:]]*['\"]\\([^'\"]*\\)['\"].*/\\1/p" \
+            "$APP_DIR/config/config.local.php" | head -n 1)"
+        if [[ "$value" == /* ]]; then
+            storage_paths+=("-$value")
+        elif [[ -n "$value" ]]; then
+            # Relative paths resolve from the project root.
+            storage_paths+=("-$APP_DIR/${value#./}")
+        fi
+    done
+fi
+if (( ${#storage_paths[@]} > 0 )); then
+    install -d "$storage_dropin_dir"
+    {
+        echo "# Written by scripts/install-debian.sh from config/config.local.php; do not edit."
+        echo "[Service]"
+        echo "ReadWritePaths=${storage_paths[*]}"
+    } > "$storage_dropin"
+    echo "[TryHackX Files] Storage outside the application directory: ${storage_paths[*]}"
+elif [[ -f "$storage_dropin" ]] && head -n 1 "$storage_dropin" | grep -q 'Written by scripts/install-debian.sh'; then
+    rm -f "$storage_dropin"
+    rmdir "$storage_dropin_dir" 2>/dev/null || true
+fi
 
 if [[ ! -e /etc/default/filehost ]]; then
     printf '%s\n' \

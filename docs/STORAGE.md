@@ -55,7 +55,10 @@ Migration procedure:
 1. stop Python and preferably Apache so writes cannot occur;
 2. copy the entire contents while preserving ID directories and manifests;
 3. set `UPLOADS_PATH`;
-4. grant PHP and Python read/write access;
+4. grant PHP and Python read/write access; on Debian the upload service is sandboxed with
+   `ProtectSystem=strict`, so re-run `sudo bash scripts/install-debian.sh` after changing
+   `UPLOADS_PATH`, `DATA_PATH` or `FILE_QUARANTINE_PATH`: it derives the writable paths from
+   `config/config.local.php` and writes the systemd drop-in that opens them;
 5. restart services and test an old download plus a new upload;
 6. run integrity checks;
 7. delete the old copy only after successful verification.
@@ -68,7 +71,7 @@ php scripts/check-storage-integrity.php --json
 Windows copy example:
 
 ```powershell
-robocopy C:\wamp64\www\pon\uploads D:\filehost-uploads /E /COPYALL
+robocopy C:\wamp64\www\filehost\uploads D:\filehost-uploads /E /COPYALL
 ```
 
 Database rows store file IDs, not absolute paths, so no SQL migration is required.
