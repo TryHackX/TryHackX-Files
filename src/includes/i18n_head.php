@@ -11,8 +11,11 @@
  * scraping of script source.
  */
 require_once __DIR__ . '/Lang.php';
+// Public pages set $i18nScope = 'public' before including this file and receive only the keys their
+// scripts use; the panel (no value set) gets the whole dictionary.
+$i18nScope = (isset($i18nScope) && $i18nScope === 'public') ? 'public' : 'full';
 ?>
-<script type="application/json" id="i18n-data"><?= json_encode(Lang::all(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?></script>
+<script type="application/json" id="i18n-data"><?= json_encode(Lang::forBrowser($i18nScope), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?></script>
 <script src="<?= htmlspecialchars(
 	APP_URL . '/assets/js/bootstrap.js?v=' . APP_VERSION,
 	ENT_QUOTES | ENT_SUBSTITUTE,

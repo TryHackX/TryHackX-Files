@@ -367,6 +367,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			ENT_QUOTES | ENT_SUBSTITUTE,
 			'UTF-8'
 		) ?>"></div>
+	<?php /* Admin-only modules are not shipped to everyone: panel.js tolerates their absence (`|| {}`). */ ?>
 	<script src="<?= $appUrl ?>/assets/js/util.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/api.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
@@ -376,14 +377,24 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<script src="<?= $appUrl ?>/assets/js/panel-docs.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-account-tools.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-files.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/panel-users.js?v=<?= APP_VERSION ?>"></script>
+	<?php if ($isAdmin): ?>
+		<script src="<?= $appUrl ?>/assets/js/panel-users.js?v=<?= APP_VERSION ?>"></script>
+	<?php endif; ?>
 	<script src="<?= $appUrl ?>/assets/js/panel-settings.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-languages.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/panel-groups.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/panel-moderation.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/panel-dashboard.js?v=<?= APP_VERSION ?>"></script>
+	<?php if ($isAdmin): ?>
+		<script src="<?= $appUrl ?>/assets/js/panel-groups.js?v=<?= APP_VERSION ?>"></script>
+	<?php endif; ?>
+	<?php if ($isAdmin || $canModerationPanel): ?>
+		<script src="<?= $appUrl ?>/assets/js/panel-moderation.js?v=<?= APP_VERSION ?>"></script>
+	<?php endif; ?>
+	<?php if ($isAdmin): ?>
+		<script src="<?= $appUrl ?>/assets/js/panel-dashboard.js?v=<?= APP_VERSION ?>"></script>
+	<?php endif; ?>
 	<script src="<?= $appUrl ?>/assets/js/panel-premium.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/panel-ads.js?v=<?= APP_VERSION ?>"></script>
+	<?php if ($isAdmin || $canAdsPanel || $tab === 'myads'): ?>
+		<script src="<?= $appUrl ?>/assets/js/panel-ads.js?v=<?= APP_VERSION ?>"></script>
+	<?php endif; ?>
 	<script src="<?= $appUrl ?>/assets/js/panel.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-table-sort.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/panel-events.js?v=<?= APP_VERSION ?>"></script>

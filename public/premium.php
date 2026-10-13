@@ -8,6 +8,8 @@
  * afterwards, through `?action=premium_activate`.
  */
 define('FILEHOST_CSP_STRICT_SCRIPTS', true);
+// Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
+$i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/Markdown.php';
 require_once __DIR__ . '/../src/includes/api/PremiumController.php';
@@ -30,7 +32,7 @@ if (isset($_SESSION['user_id'])) {
 if (!PremiumController::isEnabled()) {
 	http_response_code(404);
 	$pageTitle = __('premium.title');
-	$pageIcon = '<i class="fa-solid fa-circle-question"></i>';
+	$pageIcon = 'fa-circle-question';
 	$pageHeading = __('premium.disabled_heading');
 	$pageMessage = __('premium.disabled');
 	require __DIR__ . '/../src/includes/error_page.php';
@@ -303,10 +305,10 @@ if ($errCode !== '' && Lang::has('premium.err_' . $errCode)) {
 									<?= htmlspecialchars($ctaLabel) ?>
 								</a>
 							<?php elseif ($plan['checkoutType'] === 'html'): ?>
-								<?php /* Authored by an admin in the panel, like any other template setting, and
-								         rendered as written — that is the whole point of the `html` mode: it is
-								         how a provider's own button or embed script gets onto the page. */ ?>
-								<?= $plan['checkoutHtml'] ?>
+								<?php /* Authored by an admin in the panel and printed as written — text, links and
+								         images only. This page's CSP blocks scripts, forms and frames, so the block is
+								         validated on save (CheckoutHtml) and left out here if it no longer passes. */ ?>
+								<?= CheckoutHtml::render((string) $plan['checkoutHtml']) ?>
 							<?php endif; ?>
 						</div>
 					</div>

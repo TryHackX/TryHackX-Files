@@ -367,6 +367,44 @@ class Lang
 		self::init();
 		return self::$strings + self::$fallbackStrings;
 	}
+
+	/**
+	 * Keys the scripts of the PUBLIC pages (upload, download, collection, premium) ask for, as key
+	 * prefixes. The dictionary is inlined into every page, and the full one is ~130 KB of mostly
+	 * panel text a visitor never sees. tests/php/LangScopeTest scans those scripts, so a new
+	 * `t('x.y')` there that this list does not cover fails the build instead of printing a bare key.
+	 */
+	public const PUBLIC_PREFIXES = [
+		'common.', 'home.', 'up.', 'qr.', 'pwset.', 'pwprompt.', 'pwd.', 'captcha.', 'download.',
+		'report.', 'auth.', 'js.',
+		'notif.ago_', 'notif.empty',
+		'panel.cc.locked_ph', 'panel.cc.rejected', 'api.pass_change_error',
+	];
+
+	/**
+	 * The dictionary as the browser gets it: everything for the panel (`'full'`), or only what the
+	 * public pages' scripts use (`'public'`). The live language switch re-reads the same page, so
+	 * it always sees the same scope.
+	 */
+	public static function forBrowser(string $scope = 'full'): array
+	{
+		$all = self::all();
+		if ($scope !== 'public') {
+			return $all;
+		}
+		return array_filter(
+			$all,
+			static function ($key): bool {
+				foreach (self::PUBLIC_PREFIXES as $prefix) {
+					if (strncmp((string) $key, $prefix, strlen($prefix)) === 0) {
+						return true;
+					}
+				}
+				return false;
+			},
+			ARRAY_FILTER_USE_KEY
+		);
+	}
 }
 
 /** Shorthand: raw translated string. */

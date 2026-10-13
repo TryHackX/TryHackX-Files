@@ -106,7 +106,7 @@ if ($accountMessage === 'email_changed') {
 				<?= _h('panel.2fa.intro') ?>
 			</p>
 			<div class="form-group" style="max-width:260px;">
-				<label><?= _h('panel.2fa.off_label') ?></label>
+				<label for="twofaSetupPass"><?= _h('panel.2fa.on_label') ?></label>
 				<input type="password" id="twofaSetupPass" maxlength="1024" autocomplete="current-password" placeholder="<?= _h('auth.password') ?>">
 			</div>
 			<button type="button" class="btn btn-primary" data-fh-click="start2faSetup(this)"><?= _h('panel.2fa.enable') ?></button>
@@ -141,7 +141,7 @@ if ($accountMessage === 'email_changed') {
 			</div>
 
 			<div class="form-group" style="max-width:260px; margin-top:20px;">
-				<label><?= _h('panel.2fa.off_label') ?></label>
+				<label for="twofaOffPass"><?= _h('panel.2fa.off_label') ?></label>
 				<input type="password" id="twofaOffPass" maxlength="1024" autocomplete="current-password" placeholder="<?= _h('auth.password') ?>">
 			</div>
 			<div id="twofaDisableMsg" class="auth-message"></div>

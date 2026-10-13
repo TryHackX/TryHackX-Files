@@ -339,6 +339,23 @@ final class HttpApiTest extends TestCase
 		$this->assertStringNotContainsString('config_exists', $body);
 	}
 
+	/** The inline dictionary of a public page is the small public subset; the live language switch reads the same block. */
+	public function testHomePageShipsOnlyThePublicDictionary(): void
+	{
+		$res = self::rawRequest('GET', '/index.php?lang=en');
+		$this->assertSame(200, $res['status']);
+		$this->assertSame(
+			1,
+			preg_match('#<script type="application/json" id="i18n-data">(.*?)</script>#s', $res['body'], $m)
+		);
+		$dictionary = json_decode($m[1], true);
+		$this->assertIsArray($dictionary);
+		$this->assertArrayHasKey('up.session_failed', $dictionary);
+		$this->assertArrayHasKey('js.resend_confirm', $dictionary);
+		$this->assertArrayNotHasKey('panel.users.th_email', $dictionary, 'panel text must not ride along on the home page');
+		$this->assertLessThan(30000, strlen($m[1]), 'the public dictionary should stay small');
+	}
+
 	public function testHomePageEnforcesTheInlineScriptFreeCspIsland(): void
 	{
 		$res = self::rawRequest('GET', '/index.php');
@@ -582,15 +599,14 @@ final class HttpApiTest extends TestCase
 		$this->assertStringContainsString('/assets/js/panel-docs.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-account-tools.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-files.js', $res['body']);
-		$this->assertStringContainsString('/assets/js/panel-users.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-settings.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-languages.js', $res['body']);
-		$this->assertStringContainsString('/assets/js/panel-groups.js', $res['body']);
-		$this->assertStringContainsString('/assets/js/panel-moderation.js', $res['body']);
-		$this->assertStringContainsString('/assets/js/panel-dashboard.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-premium.js', $res['body']);
-		$this->assertStringContainsString('/assets/js/panel-ads.js', $res['body']);
 		$this->assertStringContainsString('/assets/js/panel-events.js', $res['body']);
+		// An ordinary account is not sent the scripts of screens it cannot open.
+		foreach (['panel-users', 'panel-groups', 'panel-moderation', 'panel-dashboard', 'panel-ads'] as $adminOnly) {
+			$this->assertStringNotContainsString('/assets/js/' . $adminOnly . '.js', $res['body'], $adminOnly);
+		}
 	}
 
 	public function testPromoCheckRequiresNothingButRejectsJunk(): void
@@ -722,6 +738,13 @@ final class HttpApiTest extends TestCase
 
 		$users = self::getJson('/api.php?action=admin_users');
 		$this->assertTrue($users['success'] ?? false, 'admin listing should answer the admin');
+
+		// The admin's panel does carry the scripts of the screens an ordinary account never gets.
+		$panel = self::rawRequest('GET', '/panel.php?tab=users');
+		$this->assertSame(200, $panel['status']);
+		foreach (['panel-users', 'panel-groups', 'panel-moderation', 'panel-dashboard', 'panel-ads'] as $module) {
+			$this->assertStringContainsString('/assets/js/' . $module . '.js', $panel['body'], $module);
+		}
 	}
 
 	/**

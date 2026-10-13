@@ -1,6 +1,8 @@
 <?php
 
 define('FILEHOST_CSP_STRICT_SCRIPTS', true);
+// Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
+$i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/Database.php';
 require_once __DIR__ . '/../src/includes/file_icons.php';
@@ -255,6 +257,8 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 		<?php endif; ?>
 		<?php require __DIR__ . '/../src/includes/site_footer.php'; ?>
 	</div>
+	<?php /* The toast template ui.js clones for errors and notices (same markup as download.php). */ ?>
+	<div class="toast" id="dlToast"><span id="dlToastText"></span></div>
 	<?php if ($collection): ?>
 		<div class="modal-bg" id="collMembersModal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="collMembersTitle">
 			<div class="modal">

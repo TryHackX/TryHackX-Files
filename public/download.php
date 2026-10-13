@@ -1,6 +1,8 @@
 <?php
 
 define('FILEHOST_CSP_STRICT_SCRIPTS', true);
+// Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
+$i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/FileManager.php';
 require_once __DIR__ . '/../src/includes/Database.php';
@@ -305,36 +307,36 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 
 			<form id="reportForm">
 				<div class="form-group">
-					<label><?= _h('report.name') ?></label>
-					<input type="text" name="reporter_name" class="auth-input" required maxlength="100" placeholder="<?= _h('report.name_ph') ?>">
+					<label for="reportName"><?= _h('report.name') ?></label>
+					<input type="text" name="reporter_name" id="reportName" class="auth-input" required maxlength="100" placeholder="<?= _h('report.name_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.email') ?></label>
+					<label for="reporterEmail"><?= _h('report.email') ?></label>
 					<input type="email" name="reporter_email" id="reporterEmail" class="auth-input" required maxlength="254"
 						placeholder="jan@example.com">
 					<div class="field-status" id="reportEmailStatus"></div>
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.entity') ?></label>
-					<input type="text" name="reporter_entity" class="auth-input" maxlength="255" placeholder="<?= _h('report.entity_ph') ?>">
+					<label for="reportEntity"><?= _h('report.entity') ?></label>
+					<input type="text" name="reporter_entity" id="reportEntity" class="auth-input" maxlength="255" placeholder="<?= _h('report.entity_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.org') ?></label>
-					<input type="text" name="reporter_org" class="auth-input" maxlength="255" placeholder="<?= _h('report.org_ph') ?>">
+					<label for="reportOrg"><?= _h('report.org') ?></label>
+					<input type="text" name="reporter_org" id="reportOrg" class="auth-input" maxlength="255" placeholder="<?= _h('report.org_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.obj_title') ?></label>
-					<input type="text" name="report_title" class="auth-input" required readonly maxlength="255"
+					<label for="reportTitle"><?= _h('report.obj_title') ?></label>
+					<input type="text" name="report_title" id="reportTitle" class="auth-input" required readonly maxlength="255"
 						value="<?= htmlspecialchars($file['name'] ?? '') ?>"
 						style="background: var(--bg-hover) !important; color: var(--text-muted); cursor: not-allowed; opacity: 1;">
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.link') ?></label>
-					<input type="url" name="report_link" class="auth-input" maxlength="255" placeholder="https://...">
+					<label for="reportLink"><?= _h('report.link') ?></label>
+					<input type="url" name="report_link" id="reportLink" class="auth-input" maxlength="255" placeholder="https://...">
 				</div>
 				<div class="form-group">
-					<label><?= _h('report.info') ?></label>
-					<textarea name="additional_info" class="auth-input" rows="4" maxlength="20000"
+					<label for="reportInfo"><?= _h('report.info') ?></label>
+					<textarea name="additional_info" id="reportInfo" class="auth-input" rows="4" maxlength="20000"
 						placeholder="<?= _h('report.info_ph') ?>"></textarea>
 				</div>
 

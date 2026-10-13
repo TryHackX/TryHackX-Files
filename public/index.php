@@ -2,6 +2,8 @@
 // This page has no executable inline scripts or HTML event handlers. Keep it as the first
 // enforced CSP island while the larger panel/download templates are migrated incrementally.
 define('FILEHOST_CSP_STRICT_SCRIPTS', true);
+// Only the translation keys this page's scripts use are inlined for the browser (see Lang::forBrowser).
+$i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 $appUrl = APP_URL;
@@ -13,7 +15,7 @@ if ($maintenanceMode) {
 	if (!$currentUser || !$currentUser['is_admin']) {
 		http_response_code(503);
 		$pageTitle = __('error.maintenance_title');
-		$pageIcon = '<i class="fa-solid fa-screwdriver-wrench"></i>';
+		$pageIcon = 'fa-screwdriver-wrench';
 		$pageHeading = __('error.maintenance_heading');
 		// B8: an empty custom message falls back to the visitor's-language default.
 			$maintMsg = trim((string) Database::getSetting('maintenance_message', ''));
@@ -29,7 +31,7 @@ if (Database::getInstance()) {
 	if ($ban) {
 		http_response_code(403);
 		$pageTitle = __('error.denied_title');
-		$pageIcon = '<i class="fa-solid fa-ban"></i>';
+		$pageIcon = 'fa-ban';
 		$pageHeading = __('error.banned_heading');
 		$pageMessage = __('error.banned_message');
 		$pageMeta = [
