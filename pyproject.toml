@@ -18,6 +18,3 @@ ignore = ["B904"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/python/*.py" = ["E402"]
-# Findings that predate these rule families and are fixed together with the transfer-path changes
-# to this file; remove this entry once they are gone.
-"upload_server.py" = ["C416", "ASYNC240", "UP017", "PIE810"]

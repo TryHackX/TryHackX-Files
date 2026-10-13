@@ -1897,7 +1897,7 @@ class TestBoundedPoolAcquire:
 
         async def scenario():
             try:
-                await us.acquire_bounded(NeverFreePool(), timeout=0.05)
+                await us.acquire_bounded(NeverFreePool(), wait_seconds=0.05)
             except us.HTTPException as exc:
                 return exc.status_code
             return None
@@ -1923,7 +1923,7 @@ class TestBoundedPoolAcquire:
 
         async def scenario():
             try:
-                await us.acquire_bounded(LatePool(), timeout=0.02)
+                await us.acquire_bounded(LatePool(), wait_seconds=0.02)
             except us.HTTPException:
                 pass
             await asyncio.sleep(0.05)

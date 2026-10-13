@@ -31,7 +31,7 @@ import ipaddress
 import socket
 import ssl
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import unquote, quote, urlsplit
@@ -491,9 +491,9 @@ def _release_if_acquired(pool):
     return callback
 
 
-async def acquire_bounded(pool, timeout: float | None = None):
+async def acquire_bounded(pool, wait_seconds: float | None = None):
     """Take a connection from an aiomysql pool, or answer 503 instead of waiting forever."""
-    limit = DB_ACQUIRE_TIMEOUT if timeout is None else timeout
+    limit = DB_ACQUIRE_TIMEOUT if wait_seconds is None else wait_seconds
     task = asyncio.ensure_future(pool.acquire())
     try:
         done, _ = await asyncio.wait({task}, timeout=limit)
@@ -858,7 +858,7 @@ async def update_settings():
                     f"SELECT `setting_key`, `setting_value` FROM `{table}` WHERE `setting_key` IN ({cron_ph})",
                     tuple(cron_keys)
                 )
-                cron_map = {k: v for k, v in (await cur.fetchall())}
+                cron_map = dict(await cur.fetchall())
                 settings_cache['cron_enabled'] = str(cron_map.get('cron_enabled', '0')) == '1'
                 settings_cache['cron_interval'] = safe_int(cron_map.get('cron_interval', 15)) or 15
                 settings_cache['cron_php_binary'] = (cron_map.get('cron_php_binary') or '').strip()
@@ -2178,7 +2178,7 @@ async def commit_staged_upload(
                         user_id,
                         cursor=cur,
                     )
-                staging_dir.replace(final_dir)
+                await asyncio.to_thread(staging_dir.replace, final_dir)
                 published = True
                 await conn.commit()
             except Exception:
@@ -2860,7 +2860,7 @@ async def _count_active_counter_reservations(
 
 def _quota_period_window(period: str, now: int | None = None) -> tuple[int, int]:
     """UTC calendar window used consistently by reservations and the PHP status view."""
-    current = datetime.fromtimestamp(now or int(time.time()), timezone.utc)
+    current = datetime.fromtimestamp(now or int(time.time()), UTC)
     if period == "day":
         start = current.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=1)
@@ -4907,7 +4907,7 @@ def _thumbnail_worker_main(args: list[str]) -> int:
             return 65
         if not (64 <= max_edge <= 2000):
             return 65
-        if not (mime.startswith("image/") or mime.startswith("video/")):
+        if not mime.startswith(("image/", "video/")):
             return 65
         if not src_resolved.is_file() or src_resolved.stat().st_size > THUMB_MAX_INPUT_BYTES:
             return 65
@@ -4961,7 +4961,7 @@ async def thumbnail(id: str):
         raise HTTPException(status_code=410, detail="Download limit reached")
     if one_time and consumed_at is not None:
         raise HTTPException(status_code=410, detail="This one-time link has already been used")
-    if not (mime.startswith("image/") or mime.startswith("video/")):
+    if not mime.startswith(("image/", "video/")):
         raise HTTPException(status_code=404, detail="No thumbnail for this type")
 
     # Always re-evaluate policy before a cache hit. no-store prevents a thumbnail that was
