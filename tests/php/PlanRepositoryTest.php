@@ -10,7 +10,9 @@ final class PlanRepositoryTest extends RepoTestCase
 
 	protected function setUp(): void
 	{
-		$this->truncate('plans', 'users');
+		// Payments too: plan ids restart after the truncate, so an unfinished order left by
+		// another class would point at this class's plans (and, rightly, block group deletion).
+		$this->truncate('payments', 'plans', 'users');
 		$res = Database::saveGroup(null, ['name' => 'Pro ' . bin2hex(random_bytes(3))]);
 		$this->groupId = (int) $res['id'];
 	}
