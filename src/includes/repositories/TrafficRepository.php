@@ -234,6 +234,28 @@ final class TrafficRepository
 		}
 	}
 
+	/** How many days of per-transfer detail the cleanup job keeps (`traffic_detail_days`). */
+	public static function detailDays(): int
+	{
+		return max(1, (int) Database::getSetting('traffic_detail_days', 30));
+	}
+
+	/**
+	 * The top-files periods worth offering: those the detailed log can still cover, since a
+	 * windowed ranking counts download events and older days survive only as totals.
+	 * period => its length in days (a month counted long, so 30 days of detail still offer it).
+	 *
+	 * @return array<string, int>
+	 */
+	public static function rankablePeriods(): array
+	{
+		$detailDays = self::detailDays();
+		return array_filter(
+			['week' => 7, 'month' => 31, '3months' => 92, '6months' => 183, 'year' => 366],
+			static fn(int $days): bool => $days <= $detailDays + 1
+		);
+	}
+
 	/** IPs whose total transfer over the window exceeds $thresholdBytes (abuse heuristic). */
 	public static function suspiciousIPs(int $thresholdBytes, int $hours = 24): array
 	{
@@ -270,33 +292,36 @@ final class TrafficRepository
 		$logs = Database::table('traffic_logs');
 		$daily = Database::table('traffic_daily');
 		$detailCutoff = strtotime('today') - max(1, $detailDays) * 86400;
-		$shift = Database::tzShiftSeconds();
 		try {
 			$pdo->beginTransaction();
-			$oldest = $pdo->prepare(
-				"SELECT MIN(DATE(FROM_UNIXTIME(`created_at` + ?)))
-				 FROM `{$logs}` WHERE `created_at` < ?"
-			);
-			$oldest->execute([$shift, $detailCutoff]);
-			$day = $oldest->fetchColumn();
-			if ($day) {
+			// The day is worked out in PHP and turned into a [start, end) range on the raw
+			// column, so both statements walk `idx_created` instead of computing a date for
+			// every row of the table — and the DELETE locks only the rows of that one day
+			// rather than everything it scanned, while downloads keep writing new rows.
+			$oldest = $pdo->prepare("SELECT MIN(`created_at`) FROM `{$logs}` WHERE `created_at` < ?");
+			$oldest->execute([$detailCutoff]);
+			$oldestAt = $oldest->fetchColumn();
+			if ($oldestAt !== false && $oldestAt !== null) {
+				$day = date('Y-m-d', (int) $oldestAt);
+				$dayStart = (int) strtotime($day . ' 00:00:00');
+				$dayEnd = (int) strtotime($day . ' 00:00:00 +1 day');
 				$aggregate = $pdo->prepare(
 					"INSERT INTO `{$daily}`
 					 (`day`, `transfer_type`, `transfer_size`, `transfer_count`)
 					 SELECT ?, `transfer_type`, SUM(`transfer_size`), COUNT(*)
 					 FROM `{$logs}`
-					 WHERE DATE(FROM_UNIXTIME(`created_at` + ?)) = ?
+					 WHERE `created_at` >= ? AND `created_at` < ?
 					 GROUP BY `transfer_type`
 					 ON DUPLICATE KEY UPDATE
 					  `transfer_size` = VALUES(`transfer_size`),
 					  `transfer_count` = VALUES(`transfer_count`)"
 				);
-				$aggregate->execute([$day, $shift, $day]);
+				$aggregate->execute([$day, $dayStart, $dayEnd]);
 				$out['aggregated'] = $aggregate->rowCount();
 				$delete = $pdo->prepare(
-					"DELETE FROM `{$logs}` WHERE DATE(FROM_UNIXTIME(`created_at` + ?)) = ?"
+					"DELETE FROM `{$logs}` WHERE `created_at` >= ? AND `created_at` < ?"
 				);
-				$delete->execute([$shift, $day]);
+				$delete->execute([$dayStart, $dayEnd]);
 				$out['deleted'] = $delete->rowCount();
 			}
 			$prune = $pdo->prepare("DELETE FROM `{$daily}` WHERE `day` < ?");

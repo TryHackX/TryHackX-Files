@@ -61,12 +61,17 @@
 			if (topFilesPref.from) params.from = topFilesPref.from;
 			if (topFilesPref.to) params.to = topFilesPref.to;
 		}
+		let clampedNote = '';
 		try {
 			const d = await FHApi.get('admin_top_files', params);
-			if (d && d.success) renderTopFiles(d.top_files || []);
+			if (d && d.success) {
+				renderTopFiles(d.top_files || []);
+				// Older downloads survive only as daily totals, so the server cut the window.
+				if (d.clamped) clampedNote = ' ' + t('panel.top.clamped', { days: d.detail_days });
+			}
 		} catch (e) { /* leave the previous rendering in place */ }
 		const label = document.getElementById('topFilesPeriod');
-		if (label) label.textContent = topFilesPeriodLabel();
+		if (label) label.textContent = topFilesPeriodLabel() + clampedNote;
 	}
 
 	function openTopFilesSettings() {

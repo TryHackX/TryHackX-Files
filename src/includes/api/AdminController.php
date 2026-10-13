@@ -641,11 +641,27 @@ final class AdminController
 		[$from, $to] = self::resolvePeriod($period);
 		$limit = max(1, min(20, (int) ($_GET['limit'] ?? 5)));
 
+		// A windowed ranking counts download events in the detailed transfer log, which the
+		// cleanup job folds into per-day totals (without the file) after a while. Older than
+		// that there is nothing to count, so the window is cut to what exists and the widget
+		// says so rather than presenting a month as a year.
+		$clamped = false;
+		$detailDays = TrafficRepository::detailDays();
+		if ($from !== null || $to !== null) {
+			$oldest = (int) strtotime('today') - $detailDays * 86400;
+			if ($from === null || $from < $oldest) {
+				$from = $oldest;
+				$clamped = true;
+			}
+		}
+
 		echo json_encode([
 			'success' => true,
 			'period' => $period,
 			'from' => $from,
 			'to' => $to,
+			'clamped' => $clamped,
+			'detail_days' => $detailDays,
 			'top_files' => Database::getTopFiles($limit, $from, $to),
 		]);
 	}

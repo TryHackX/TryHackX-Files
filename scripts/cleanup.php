@@ -133,7 +133,7 @@ $adsPurged = $adGraceDays > 0 ? AdRepository::purgeExpired($adGraceDays) : 0;
 // Notifications nobody will read again.
 $notifPruned = NotificationRepository::prune();
 $traffic = TrafficRepository::aggregateAndPrune(
-	max(1, (int) Database::getSetting('traffic_detail_days', 30)),
+	TrafficRepository::detailDays(),
 	max(30, (int) Database::getSetting('traffic_daily_days', 730))
 );
 

@@ -336,14 +336,13 @@ if (!defined('APP_ROOT')) {
 				<label><?= _h('panel.top.period') ?></label>
 				<select id="tfPeriod" class="input" data-fh-change="onTopFilesPeriodChange()">
 					<option value="all"><?= _h('panel.top.all') ?></option>
-					<option value="week"><?= _h('panel.top.week') ?></option>
-					<option value="month"><?= _h('panel.top.month') ?></option>
-					<option value="3months"><?= _h('panel.top.3months') ?></option>
-					<option value="6months"><?= _h('panel.top.6months') ?></option>
-					<option value="year"><?= _h('panel.top.year') ?></option>
+					<?php /* Only spans the detailed transfer log still covers; see handleAdminTopFiles(). */ ?>
+					<?php foreach (array_keys(TrafficRepository::rankablePeriods()) as $tfPeriod): ?>
+						<option value="<?= htmlspecialchars($tfPeriod) ?>"><?= _h('panel.top.' . $tfPeriod) ?></option>
+					<?php endforeach; ?>
 					<option value="custom"><?= _h('panel.top.custom') ?></option>
 				</select>
-				<small><?= _h('panel.top.period_hint') ?></small>
+				<small><?= _h('panel.top.period_hint', ['days' => TrafficRepository::detailDays()]) ?></small>
 			</div>
 			<div class="form-row" id="tfCustomRange" style="display:none;">
 				<div class="form-group">

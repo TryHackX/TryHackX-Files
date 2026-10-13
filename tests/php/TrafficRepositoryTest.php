@@ -80,4 +80,40 @@ final class TrafficRepositoryTest extends RepoTestCase
 		$this->assertSame(1200, (int) $bucket[0]['download']);
 		$this->assertSame(300, (int) $bucket[0]['upload']);
 	}
+
+	public function testOneRunFoldsExactlyTheOldestDay(): void
+	{
+		$pdo = Database::getInstance();
+		$logs = Database::table('traffic_logs');
+		$oldDay = strtotime('-45 days 00:00:00');
+		$stmt = $pdo->prepare(
+			"INSERT INTO `{$logs}` (`ip_address`, `transfer_size`, `transfer_type`, `created_at`)
+			 VALUES ('10.0.0.1', 10, 'download', ?), ('10.0.0.1', 20, 'download', ?),
+			        ('10.0.0.1', 40, 'download', ?), ('10.0.0.1', 80, 'download', ?)"
+		);
+		// First and last second of the oldest day, the first second of the next one, and today.
+		$stmt->execute([$oldDay, $oldDay + 86399, $oldDay + 86400, time()]);
+
+		$result = TrafficRepository::aggregateAndPrune(30, 730);
+		$this->assertSame(2, $result['deleted']);
+		$daily = $pdo->query(
+			"SELECT `day`, `transfer_size` FROM `" . Database::table('traffic_daily') . "`"
+		)->fetchAll(PDO::FETCH_ASSOC);
+		$this->assertCount(1, $daily);
+		$this->assertSame(date('Y-m-d', $oldDay), (string) $daily[0]['day']);
+		$this->assertSame(30, (int) $daily[0]['transfer_size']);
+		$this->assertSame(2, (int) $pdo->query("SELECT COUNT(*) FROM `{$logs}`")->fetchColumn());
+	}
+
+	public function testTopFilesPeriodsFollowTheDetailRetention(): void
+	{
+		Database::setSetting('traffic_detail_days', '30');
+		Database::invalidateSettingsCache();
+		$this->assertSame(['week', 'month'], array_keys(TrafficRepository::rankablePeriods()));
+		Database::setSetting('traffic_detail_days', '400');
+		Database::invalidateSettingsCache();
+		$this->assertSame(['week', 'month', '3months', '6months', 'year'], array_keys(TrafficRepository::rankablePeriods()));
+		Database::setSetting('traffic_detail_days', '30');
+		Database::invalidateSettingsCache();
+	}
 }

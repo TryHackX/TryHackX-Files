@@ -105,3 +105,37 @@ test('the transfer tables are polled every few seconds, not every second', () =>
 	assert.match(source, /const ACTIVE_POLL_MS = (?:[3-9]\d{3}|\d{5,})/);
 	assert.doesNotMatch(source, /\}, 1000\);/);
 });
+
+test('top files widget says when the server cut the period to the detailed log', async () => {
+	const holder = { textContent: '', innerHTML: '' };
+	const label = { textContent: '' };
+	const bootstrap = { dataset: { config: JSON.stringify({ apiUrl: '/api.php', tab: 'dashboard' }) } };
+	const elements = { panelBootstrap: bootstrap, topFiles: holder, topFilesPeriod: label };
+	const document = {
+		getElementById: id => elements[id] || null,
+		querySelector() { return null; },
+		querySelectorAll() { return []; },
+		visibilityState: 'visible'
+	};
+	const window = {
+		FHUtil: { esc: v => String(v ?? ''), formatSize: v => String(v), formatDate: v => String(v) },
+		t: (key, params) => key + (params && params.days ? ':' + params.days : ''),
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, {
+		console,
+		document,
+		localStorage: {
+			getItem() { return null; },
+			setItem() {}
+		},
+		setInterval() { return 1; },
+		clearInterval() {},
+		FHApi: { get: async () => ({ success: true, top_files: [], clamped: true, detail_days: 30 }) },
+		window
+	}, { filename: 'panel-dashboard.js' });
+
+	await window.FHPanelDashboard.loadTopFiles();
+	assert.equal(label.textContent, 'panel.top.all panel.top.clamped:30');
+});
