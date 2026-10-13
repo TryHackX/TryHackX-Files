@@ -447,6 +447,7 @@ return [
 	'api.save_failed' => 'Could not save (file missing or no permission)',
 	'api.no_files_selected' => 'No files selected',
 	'api.collection_min_files' => 'A collection needs at least :n files.',
+	'api.collection_full' => 'A collection can hold at most :n files. Remove one before adding another.',
 	'api.too_many_files' => 'A single request may contain at most 200 files.',
 	'api.invalid_request' => 'The JSON request is invalid or malformed.',
 	'api.collection_failed' => 'Could not create the collection',

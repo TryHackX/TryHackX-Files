@@ -449,6 +449,7 @@ return [
 	'api.save_failed' => 'Nie udało się zapisać (brak pliku lub brak uprawnień)',
 	'api.no_files_selected' => 'Nie wybrano plików',
 	'api.collection_min_files' => 'Kolekcja wymaga co najmniej :n plików.',
+	'api.collection_full' => 'Kolekcja może zawierać najwyżej :n plików. Usuń któryś, zanim dodasz kolejny.',
 	'api.too_many_files' => 'Jedno żądanie może zawierać najwyżej 200 plików.',
 	'api.invalid_request' => 'Nieprawidłowe lub uszkodzone żądanie JSON.',
 	'api.collection_failed' => 'Nie udało się utworzyć kolekcji',

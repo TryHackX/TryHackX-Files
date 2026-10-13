@@ -254,8 +254,11 @@ final class AdminController
 				break;
 
 			case 'clean':
+				// One durable path: rows go together with a queued removal of their bytes (and
+				// a quarantine copy when that is on), or not at all. It is done only when the
+				// account has nothing left — a rolled-back batch must not be reported as done.
 				FileManager::deleteAllUserFiles($userId);
-				$result = Database::cleanUserFiles($userId);
+				$result = (int) (Database::getUserStats($userId)['files_count'] ?? 1) === 0;
 				break;
 
 			default:

@@ -5423,12 +5423,6 @@ class Database
 		return UserRepository::invalidateAccess($id);
 	}
 
-	/** Delete all of a user's file rows — delegated to FileRepository (Faza 5 · #2). */
-	public static function cleanUserFiles(int $id): bool
-	{
-		return FileRepository::deleteAllForUser($id);
-	}
-
 	public static function adminUpdateUser(int $id, array $data, ?int $actorId = null): array
 	{
 		return UserRepository::adminUpdate($id, $data, $actorId);

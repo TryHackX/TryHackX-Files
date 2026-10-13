@@ -109,6 +109,28 @@ final class FileCapabilitySecurityTest extends RepoTestCase
 		$this->assertFileDoesNotExist($artifact);
 	}
 
+	public function testRevertKeepsARetryJobWhenTheBytesCannotBeRemovedYet(): void
+	{
+		$id = $this->id('stuck');
+		$artifact = $this->artifact($id);
+		// An unexpected sub-directory makes the first removal attempt fail, like a file
+		// another process still holds open would.
+		mkdir(dirname($artifact) . '/nested', 0777, true);
+		$this->insertFile($id, null, [
+			'delete_token' => password_hash('right-secret', PASSWORD_DEFAULT),
+		]);
+
+		$this->callPrivate('revertPayload', $id . ':right-secret');
+
+		$job = Database::getInstance()->prepare(
+			'SELECT COUNT(*) FROM `' . Database::table('file_deletion_queue') . '` WHERE `file_id` = ?'
+		);
+		$job->execute([$id]);
+		$this->assertSame(1, (int) $job->fetchColumn(), 'the bytes stay queued for a retry instead of being orphaned');
+		rmdir(dirname($artifact) . '/nested');
+		FileManager::processDeletionQueue(10);
+	}
+
 	public function testPublicInfoDtoIsAnExplicitAllowlistWithoutIpOrSecrets(): void
 	{
 		$dto = $this->callPrivate('publicFileDto', [

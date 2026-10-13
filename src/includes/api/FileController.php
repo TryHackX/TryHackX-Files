@@ -19,7 +19,7 @@ final class FileController
 	 * API surface and the browser is not the only caller.
 	 */
 	public const COLLECTION_MIN_FILES = 2;
-	public const COLLECTION_MAX_FILES = 200;
+	public const COLLECTION_MAX_FILES = CollectionRepository::MAX_MEMBERS;
 	private const COLLECTION_JSON_MAX_BYTES = 1048576;
 
 	private static function deleteTokenMatches(string $token, string $stored): bool
@@ -99,14 +99,11 @@ final class FileController
 			$file = $stmt->fetch();
 
 			// File age is never authority. Guests must present the per-upload capability even
-			// during the first seconds after upload.
+			// during the first seconds after upload. The token does not expire, so this is a
+			// delete like any other and takes the durable path: queued byte removal (retried
+			// if the first unlink fails), quarantine when enabled, collection/report cleanup.
 			if ($file && self::deleteTokenMatches($token, (string) $file['delete_token'])) {
-				$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `id` = ?");
-				$stmt->execute([$id]);
-				if ($stmt->rowCount() === 1) {
-					Database::deleteReportsByFileIds([$id]);
-					FileManager::purgeFileArtifacts($id);
-				}
+				FileManager::deleteAuthorisedFile($id, 'upload_revert', 'capability');
 			}
 		} catch (PDOException $e) {
 		}
@@ -1874,6 +1871,13 @@ final class FileController
 		// ownerId scopes the insert to our own files for the own-file case; null is the
 		// "collect what I do not own" path, which the permission above is exactly about.
 		$added = Database::addFilesToCollection($collectionId, $allowed, $isOwn ? $userId : null);
+		if ($added === CollectionRepository::FULL) {
+			echo json_encode([
+				'success' => false,
+				'error' => __('api.collection_full', ['n' => CollectionRepository::MAX_MEMBERS]),
+			]);
+			return;
+		}
 		if ($added === 0) {
 			// INSERT IGNORE returns 0 for a file that is already a member — not an error, and
 			// saying "already in there" is more useful than a generic failure.
@@ -2098,10 +2102,9 @@ final class FileController
 			return;
 		}
 
+		// Applied together with the sharing options below, after every check has passed — a
+		// refused save must not leave a half-applied rename behind.
 		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
-		if ($name !== '') {
-			Database::renameCollection($id, $name, $ownerId);
-		}
 
 		$opts = [];
 		$expiryDays = max(0, (int) ($input['expiry_days'] ?? 0));
@@ -2148,6 +2151,9 @@ final class FileController
 		}
 
 		$ok = Database::setCollectionOptions($id, $ownerId, $opts);
+		if ($ok && $name !== '') {
+			Database::renameCollection($id, $name, $ownerId);
+		}
 		echo json_encode(['success' => (bool) $ok]);
 	}
 

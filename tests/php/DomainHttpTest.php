@@ -51,6 +51,11 @@ final class DomainHttpTest extends TestCase
 		self::$ids['locked'] = self::storeFile('locked.png', 'image/png', 'locked-bytes', [
 			'password_hash' => password_hash('right-password', PASSWORD_DEFAULT),
 		]);
+		self::$ids['owned'] = self::storeFile('owned.bin', 'application/octet-stream', 'owned-bytes', [
+			'user_id' => (int) $owner['id'],
+		]);
+		Database::createAdmin('httpboss', 'HttpBoss1!x', 'httpboss@example.pl');
+		$pdo->exec("UPDATE `" . Database::table('users') . "` SET `is_active` = 1");
 		self::$ids['collection'] = 'c' . bin2hex(random_bytes(6));
 		$made = Database::createCollectionWithFiles(
 			self::$ids['collection'],
@@ -306,6 +311,22 @@ final class DomainHttpTest extends TestCase
 		$res = self::request('GET', '/collection.php?id=' . self::$ids['collection']);
 		$this->assertSame(200, $res['status']);
 		$this->assertSame(1, substr_count($res['body'], 'COLLECTION-BOTTOM-AD'));
+	}
+
+	public function testCleaningAnAccountRemovesRowsAndBytesTogether(): void
+	{
+		self::freshSession();
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpboss', 'password' => 'HttpBoss1!x'], '203.0.113.50');
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+		$owner = Database::getUserByEmailOrUsername('httpowner');
+
+		$res = self::json('POST', '/api.php?action=admin_user_action', [
+			'user_id' => (int) $owner['id'],
+			'action' => 'clean',
+		], '203.0.113.50');
+		$this->assertTrue($res['success'] ?? false, json_encode($res));
+		$this->assertSame(0, (int) (Database::getUserStats((int) $owner['id'])['files_count'] ?? -1));
+		$this->assertDirectoryDoesNotExist(PROJECT_ROOT . '/tests/php/.tmp-uploads-http/' . self::$ids['owned']);
 	}
 
 	public function testReportValidationIsLabelledByKindNotByWording(): void

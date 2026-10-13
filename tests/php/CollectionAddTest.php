@@ -43,6 +43,25 @@ final class CollectionAddTest extends RepoTestCase
         $this->assertSame(1, $this->memberCount(), 'and really does not add a second row');
     }
 
+    public function testAFullCollectionTakesNoMoreMembers(): void
+    {
+        $pdo = Database::getInstance();
+        $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+        $ins = $pdo->prepare('INSERT INTO `' . Database::table('collection_files') . '` (`collection_id`, `file_id`, `position`) VALUES (?, ?, ?)');
+        for ($i = 0; $i < CollectionRepository::MAX_MEMBERS - 1; $i++) {
+            $ins->execute([$this->collectionId, 'member' . $i, $i]);
+        }
+        $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        $this->insertFile('lastslot', $this->userId);
+        $this->insertFile('overflow', $this->userId);
+
+        $this->assertSame(1, Database::addFilesToCollection($this->collectionId, ['lastslot'], $this->userId));
+        $this->assertSame(CollectionRepository::FULL, Database::addFilesToCollection($this->collectionId, ['overflow'], $this->userId));
+        $this->assertSame(0, Database::addFilesToCollection($this->collectionId, ['lastslot'], $this->userId),
+            'a file that is already a member is "already there", not "full"');
+        $this->assertSame(CollectionRepository::MAX_MEMBERS, $this->memberCount());
+    }
+
     public function testOwnerScopeRefusesSomeoneElsesFile(): void
     {
         $this->insertFile('addf2', $this->otherId);

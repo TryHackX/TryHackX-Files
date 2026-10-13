@@ -421,6 +421,7 @@ return array (
   'api.save_failed' => '无法保存（文件不存在或没有权限）',
   'api.no_files_selected' => '未选择任何文件',
   'api.collection_min_files' => '合集至少需要 :n 个文件。',
+  'api.collection_full' => '一个合集最多可包含 :n 个文件。请先移除一个再添加。',
   'api.too_many_files' => '单个请求最多可包含 200 个文件。',
   'api.invalid_request' => 'JSON 请求无效或格式错误。',
   'api.collection_failed' => '无法创建合集',

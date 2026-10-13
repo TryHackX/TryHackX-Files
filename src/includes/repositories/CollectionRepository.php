@@ -104,8 +104,19 @@ final class CollectionRepository
 	}
 
 	/**
+	 * The most files one collection holds. Creation always enforced it; adding one file at a
+	 * time did not, and a collection past it could no longer be reordered (that request is
+	 * bounded by the same number) and made every page view load all of its members.
+	 */
+	public const MAX_MEMBERS = 200;
+
+	/** addFiles() result when the collection is already full. */
+	public const FULL = -1;
+
+	/**
 	 * Attach files to a collection. When $ownerId is given, only that user's files are
-	 * added (so users can't collect files they don't own). Returns the number added.
+	 * added (so users can't collect files they don't own). Returns the number added, or
+	 * FULL when nothing could be added because the collection holds MAX_MEMBERS files.
 	 */
 	public static function addFiles(string $collectionId, array $fileIds, ?int $ownerId): int
 	{
@@ -131,10 +142,12 @@ final class CollectionRepository
 				$pdo->rollBack();
 				return 0;
 			}
-			// Current highest position, so appends keep a stable order.
-			$stmt = $pdo->prepare("SELECT COALESCE(MAX(`position`), -1) FROM `{$linkTable}` WHERE `collection_id` = ?");
+			// Current highest position, so appends keep a stable order; and the member count,
+			// read under the collection lock so concurrent adds cannot overfill it.
+			$stmt = $pdo->prepare("SELECT COALESCE(MAX(`position`), -1), COUNT(*) FROM `{$linkTable}` WHERE `collection_id` = ?");
 			$stmt->execute([$collectionId]);
-			$pos = (int) $stmt->fetchColumn();
+			[$pos, $members] = array_map('intval', $stmt->fetch(PDO::FETCH_NUM) ?: [-1, 0]);
+			$full = false;
 
 			$in = implode(',', array_fill(0, count($fileIds), '?'));
 			$params = $fileIds;
@@ -154,13 +167,22 @@ final class CollectionRepository
 				if (!isset($eligible[$fid])) {
 					continue; // not found / not owned
 				}
+				if ($members >= self::MAX_MEMBERS) {
+					$isMember = $pdo->prepare(
+						"SELECT 1 FROM `{$linkTable}` WHERE `collection_id` = ? AND `file_id` = ?"
+					);
+					$isMember->execute([$collectionId, $fid]);
+					$full = $full || !$isMember->fetchColumn();
+					continue;
+				}
 				$ins->execute([$collectionId, $fid, ++$pos]);
 				if ($ins->rowCount() > 0) {
 					$added++;
+					$members++;
 				}
 			}
 			$pdo->commit();
-			return $added;
+			return ($added === 0 && $full) ? self::FULL : $added;
 		} catch (Throwable $e) {
 			if ($pdo->inTransaction()) {
 				$pdo->rollBack();

@@ -181,6 +181,30 @@ final class FileQuarantineTest extends RepoTestCase
 		$this->assertDirectoryDoesNotExist(DATA_DIR . '/file-quarantine/' . $id);
 	}
 
+	public function testFileWhoseBytesAreGoneStillLeavesTheDeletionQueue(): void
+	{
+		// A "dead" row: listed, but its upload directory no longer exists.
+		$id = 'q_dead_' . substr(hash('sha256', uniqid('', true)), 0, 12);
+		$this->ids[] = $id;
+		$this->insertFile($id, null, ['original_name' => 'gone.bin', 'size' => 5]);
+
+		$this->assertTrue(FileManager::deleteFileAdmin($id));
+		$left = (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('file_deletion_queue') . "`"
+		)->fetchColumn();
+		$this->assertSame(0, $left, 'the job must complete instead of retrying for ever');
+		$this->assertSame('quarantined', FileQuarantine::find($id)['state'] ?? null);
+
+		// There is no content to bring back, so restore refuses rather than recreating a row
+		// that points at nothing.
+		$this->assertFalse(FileQuarantine::restore($id));
+		$row = Database::getInstance()->prepare(
+			"SELECT COUNT(*) FROM `" . Database::table('files') . "` WHERE `id` = ?"
+		);
+		$row->execute([$id]);
+		$this->assertSame(0, (int) $row->fetchColumn());
+	}
+
 	public function testAccountDeletionBypassesQuarantine(): void
 	{
 		$ownerName = 'q-owner-' . bin2hex(random_bytes(4));

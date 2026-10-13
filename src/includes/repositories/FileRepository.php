@@ -337,22 +337,6 @@ final class FileRepository
 		}
 	}
 
-	/** Delete all of a user's file rows (admin "clean files"; physical bytes handled by the caller). */
-	public static function deleteAllForUser(int $userId): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-		$table = Database::table('files');
-		try {
-			$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `user_id` = ?");
-			return $stmt->execute([$userId]);
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
 	/** Aggregate file stats for a user: count, total size, total downloads. */
 	public static function statsForUser(int $userId): array
 	{

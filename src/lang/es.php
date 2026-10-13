@@ -421,6 +421,7 @@ return array (
   'api.save_failed' => 'No se pudo guardar (archivo inexistente o sin permisos)',
   'api.no_files_selected' => 'No hay archivos seleccionados',
   'api.collection_min_files' => 'Una colección necesita al menos :n archivos.',
+  'api.collection_full' => 'Una colección puede contener como máximo :n archivos. Quita uno antes de añadir otro.',
   'api.too_many_files' => 'Una solicitud puede contener como máximo 200 archivos.',
   'api.invalid_request' => 'La solicitud JSON no es válida o está dañada.',
   'api.collection_failed' => 'No se pudo crear la colección',

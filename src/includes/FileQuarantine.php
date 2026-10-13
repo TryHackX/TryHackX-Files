@@ -328,10 +328,18 @@ final class FileQuarantine
 				if (!mkdir($partial, 0700, true) && !is_dir($partial)) {
 					throw new RuntimeException('Could not create quarantine staging.');
 				}
-				self::copyDirectory(
-					UPLOADS_DIR . DIRECTORY_SEPARATOR . $id,
-					$partial . DIRECTORY_SEPARATOR . 'payload'
-				);
+				$live = UPLOADS_DIR . DIRECTORY_SEPARATOR . $id;
+				$missingPayload = !file_exists($live) && !is_link($live);
+				if ($missingPayload) {
+					// The row outlived its bytes (a "dead" file). There is nothing to copy, and
+					// insisting on a copy left the deletion job failing for ever. The bundle
+					// records the absence; restore refuses it (see restore()).
+					if (!mkdir($partial . DIRECTORY_SEPARATOR . 'payload', 0700, true)) {
+						throw new RuntimeException('Could not create the quarantine payload directory.');
+					}
+				} else {
+					self::copyDirectory($live, $partial . DIRECTORY_SEPARATOR . 'payload');
+				}
 				self::injectFailure('copy');
 
 				$thumb = DATA_DIR . DIRECTORY_SEPARATOR . 'thumbs'
@@ -348,6 +356,7 @@ final class FileQuarantine
 					'file_id' => $id,
 					'size' => (int) $row['size'],
 					'checksum' => $checksum,
+					'missing_payload' => $missingPayload,
 					'reason' => (string) $row['reason'],
 					'actor' => [
 						'type' => (string) $row['actor_type'],
@@ -476,6 +485,11 @@ final class FileQuarantine
 			if (!is_array($file) || ($file['id'] ?? null) !== $id
 				|| !is_string($row['checksum']) || strlen($row['checksum']) !== 64) {
 				throw new RuntimeException('Quarantine restore manifest is invalid.');
+			}
+			if (hash_equals(hash('sha256', ''), $row['checksum'])) {
+				// Captured from a row whose bytes were already gone: restoring it would only
+				// bring back a record pointing at nothing.
+				throw new RuntimeException('Quarantine bundle holds no file content to restore.');
 			}
 
 			$existing = $pdo->prepare("SELECT `id` FROM `{$files}` WHERE `id` = ? FOR UPDATE");
