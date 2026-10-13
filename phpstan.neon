@@ -1,5 +1,8 @@
 parameters:
-    level: 1
+    level: 3
+    # The declared minimum (composer.json platform, README, public/install.php). Analysing against
+    # it flags syntax and functions that only exist on newer PHP.
+    phpVersion: 80100
     paths:
         - public
         - scripts

@@ -1,10 +1,17 @@
-fastapi>=0.141.1
-uvicorn[standard]>=0.29
-aiofiles>=23.2
-aiomysql>=0.2
-bcrypt>=4.1
-cryptography>=42.0
-segno>=1.6
-Pillow>=10
-imageio-ffmpeg>=0.5
-
+# Human-maintained runtime inputs. The only supported install path is the hash-locked
+# requirements-lock.txt compiled from this file (see tests/README.md for the exact command).
+fastapi>=0.143.0
+uvicorn>=0.54
+# uvicorn's optional HTTP parser and event loop. Declared explicitly (instead of the
+# uvicorn[standard] extra) so websockets, watchfiles, python-dotenv and PyYAML - none of which
+# this service uses - are not installed. uvloop does not exist on Windows; the marker keeps the
+# Windows launchers installable from the same lock.
+httptools>=0.9
+uvloop>=0.23; sys_platform != "win32"
+aiofiles>=25.1
+aiomysql>=0.3.2
+bcrypt>=5.0
+cryptography>=50.0.2
+segno>=1.6.6
+Pillow>=12.3
+imageio-ffmpeg>=0.6

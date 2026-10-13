@@ -5,12 +5,19 @@ extend-exclude = [
     "data",
     "uploads",
     "venv",
+    ".venv",
 ]
 
 [tool.ruff.lint]
-# Begin with semantic correctness checks: parser/runtime errors and Pyflakes.
-# Formatting can be introduced independently without obscuring real defects.
-select = ["E4", "E7", "E9", "F"]
+# Parser/runtime errors and Pyflakes, plus the families that find real defects without
+# demanding a formatting rewrite: bugbear (B), blocking calls inside async functions (ASYNC),
+# Pylint errors (PLE), redundant constructs (PIE), outdated idioms (UP) and comprehensions (C4).
+# B904 (explicit exception chaining) is a style preference here, not a defect.
+select = ["E4", "E7", "E9", "F", "B", "ASYNC", "PLE", "PIE", "UP", "C4"]
+ignore = ["B904"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/python/*.py" = ["E402"]
+# Findings that predate these rule families and are fixed together with the transfer-path changes
+# to this file; remove this entry once they are gone.
+"upload_server.py" = ["C416", "ASYNC240", "UP017", "PIE810"]
