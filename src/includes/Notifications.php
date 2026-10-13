@@ -1,4 +1,8 @@
 <?php
+// E-mails are rendered in the recipient's language, also from cron (scripts/cleanup.php),
+// which loads the repositories without the web bootstrap that normally brings Lang in.
+require_once __DIR__ . '/Lang.php';
+
 /**
  * Notifications — what the app is allowed to tell an account, and how it says it.
  *
@@ -320,10 +324,12 @@ final class Notifications
 		$body = $rendered . "\n\n" . Lang::translateFor($language, 'notif.mail.footer', [
 			'url' => $link !== '' ? $link : (defined('APP_URL') ? APP_URL . '/panel.php?tab=notifications' : ''),
 		]);
-		return Database::sendEmail(
+		return MailService::send(
 			$email,
 			$appName . ' — ' . Lang::translateFor($language, 'notif.type.' . $type),
-			$body
+			$body,
+			null,
+			$language
 		);
 	}
 

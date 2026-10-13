@@ -1,4 +1,7 @@
 <?php
+// The message footer is translated; cron and the mail worker load this without config.php.
+require_once dirname(__DIR__) . '/Lang.php';
+
 /**
  * Durable transactional e-mail outbox.
  *
@@ -40,10 +43,11 @@ final class MailService
 		string $to,
 		string $subject,
 		string $message,
-		?string $idempotencyKey = null
+		?string $idempotencyKey = null,
+		?string $language = null
 	): bool {
 		return self::enqueue(
-			self::renderEnvelope($to, $subject, $message),
+			self::renderEnvelope($to, $subject, $message, false, $language),
 			$idempotencyKey
 		);
 	}
@@ -64,10 +68,11 @@ final class MailService
 		string $to,
 		string $subject,
 		string $html,
-		?string $idempotencyKey = null
+		?string $idempotencyKey = null,
+		?string $language = null
 	): bool {
 		return self::enqueue(
-			self::renderEnvelope($to, $subject, $html, true),
+			self::renderEnvelope($to, $subject, $html, true, $language),
 			$idempotencyKey
 		);
 	}
@@ -82,10 +87,11 @@ final class MailService
 		string $to,
 		string $subject,
 		string $html,
-		?string $idempotencyKey = null
+		?string $idempotencyKey = null,
+		?string $language = null
 	): bool {
 		return self::enqueue(
-			self::renderEnvelope($to, $subject, self::sanitizeHtmlFragment($html), true),
+			self::renderEnvelope($to, $subject, self::sanitizeHtmlFragment($html), true, $language),
 			$idempotencyKey
 		);
 	}
@@ -534,7 +540,8 @@ final class MailService
 		string $to,
 		string $subject,
 		string $message,
-		bool $messageIsHtml = false
+		bool $messageIsHtml = false,
+		?string $language = null
 	): ?array
 	{
 		$from = trim((string) Database::getSetting(
@@ -562,8 +569,20 @@ final class MailService
 		$headers .= "Reply-To: {$from}\r\n";
 		$headers .= 'X-Mailer: TryHackX-Files/' . (defined('APP_VERSION') ? APP_VERSION : '1.0');
 
-		$appName = htmlspecialchars(
-			defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files'),
+		$appNamePlain = defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files');
+		$footerLanguage = self::footerLanguage($language);
+		$sentBy = htmlspecialchars(
+			Lang::translateFor($footerLanguage, 'mail.footer_sent_by', ['app' => "\u{1}"]),
+			ENT_QUOTES | ENT_SUBSTITUTE,
+			'UTF-8'
+		);
+		$sentBy = str_replace(
+			"\u{1}",
+			'<strong>' . htmlspecialchars($appNamePlain, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</strong>',
+			$sentBy
+		);
+		$ignoreNote = htmlspecialchars(
+			Lang::translateFor($footerLanguage, 'mail.footer_ignore'),
 			ENT_QUOTES | ENT_SUBSTITUTE,
 			'UTF-8'
 		);
@@ -579,8 +598,8 @@ final class MailService
 					{$body}
 				</div>
 				<div style='margin-top: 40px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 14px; color: #718096; text-align: center;'>
-					Wiadomość wysłana przez <strong>{$appName}</strong><br>
-					<small>Jeśli nie spodziewałeś się tej wiadomości, zignoruj ją.</small>
+					{$sentBy}<br>
+					<small>{$ignoreNote}</small>
 				</div>
 			</div>
 		</body>
@@ -595,6 +614,23 @@ final class MailService
 			'headers' => $headers,
 			'html_body' => $htmlMessage,
 		];
+	}
+
+	/**
+	 * The language of the footer every message carries: the recipient's when the caller knows
+	 * it, otherwise the language of the request that wrote the mail, otherwise the
+	 * installation default (cron has no request).
+	 */
+	private static function footerLanguage(?string $language): string
+	{
+		$language = trim((string) $language);
+		if ($language !== '') {
+			return $language;
+		}
+		if (PHP_SAPI !== 'cli') {
+			return Lang::current();
+		}
+		return (string) Database::getSetting('default_language', 'pl');
 	}
 
 	/** Deliver an already-rendered row without re-entering the outbox. */
