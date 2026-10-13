@@ -9,7 +9,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header" id="ccModalHeader">
 			<h3><i class="fa-solid fa-box-archive"></i> <?= _h('panel.cc.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('createCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('createCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="createCollectionMessage" class="auth-message"></div>

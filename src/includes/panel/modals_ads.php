@@ -10,7 +10,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-rectangle-ad"></i> <span id="adFormTitle"><?= _h('panel.ads.form_title') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('adFormModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('adFormModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="adFormMessage" class="auth-message"></div>
@@ -109,7 +109,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-tags"></i> <span id="packageFormTitle"><?= _h('panel.ads.package_form_title') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('packageFormModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('packageFormModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="packageFormMessage" class="auth-message"></div>
@@ -193,7 +193,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-circle-xmark"></i> <?= _h('panel.ads.reject_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('adRejectModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('adRejectModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="adRejectId">
@@ -226,7 +226,7 @@ if (!defined('APP_ROOT')) {
 				<h3><i class="fa-solid fa-arrows-to-dot"></i> <?= _h('panel.ads.assign_title') ?></h3>
 				<span id="zoneAssignLabel" class="zone-assign-label"></span>
 			</div>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('zoneAssignModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('zoneAssignModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="zoneAssignZone">
@@ -250,7 +250,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-crop-simple"></i> <?= _h('panel.ads.crop_title') ?> <span id="adCropModalDims" style="color:var(--accent); font-size:0.85em;"></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="adCropCancel()"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="adCropCancel()"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div class="ad-crop-stage">
@@ -281,7 +281,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-rotate-right"></i> <?= _h('panel.myads.renew_title') ?> <span id="myAdRenewName" style="color:var(--accent)"></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('myAdRenewModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('myAdRenewModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="myAdRenewAdId">
@@ -301,7 +301,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-bolt"></i> <?= _h('panel.myads.boost_title') ?> <span id="myAdBoostName" style="color:var(--accent)"></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('myAdBoostModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('myAdBoostModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="myAdBoostAdId">
@@ -319,7 +319,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-rectangle-ad"></i> <span id="myAdFormTitle"><?= _h('panel.myads.form_title') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('myAdFormModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('myAdFormModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="myAdFormMessage" class="auth-message"></div>

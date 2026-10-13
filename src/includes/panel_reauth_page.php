@@ -103,9 +103,13 @@ if ($reauthCaptchaConfig === false) {
 			<?php endif; ?>
 
 			<?php if (!$reauthLocked): ?>
-				<form method="post" autocomplete="off">
+				<form method="post">
 					<input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
 					<input type="hidden" name="action" value="panel_reauth">
+					<?php /* Not submitted for anything: it tells a phone's password manager which
+					         saved account the password below belongs to, so it can offer it. */ ?>
+					<input type="text" name="username" value="<?= htmlspecialchars($reauthUsername, ENT_QUOTES, 'UTF-8') ?>"
+						autocomplete="username" readonly hidden>
 					<div class="form-group">
 						<label for="reauthPassword"><?= _h('panel.reauth.password') ?></label>
 						<input class="auth-input" type="password" id="reauthPassword" name="password" required autofocus

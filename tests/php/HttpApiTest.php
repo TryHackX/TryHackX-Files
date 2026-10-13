@@ -788,8 +788,13 @@ final class HttpApiTest extends TestCase
 		// The gate is the one page a visitor is asked to type a password into, so it has to
 		// look like the rest of the product: the site's own stylesheet and background layer,
 		// the sign-in modal's card and controls, and the same raised-not-centred placement.
+		$this->assertStringContainsString('/assets/css/base.css', $restored['body']);
 		$this->assertStringContainsString('/assets/css/index.css', $restored['body']);
 		$this->assertStringContainsString('class="bg-wrap"', $restored['body']);
+		// A phone's password manager needs the account name next to the password to offer the
+		// saved credential; the form must not switch autofill off either.
+		$this->assertMatchesRegularExpression('/name="username"[^>]*autocomplete="username"/', $restored['body']);
+		$this->assertDoesNotMatchRegularExpression('/<form method="post" autocomplete="off"/', $restored['body']);
 		$this->assertStringContainsString('class="auth-box reauth-box"', $restored['body']);
 		$this->assertStringContainsString('class="auth-input"', $restored['body']);
 		$this->assertStringContainsString('class="auth-submit"', $restored['body']);

@@ -10,7 +10,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-sm">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-copy"></i> <?= _h('panel.lang.duplicate') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('languageDuplicateModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('languageDuplicateModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="languageDuplicateMessage" class="auth-message"></div>
@@ -44,7 +44,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-language"></i> <?= _h('panel.lang.add') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('languageUploadModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('languageUploadModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="languageUploadMessage" class="auth-message"></div>

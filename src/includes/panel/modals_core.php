@@ -11,7 +11,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.modal.del_file') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('deleteModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('deleteModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="deleteFileMessage" class="auth-message"></div>
@@ -30,7 +30,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-user-plus"></i> <?= _h('panel.modal.create_user') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('createUserModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('createUserModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="createUserMessage" class="auth-message"></div>
@@ -83,7 +83,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-ban"></i> <?= _h('panel.modal.ban_user') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('advancedBanModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('advancedBanModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p><?= __('panel.modal.ban_opts', ['name' => $slot('banTargetUser')]) ?></p>
@@ -124,7 +124,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3 id="userActionTitle"><?= _h('panel.modal.user_action') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('userActionModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('userActionModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="userActionMessage" class="auth-message"></div>
@@ -144,7 +144,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-lg">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-flag"></i> <?= _h('panel.modal.report_details') ?> <span class="report-id" id="reportDetailsId"></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('reportDetailsModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('reportDetailsModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="reportDetailsContent"></div>
@@ -167,7 +167,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-shield-halved"></i> <?= _h('panel.modal.reject_report') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('rejectReportModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('rejectReportModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p><?= _h('panel.modal.reject_q') ?></p>
@@ -188,7 +188,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.modal.del_reported') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('deleteReportedModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('deleteReportedModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p><?= _h('panel.modal.del_reported_q') ?></p>
@@ -206,7 +206,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3 id="pwdConfirmTitle"><i class="fa-solid fa-lock"></i> <?= _h('panel.modal.pw_required') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('passwordConfirmModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('passwordConfirmModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p id="pwdConfirmMessage"><?= _h('panel.modal.pw_required_msg') ?></p>
@@ -229,7 +229,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal" style="max-width: 800px; width: 90%;">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-ban"></i> <?= _h('panel.modal.bans_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('ipBansModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('ipBansModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="ipBansMessage" class="auth-message"></div>
@@ -272,7 +272,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-ban"></i> <?= _h('panel.modal.add_ban_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('addBanModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('addBanModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="addBanMessage" class="auth-message"></div>
@@ -315,7 +315,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-broom"></i> <?= _h('panel.modal.cleanup') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('cleanupModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('cleanupModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p style="color:var(--text-muted); margin-bottom:15px;"><?= _h('panel.modal.cleanup_intro') ?></p>
@@ -353,7 +353,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-sm">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-circle-question" id="confirmIcon"></i> <span id="confirmTitle"><?= _h('panel.modal.confirm') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('confirmModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('confirmModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p id="confirmMessage"><?= _h('panel.modal.are_you_sure') ?></p>
@@ -370,7 +370,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.modal.del_file') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('myFileDeleteModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('myFileDeleteModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="myFileDeleteMessage" class="auth-message"></div>
@@ -388,7 +388,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-gear"></i> <?= _h('panel.fo.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('fileOptionsModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('fileOptionsModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="fileOptionsMessage" class="auth-message"></div>
@@ -460,7 +460,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-keyboard"></i> <?= _h('panel.sc.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('shortcutsModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('shortcutsModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<table class="shortcuts-table">

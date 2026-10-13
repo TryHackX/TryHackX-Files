@@ -9,7 +9,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-life-ring"></i> <?= _h('panel.2fa.rc_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('recoveryCodesModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('recoveryCodesModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="recoveryCodesMessage" class="auth-message"></div>

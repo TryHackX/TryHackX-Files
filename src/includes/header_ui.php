@@ -40,8 +40,9 @@
             && Database::getSetting('premium_show_header', '1') === '1';
         ?>
         <?php if ($__premiumOn): ?>
-            <a href="<?= $appUrl ?>/premium" class="btn btn-premium">
-                <i class="fa-solid fa-gem"></i> <?= _h('premium.nav') ?>
+            <?php /* Icon-only on phones (base.css), so the name also lives in aria-label/title. */ ?>
+            <a href="<?= $appUrl ?>/premium" class="btn btn-premium" title="<?= _h('premium.nav') ?>" aria-label="<?= _h('premium.nav') ?>">
+                <i class="fa-solid fa-gem" aria-hidden="true"></i> <?= _h('premium.nav') ?>
             </a>
         <?php endif; ?>
         <?php /* Between premium and the theme toggle: the bell is about this account, so it sits

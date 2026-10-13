@@ -9,7 +9,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-ticket"></i> <span id="promoFormTitle"><?= _h('panel.promo.form_title') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('promoFormModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('promoFormModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="promoFormMessage" class="auth-message"></div>

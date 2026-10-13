@@ -9,7 +9,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-pen"></i> <?= _h('panel.mu.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('manageUserModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('manageUserModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="manageUserMessage" class="auth-message"></div>
@@ -63,7 +63,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-users"></i> <?= _h('panel.grp.set_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('setUserGroupModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('setUserGroupModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="setUserGroupMessage" class="auth-message"></div>
@@ -94,7 +94,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-lg">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-users"></i> <span id="grpFormTitle"><?= _h('panel.grp.title') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('groupsModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('groupsModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="groupsMessage" class="auth-message"></div>
@@ -293,7 +293,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-chart-line"></i> <?= _h('panel.dash.range_custom') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('trafficRangeModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('trafficRangeModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div class="form-row">
@@ -329,7 +329,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trophy"></i> <?= _h('panel.top.settings') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('topFilesModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('topFilesModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div class="form-group">
@@ -371,7 +371,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-doc">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-book"></i> <span id="docModalTitle"></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('docModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('docModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div class="doc-view" id="docModalBody"><?= _h('common.loading') ?></div>

@@ -9,7 +9,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-key"></i> <?= _h('panel.ak.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('createApiKeyModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('createApiKeyModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="createApiKeyMessage" class="auth-message"></div>
@@ -47,7 +47,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.ak.revoke_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('revokeApiKeyModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('revokeApiKeyModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="revokeKeyId">
@@ -65,7 +65,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-bell"></i> <?= _h('panel.whm.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('createWebhookModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('createWebhookModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="createWebhookMessage" class="auth-message"></div>
@@ -108,7 +108,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.whm.del_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('deleteWebhookModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('deleteWebhookModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="delWebhookId">

@@ -10,7 +10,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-lg">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-filter"></i> <?= _h('panel.flt.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('filtersModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('filtersModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p style="color:var(--text-muted); font-size:0.87rem; margin:0 0 16px;"><?= _h('panel.flt.intro') ?></p>
@@ -189,7 +189,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-gear"></i> <?= _h('panel.cc.edit_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('collSettingsModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('collSettingsModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="collSettingsMessage" class="auth-message"></div>
@@ -262,7 +262,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-sm">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-lock"></i> <?= _h('pwprompt.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('fileDownloadModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('fileDownloadModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p style="color:var(--text-secondary); margin-bottom:14px;"><?= _h('pwprompt.subtitle') ?></p>
@@ -284,7 +284,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-md collection-zip-modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-lock"></i> <?= _h('panel.coll.zip_tooltip') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('collZipModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('collZipModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p id="czIntro" style="color:var(--text-secondary); margin-bottom:14px;"><?= _h('panel.cc.pw_required_download') ?></p>
@@ -308,7 +308,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-lock"></i> <?= _h('panel.cc.locked_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('collLockedModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('collLockedModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p style="color:var(--text-secondary); margin-bottom:14px;"><?= _h('panel.cc.locked_intro') ?></p>
@@ -331,7 +331,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-lg">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-filter"></i> <?= _h('panel.mflt.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('myFiltersModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('myFiltersModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<p style="color:var(--text-muted); font-size:0.87rem; margin:0 0 16px;"><?= _h('panel.mflt.intro') ?></p>
@@ -485,7 +485,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-folder-plus"></i> <?= _h('panel.atc.title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('addToCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('addToCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="addToCollectionMessage" class="auth-message"></div>
@@ -521,7 +521,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-trash"></i> <?= _h('panel.cc.del_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('deleteCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('deleteCollectionModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<input type="hidden" id="delCollId">

@@ -10,7 +10,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-lg">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-gem"></i> <span id="planModalTitle"><?= _h('panel.prem.add') ?></span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('planModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('planModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="planMessage" class="auth-message"></div>
@@ -190,7 +190,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-users-gear"></i> <?= _h('panel.prem.bulk_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('bulkPlanModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('bulkPlanModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="bulkPlanMessage" class="auth-message"></div>
@@ -237,7 +237,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-puzzle-piece" id="pluginIcon"></i> <span id="pluginName">—</span></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('pluginModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('pluginModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="pluginMessage" class="auth-message"></div>
@@ -266,7 +266,7 @@ if (!defined('APP_ROOT')) {
 	<div class="modal modal-sm">
 		<div class="modal-header">
 			<h3><i class="fa-solid fa-gem"></i> <?= _h('panel.prem.grant_title') ?></h3>
-			<button class="btn-icon modal-close" data-fh-click="closeModal('planGrantModal')"><i class="fa-solid fa-xmark"></i></button>
+			<button class="btn-icon modal-close" aria-label="<?= _h('common.close') ?>" data-fh-click="closeModal('planGrantModal')"><i class="fa-solid fa-xmark"></i></button>
 		</div>
 		<div class="modal-body">
 			<div id="planGrantMessage" class="auth-message"></div>

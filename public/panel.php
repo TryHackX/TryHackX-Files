@@ -282,7 +282,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<!-- Logged-in account modal (opened from the header person icon) -->
 	<div class="auth-modal" id="authModal">
 		<div class="auth-box">
-			<button class="auth-close" type="button" data-panel-action="close-auth">
+			<button class="auth-close" type="button" data-panel-action="close-auth" aria-label="<?= _h('common.close') ?>">
 				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
 					<line x1="18" y1="6" x2="6" y2="18" />
 					<line x1="6" y1="6" x2="18" y2="18" />
