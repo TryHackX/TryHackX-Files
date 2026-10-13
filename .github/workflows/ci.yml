@@ -236,15 +236,27 @@ jobs:
         with:
           persist-credentials: false
 
+      # Job logs need a GitHub login; check-run annotations do not. Every step below turns
+      # its failure into an `::error` annotation (tests/smoke/gh-annotate.sh), readable through
+      # GET /repos/{owner}/{repo}/check-runs/{id}/annotations without a token.
       - name: Build image
-        run: docker compose build --pull app
+        run: |
+          set -o pipefail
+          if ! docker compose build --pull app 2>&1 | tee build.log; then
+            bash tests/smoke/gh-annotate.sh error "Docker smoke: image build failed" "$(tail -n 40 build.log)"
+            exit 1
+          fi
 
       - name: Start isolated stack
-        run: docker compose up --detach db app
+        run: |
+          if ! docker compose up --detach db app; then
+            bash tests/smoke/gh-annotate.sh logs "Docker smoke: stack did not start"
+            exit 1
+          fi
 
       - name: Bootstrap fresh schema
         run: |
-          docker compose exec --no-TTY --user www-data \
+          if ! output="$(docker compose exec --no-TTY --user www-data \
             -e FILEHOST_CI_BOOTSTRAP=1 \
             -e FILEHOST_DB_HOST=db \
             -e FILEHOST_DB_USER="${MYSQL_USER}" \
@@ -252,11 +264,18 @@ jobs:
             -e FILEHOST_DB_NAME="${MYSQL_DATABASE}" \
             -e FILEHOST_DB_PREFIX=fh_ \
             -e FILEHOST_CANONICAL_URL="${FILEHOST_CANONICAL_URL}" \
-            app php scripts/ci-bootstrap-install.php
+            app php scripts/ci-bootstrap-install.php 2>&1)"; then
+            printf '%s\n' "${output}"
+            bash tests/smoke/gh-annotate.sh error "Docker smoke: schema bootstrap failed" "${output}"
+            exit 1
+          fi
+          printf '%s\n' "${output}"
           docker compose restart app
 
       - name: Wait for page and readiness
         run: |
+          page_status=""
+          ready_status=""
           for attempt in {1..90}; do
             page_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
               "${FILEHOST_CANONICAL_URL}/" || true)"
@@ -270,20 +289,39 @@ jobs:
           done
           docker compose ps
           docker compose logs --no-color app
+          bash tests/smoke/gh-annotate.sh error "Docker smoke: stack never became ready" \
+            "home page HTTP '${page_status}', upload server /ready '${ready_status}' after 90 attempts"
+          bash tests/smoke/gh-annotate.sh logs "Docker smoke: app log tail while waiting" app
           exit 1
 
       - name: Exercise upload and interrupted-download lifecycle
         run: bash tests/smoke/docker-transfer.sh
 
       - name: Verify relational integrity
-        run: docker compose exec --no-TTY --user www-data app php scripts/check-db-integrity.php --json
+        run: |
+          status=0
+          output="$(docker compose exec --no-TTY --user www-data app php scripts/check-db-integrity.php --json 2>&1)" || status=$?
+          printf '%s\n' "${output}"
+          if [ "${status}" -ne 0 ]; then
+            bash tests/smoke/gh-annotate.sh error "Docker smoke: relational integrity (exit ${status})" "${output}"
+            exit 1
+          fi
 
       - name: Verify storage manifests and checksums
-        run: docker compose exec --no-TTY --user www-data app php scripts/check-storage-integrity.php --json
+        run: |
+          status=0
+          output="$(docker compose exec --no-TTY --user www-data app php scripts/check-storage-integrity.php --json 2>&1)" || status=$?
+          printf '%s\n' "${output}"
+          if [ "${status}" -ne 0 ]; then
+            bash tests/smoke/gh-annotate.sh error "Docker smoke: storage integrity (exit ${status})" "${output}"
+            exit 1
+          fi
 
       - name: Show container logs after failure
         if: failure()
-        run: docker compose logs --no-color
+        run: |
+          docker compose logs --no-color
+          bash tests/smoke/gh-annotate.sh logs "Docker smoke: compose log tail after the failure"
 
       - name: Remove isolated stack
         if: always()
