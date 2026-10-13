@@ -759,18 +759,7 @@ final class FileController
 			return;
 		}
 
-		// Allow logged-in users to bypass captcha - DISABLED as per user request
-		/*
-		if (isset($_SESSION['user_id'])) {
-			$token = Database::createUploadToken(getClientIP(), $_SESSION['user_id']);
-			if ($token) {
-				echo json_encode(['success' => true, 'token' => $token]);
-				return;
-			}
-		}
-		*/
-
-
+		// Signed-in accounts solve the CAPTCHA too; an account is not proof of a human.
 		$input = json_decode(file_get_contents('php://input'), true);
 		$captchaResponse = $input['captcha_response'] ?? '';
 
@@ -797,27 +786,6 @@ final class FileController
 		echo json_encode(['success' => true, 'token' => $token]);
 	}
 
-	public static function handleVerifyToken()
-	{
-		header('Content-Type: application/json');
-
-		if (!Database::isRecaptchaEnabled()) {
-			echo json_encode(['success' => true, 'valid' => true]);
-			return;
-		}
-
-		$token = $_GET['token'] ?? $_SERVER['HTTP_X_UPLOAD_TOKEN'] ?? '';
-		$ip = $_GET['ip'] ?? getClientIP();
-
-		if (empty($token)) {
-			echo json_encode(['success' => true, 'valid' => false, 'error' => __('api.missing_token')]);
-			return;
-		}
-
-		$valid = Database::verifyUploadToken($token, $ip);
-		echo json_encode(['success' => true, 'valid' => $valid]);
-	}
-
 	public static function handleTokenInfo()
 	{
 		header('Content-Type: application/json');
@@ -836,31 +804,6 @@ final class FileController
 		} else {
 			echo json_encode(['success' => false, 'valid' => false]);
 		}
-	}
-
-	public static function handleIncrementToken()
-	{
-		header('Content-Type: application/json');
-
-		$input = json_decode(file_get_contents('php://input'), true);
-		$token = $input['token'] ?? $_GET['token'] ?? '';
-
-		if (empty($token)) {
-			echo json_encode(['success' => false, 'error' => __('api.missing_token')]);
-			return;
-		}
-
-		// Deprecated: Upload server now increments count automatically on start
-		// $result = Database::incrementTokenFileCount($token);
-		$result = true;
-
-		$info = Database::getTokenInfo($token, getClientIP());
-
-		echo json_encode([
-			'success' => $result,
-			'files_uploaded' => $info['files_uploaded'] ?? 0,
-			'files_remaining' => $info['files_remaining'] ?? -1
-		]);
 	}
 
 	/**
@@ -1889,31 +1832,6 @@ final class FileController
 		echo json_encode(['success' => true, 'added' => $added, 'name' => $collection['name']]);
 	}
 
-	public static function handleUserRenameCollection()
-	{
-		header('Content-Type: application/json');
-		if (!isset($_SESSION['user_id'])) {
-			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
-			return;
-		}
-		$input = json_decode(file_get_contents('php://input'), true) ?: [];
-		$id = (string) ($input['id'] ?? '');
-		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
-		if ($id === '' || $name === '') {
-			echo json_encode(['success' => false, 'error' => __('api.missing_data')]);
-			return;
-		}
-		$ownerId = empty($_SESSION['is_admin']) ? (int) $_SESSION['user_id'] : null;
-		echo json_encode(['success' => Database::renameCollection($id, $name, $ownerId)]);
-	}
-
-	/**
-	 * Edit a collection's name and sharing controls in one go (pt 17) — the collection
-	 * counterpart of handleUserSetFileOptions. Owners edit their own; admins edit any.
-	 *
-	 * Password handling matches the per-file modal: an absent/empty `password` leaves the
-	 * existing one untouched, `clear_password` removes it.
-	 */
 	/**
 	 * A short-lived token for one collection-ZIP download (runda 10). The ZIP endpoint used
 	 * to serve on the bare id; now the id alone is not a download — the token rides the same
@@ -2078,6 +1996,13 @@ final class FileController
 		echo json_encode($ok ? ['success' => true] : ['success' => false, 'error' => __('api.collection_not_found')]);
 	}
 
+	/**
+	 * Edit a collection's name and sharing controls in one go (pt 17) — the collection
+	 * counterpart of handleUserSetFileOptions. Owners edit their own; admins edit any.
+	 *
+	 * Password handling matches the per-file modal: an absent/empty `password` leaves the
+	 * existing one untouched, `clear_password` removes it.
+	 */
 	public static function handleUserUpdateCollection()
 	{
 		header('Content-Type: application/json');

@@ -38,4 +38,22 @@ abstract class RepoTestCase extends TestCase
 		$pdo->prepare("INSERT INTO `" . Database::table('files') . "` ($fields) VALUES ($ph)")
 			->execute(array_values($cols));
 	}
+
+	/** Insert an empty collection row directly (the app only creates them with members). */
+	protected function insertCollection(string $id, string $name, ?int $userId = null): void
+	{
+		Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('collections') . "`
+			 (`id`, `name`, `user_id`, `delete_token`, `downloads`, `created_at`) VALUES (?, ?, ?, ?, 0, ?)"
+		)->execute([$id, $name, $userId, password_hash('tok', PASSWORD_DEFAULT), time()]);
+	}
+
+	/** Insert one transfer-log row directly (the upload server writes them in production). */
+	protected function insertTraffic(string $ip, int $size, string $type, ?string $fileId = null, ?int $userId = null, ?int $at = null): void
+	{
+		Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('traffic_logs') . "`
+			 (`ip_address`, `transfer_size`, `transfer_type`, `file_id`, `user_id`, `created_at`) VALUES (?, ?, ?, ?, ?, ?)"
+		)->execute([$ip, $size, $type, $fileId, $userId, $at ?? time()]);
+	}
 }

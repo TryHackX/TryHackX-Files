@@ -86,15 +86,12 @@ final class NotificationRepositoryTest extends RepoTestCase
 		$this->assertSame(0, $res['unread'], 'a silent row must not light up the bell');
 	}
 
-	public function testExistsSeesBothReadAndUnreadRows(): void
+	public function testAOnceKeyStaysClaimedAfterTheRowIsRead(): void
 	{
-		$this->assertFalse(NotificationRepository::exists($this->userId, 'plan.expiring:1'));
-		NotificationRepository::push($this->userId, 'plan.expiring', 'Pro', '', [], 'plan.expiring:1');
-		$this->assertTrue(NotificationRepository::exists($this->userId, 'plan.expiring:1'));
-
+		$this->assertTrue(NotificationRepository::push($this->userId, 'plan.expiring', 'Pro', '', [], 'plan.expiring:1', 1, false, 'plan.expiring:1'));
 		NotificationRepository::markAllRead($this->userId);
-		$this->assertTrue(
-			NotificationRepository::exists($this->userId, 'plan.expiring:1'),
+		$this->assertFalse(
+			NotificationRepository::push($this->userId, 'plan.expiring', 'Pro', '', [], 'plan.expiring:1', 1, false, 'plan.expiring:1'),
 			'a warning already given stays given after it is read'
 		);
 	}

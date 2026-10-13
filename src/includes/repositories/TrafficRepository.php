@@ -9,21 +9,6 @@
  */
 final class TrafficRepository
 {
-	public static function log(string $ip, int $size, string $type, ?string $fileId = null, ?int $userId = null): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-		$table = Database::table('traffic_logs');
-		try {
-			$stmt = $pdo->prepare("INSERT INTO `{$table}` (`ip_address`, `transfer_size`, `transfer_type`, `file_id`, `user_id`, `created_at`) VALUES (?, ?, ?, ?, ?, ?)");
-			return $stmt->execute([$ip, $size, $type, $fileId, $userId, time()]);
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
 	/** Total transferred bytes over the rolling window for $period (day/week/month/year). */
 	public static function stats(string $period = 'day'): int
 	{
@@ -77,13 +62,6 @@ final class TrafficRepository
 		} catch (PDOException $e) {
 			return [];
 		}
-	}
-
-	/** Per-day upload/download totals for the last N days, today included (dashboard charts). */
-	public static function series(int $days = 7): array
-	{
-		$days = max(1, $days);
-		return self::seriesRange(strtotime('today') - (($days - 1) * 86400), time(), 'day');
 	}
 
 	/**

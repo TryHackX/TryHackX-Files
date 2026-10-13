@@ -586,33 +586,6 @@ class FileManager
 		}
 	}
 
-	public static function saveFile(array $data): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo)
-			return false;
-
-		$table = self::table('files');
-
-		try {
-			$stmt = $pdo->prepare("INSERT INTO `{$table}` (`id`, `original_name`, `mime_type`, `size`, `delete_token`, `uploaded_at`, `uploaded_ip`, `downloads`, `user_id`) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)");
-
-			return $stmt->execute([
-				$data['id'],
-				$data['originalName'],
-				$data['mimeType'] ?? 'application/octet-stream',
-				$data['size'] ?? 0,
-				$data['deleteToken'],
-				$data['uploadedAt'] ?? time(),
-				$data['uploadedIP'] ?? '',
-				$data['userId'] ?? null
-			]);
-		} catch (PDOException $e) {
-			error_log("Failed to save file: " . $e->getMessage());
-			return false;
-		}
-	}
-
 	public static function deleteFile(string $id, string $token): bool
 	{
 		if (!self::isValidFileId($id) || strlen($token) > InputLimits::SHORT_TEXT_MAX) {
@@ -1948,15 +1921,6 @@ class FileManager
 		} catch (PDOException $e) {
 			return 0;
 		}
-	}
-
-	public static function cleanupFiles(array $criteria): int
-	{
-		$preview = self::previewCleanup($criteria);
-		if (!$preview['valid'] || $preview['ids'] === []) {
-			return 0;
-		}
-		return self::deleteCleanupCandidates($preview['ids']);
 	}
 
 	/**

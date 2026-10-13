@@ -514,12 +514,6 @@ final class PaymentRepository
 		self::update($extOrderId, ['provider_order_id' => $providerOrderId]);
 	}
 
-	/** Attach order metadata (JSON) after start() — e.g. the promo code the price used. */
-	public static function setMeta(string $extOrderId, array $meta): void
-	{
-		self::update($extOrderId, ['meta' => json_encode($meta, JSON_UNESCAPED_UNICODE)]);
-	}
-
 	public static function setStatus(string $extOrderId, string $status): void
 	{
 		$pdo = Database::getInstance();

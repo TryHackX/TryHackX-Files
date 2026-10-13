@@ -244,9 +244,10 @@ function webhookAllowedEvents(): array
 }
 
 /**
- * SSRF guard for a webhook target address: only public unicast addresses pass. Private,
- * loopback, link-local/cloud-metadata (169.254.0.0/16), shared CGNAT (100.64.0.0/10),
- * multicast/reserved and IPv6 multicast are all refused.
+ * SSRF guard for a webhook target, checked when the webhook is registered: only globally
+ * routable addresses pass — private, loopback, link-local/cloud-metadata, CGNAT, multicast and
+ * reserved ranges are refused. The upload server re-resolves and checks again at delivery and
+ * pins the connection to the address it checked, so a DNS change after registration is caught.
  */
 function webhookIpIsPublic(string $ip): bool
 {

@@ -4967,11 +4967,6 @@ class Database
 		return FileRepository::verifyPassword($fileId, $password);
 	}
 
-	public static function verifyFileDeleteToken(string $fileId, string $token): bool
-	{
-		return FileRepository::verifyDeleteToken($fileId, $token);
-	}
-
 	/** Record an administrative/security event. */
 	/* Audit trail — delegated to AuditService (Faza 5 · #2). */
 
@@ -5156,11 +5151,6 @@ class Database
 
 	/* A user's own files — delegated to FileRepository (Faza 5 · #2). */
 
-	public static function getUserFiles(int $userId): array
-	{
-		return FileRepository::forUser($userId);
-	}
-
 	public static function getUserFilesPage(
 		int $userId,
 		int $limit,
@@ -5242,13 +5232,7 @@ class Database
 	 * collection is read, so no delete-path bookkeeping is required.
 	 * ------------------------------------------------------------------ */
 
-	/** Create an empty collection owned by $userId (delete_token is already hashed). */
 	/* Collections — delegated to CollectionRepository (Faza 5 · #2). */
-
-	public static function createCollection(string $id, string $name, ?int $userId, string $deleteTokenHash): bool
-	{
-		return CollectionRepository::create($id, $name, $userId, $deleteTokenHash);
-	}
 
 	public static function createCollectionWithFiles(
 		string $id,
@@ -5489,17 +5473,6 @@ class Database
 		return ReportRepository::reject($reportId);
 	}
 
-	public static function deleteReportsByFileIds(array $fileIds): int
-	{
-		return ReportRepository::deleteByFileIds($fileIds);
-	}
-
-	/** Report-spam check — delegated to ReportRepository (Faza 5 · #2). */
-	public static function checkSpam(string $email): bool
-	{
-		return ReportRepository::isSpammer($email);
-	}
-
 	/* Email — delegated to MailService (Faza 5 · #2). */
 
 	public static function sendEmail(
@@ -5646,11 +5619,6 @@ class Database
 
 	/* Traffic accounting / dashboard metrics — delegated to TrafficRepository (Faza 5 · #2). */
 
-	public static function logTraffic(string $ip, int $size, string $type, ?string $fileId = null, ?int $userId = null): bool
-	{
-		return TrafficRepository::log($ip, $size, $type, $fileId, $userId);
-	}
-
 	public static function getTrafficStats(string $period = 'day'): int
 	{
 		return TrafficRepository::stats($period);
@@ -5659,11 +5627,6 @@ class Database
 	public static function getTopTrafficIPs(int $hours = 24, int $limit = 50): array
 	{
 		return TrafficRepository::topIPs($hours, $limit);
-	}
-
-	public static function getTrafficSeries(int $days = 7): array
-	{
-		return TrafficRepository::series($days);
 	}
 
 	public static function getTrafficSeriesRange(int $from, int $to, string $bucket = 'day'): array

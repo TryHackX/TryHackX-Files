@@ -12,15 +12,15 @@ final class TrafficRepositoryTest extends RepoTestCase
 
 	public function testStatsSumOverWindow(): void
 	{
-		Database::logTraffic('10.0.0.1', 1000, 'download', null, null);
-		Database::logTraffic('10.0.0.1', 500, 'upload', null, null);
+		$this->insertTraffic('10.0.0.1', 1000, 'download', null, null);
+		$this->insertTraffic('10.0.0.1', 500, 'upload', null, null);
 		$this->assertSame(1500, Database::getTrafficStats('day'));
 	}
 
 	public function testTopIpsAndSuspicious(): void
 	{
-		Database::logTraffic('10.0.0.1', 5000, 'download', null, null);
-		Database::logTraffic('10.0.0.2', 100, 'download', null, null);
+		$this->insertTraffic('10.0.0.1', 5000, 'download', null, null);
+		$this->insertTraffic('10.0.0.2', 100, 'download', null, null);
 
 		$top = Database::getTopTrafficIPs(24, 10);
 		$this->assertSame('10.0.0.1', $top[0]['ip_address']); // biggest first
@@ -33,8 +33,8 @@ final class TrafficRepositoryTest extends RepoTestCase
 
 	public function testSeriesHasOneEntryPerDay(): void
 	{
-		Database::logTraffic('10.0.0.1', 200, 'download', null, null);
-		$series = Database::getTrafficSeries(7);
+		$this->insertTraffic('10.0.0.1', 200, 'download', null, null);
+		$series = TrafficRepository::seriesRange(strtotime('today') - 6 * 86400, time(), 'day');
 		$this->assertCount(7, $series);
 		$today = end($series);
 		$this->assertSame(200, (int) $today['download']);

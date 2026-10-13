@@ -88,21 +88,6 @@ final class CollectionRepository
 		}
 	}
 
-	public static function create(string $id, string $name, ?int $userId, string $deleteTokenHash): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-		$table = Database::table('collections');
-		try {
-			$stmt = $pdo->prepare("INSERT INTO `{$table}` (`id`, `name`, `user_id`, `delete_token`, `downloads`, `created_at`) VALUES (?, ?, ?, ?, 0, ?)");
-			return $stmt->execute([$id, $name, $userId, $deleteTokenHash, time()]);
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
 	/**
 	 * The most files one collection holds. Creation always enforced it; adding one file at a
 	 * time did not, and a collection past it could no longer be reordered (that request is
@@ -780,28 +765,6 @@ final class CollectionRepository
 		$stmt = $pdo->prepare($sql . ' FOR UPDATE');
 		$stmt->execute($params);
 		return (bool) $stmt->fetchColumn();
-	}
-
-	/** Does this collection exist and belong to $ownerId (null = admin, any owner passes)? */
-	private static function ownedBy(string $collectionId, ?int $ownerId): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-		try {
-			$sql = "SELECT 1 FROM `" . Database::table('collections') . "` WHERE `id` = ?";
-			$params = [$collectionId];
-			if ($ownerId !== null) {
-				$sql .= ' AND `user_id` = ?';
-				$params[] = $ownerId;
-			}
-			$stmt = $pdo->prepare($sql . ' LIMIT 1');
-			$stmt->execute($params);
-			return (bool) $stmt->fetchColumn();
-		} catch (PDOException $e) {
-			return false;
-		}
 	}
 
 	/** Rename a collection. Scoped to $ownerId unless null (admin). */

@@ -17,10 +17,10 @@ final class CollectionRepositoryTest extends RepoTestCase
 		$this->insertFile('cr_a', null, ['size' => 1024 * 1024, 'original_name' => 'a.bin']);
 		$this->insertFile('cr_b', null, ['size' => 2 * 1024 * 1024, 'original_name' => 'b.bin']);
 
-		Database::createCollection('full1', 'Holiday photos', null, password_hash('tok', PASSWORD_DEFAULT));
+		$this->insertCollection('full1', 'Holiday photos');
 		Database::addFilesToCollection('full1', ['cr_a', 'cr_b'], null);
 
-		Database::createCollection('empty1', 'Leftovers', null, password_hash('tok', PASSWORD_DEFAULT));
+		$this->insertCollection('empty1', 'Leftovers');
 	}
 
 	public function testBrowseReturnsCountsAndSizes(): void

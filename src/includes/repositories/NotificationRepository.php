@@ -146,36 +146,6 @@ final class NotificationRepository
 	}
 
 	/**
-	 * Has this account already been told this?
-	 *
-	 * For warnings rather than events: "your plan runs out on the 3rd" is true every time the
-	 * cron runs, and saying it once is the whole point. Stacking cannot express that — it would
-	 * turn one warning into "×12 since Tuesday" — so the emitter asks first.
-	 *
-	 * @param int $since only look this far back; 0 = ever.
-	 */
-	public static function exists(int $userId, string $groupKey, int $since = 0): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo || $userId <= 0 || $groupKey === '') {
-			return false;
-		}
-		try {
-			$sql = "SELECT 1 FROM `" . self::table() . "` WHERE `user_id` = ? AND `group_key` = ?";
-			$params = [$userId, mb_substr($groupKey, 0, 80)];
-			if ($since > 0) {
-				$sql .= ' AND `updated_at` >= ?';
-				$params[] = $since;
-			}
-			$stmt = $pdo->prepare($sql . ' LIMIT 1');
-			$stmt->execute($params);
-			return (bool) $stmt->fetchColumn();
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
-	/**
 	 * The same one-off notice for many accounts, in a few multi-row statements instead of a
 	 * handful of queries per account — the broadcast path. Rows carry $dedupeKey, so a retried
 	 * request adds nothing for accounts that already have it.

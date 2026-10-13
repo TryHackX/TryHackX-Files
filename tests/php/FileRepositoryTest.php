@@ -78,8 +78,11 @@ final class FileRepositoryTest extends RepoTestCase
 		$this->assertFalse($denied['allowed']);
 		$this->assertSame(403, $denied['status']);
 
+		// A one-time, capped file is never streamed as an uncounted preview — not even with the
+		// password — and asking does not burn it (see FileManager::previewPolicy()).
 		$preview = FileManager::authorizeFileRead('f_policy', 'preview', true);
-		$this->assertTrue($preview['allowed']);
+		$this->assertFalse($preview['allowed']);
+		$this->assertSame(403, $preview['status']);
 		$this->assertFalse(Database::oneTimeConsumed('f_policy'));
 
 		$download = FileManager::authorizeFileRead('f_policy', 'download', true);
@@ -114,7 +117,7 @@ final class FileRepositoryTest extends RepoTestCase
 		$this->insertFile('f_b', 5, ['size' => 250, 'downloads' => 3]);
 		$this->insertFile('f_c', 6, ['size' => 999]); // another user
 
-		$this->assertCount(2, Database::getUserFiles(5));
+		$this->assertCount(2, Database::getUserFilesPage(5, 100)['files']);
 		$this->assertSame('f_a', Database::getUserFileById(5, 'f_a')['id']);
 		$this->assertNull(Database::getUserFileById(5, 'f_c')); // not owner
 

@@ -97,10 +97,9 @@ if ($errCode !== '' && Lang::has('premium.err_' . $errCode)) {
 	$order = PaymentRepository::byExtOrderId((string) $_GET['order']);
 	// Only ever act on — or talk about — someone's own order.
 	if ($order && isset($_SESSION['user_id']) && (int) $order['user_id'] === (int) $_SESSION['user_id']) {
-		// The buyer is standing here having just paid, so ask the provider outright instead of
-		// waiting for a notification that may be minutes away — or, on an installation PayU
-		// cannot reach at all, never coming. This is the moment the answer matters most.
-		// GET rendering is read-only; webhooks and the scheduled worker own reconciliation.
+		// Report what the ledger says right now. A GET only reads: the provider's notification
+		// and the scheduled reconciliation (scripts/cleanup.php) are what complete an order, so
+		// a payment that is still pending here is normally settled within minutes.
 		$status = (string) $order['status'];
 		$paid = $status === PaymentRepository::COMPLETED;
 		$noticeText = $paid ? __('premium.order_done') : __('premium.order_pending');

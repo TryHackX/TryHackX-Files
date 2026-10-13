@@ -123,57 +123,6 @@ final class ReportRepository
 		}
 	}
 
-	/**
-	 * Remove any moderation reports tied to the given file id(s). Called from every
-	 * file-deletion path so deleting a file also closes its reports instead of leaving
-	 * dead entries on the "Moderate" list. Chunked to keep the IN() list bounded on
-	 * large bulk/cron cleanups. Returns the number of report rows removed.
-	 */
-	public static function deleteByFileIds(array $fileIds): int
-	{
-		if (empty($fileIds)) {
-			return 0;
-		}
-
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return 0;
-		}
-
-		$reportsTable = Database::table('reports');
-		$fileIds = array_values(array_unique($fileIds));
-		$removed = 0;
-
-		try {
-			foreach (array_chunk($fileIds, 500) as $chunk) {
-				$placeholders = implode(',', array_fill(0, count($chunk), '?'));
-				$stmt = $pdo->prepare("DELETE FROM `{$reportsTable}` WHERE `file_id` IN ({$placeholders})");
-				$stmt->execute($chunk);
-				$removed += $stmt->rowCount();
-			}
-			return $removed;
-		} catch (PDOException $e) {
-			return 0;
-		}
-	}
-
-	/** True when $email has filed more than 5 reports in the last hour (fails safe → true on error). */
-	public static function isSpammer(string $email): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-		$reportsTable = Database::table('reports');
-		try {
-			$stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$reportsTable}` WHERE `reporter_email` = ? AND `created_at` > ?");
-			$stmt->execute([$email, time() - 3600]);
-			return (int) $stmt->fetchColumn() > 5;
-		} catch (PDOException $e) {
-			return true; // Fail safe
-		}
-	}
-
 	/** Record that $ip just passed a CAPTCHA for reporting — resets its report throttle window. */
 	public static function markVerified(string $ip): void
 	{

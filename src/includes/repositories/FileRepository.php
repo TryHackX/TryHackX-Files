@@ -78,8 +78,8 @@ final class FileRepository
 	 *
 	 * The claim is a single conditional UPDATE (`consumed_at IS NULL`), so two racing
 	 * downloads can never both succeed: exactly one changes the row (rowCount 1), the
-	 * other matches nothing (rowCount 0) and is refused. On a DB error we fail open, to
-	 * match the rest of the download path (limits are advisory, not a hard gate).
+	 * other matches nothing (rowCount 0) and is refused. On a DB error the claim fails
+	 * closed: a link whose burn cannot be recorded is not served.
 	 */
 	public static function claimOneTime(string $fileId): bool
 	{
@@ -217,49 +217,6 @@ final class FileRepository
 			return $hash === null || $hash === '' || password_verify($password, (string) $hash);
 		} catch (PDOException $e) {
 			return false;
-		}
-	}
-
-	/**
-	 * True when $token is the file's delete token (pt 1).
-	 *
-	 * The delete token is handed out once, to whoever uploaded the file, and is what the upload
-	 * page already uses to prove "this upload is mine" when setting or clearing its password. So
-	 * it is also the right proof for "I may put my own just-uploaded file into a collection
-	 * without retyping the password I set on it seconds ago" — knowledge of it is strictly
-	 * stronger evidence than holding the account session, which is the case pt 1 closes.
-	 */
-	public static function verifyDeleteToken(string $fileId, string $token): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo || $token === '' || strlen($token) > InputLimits::SHORT_TEXT_MAX) {
-			return false;
-		}
-		$table = Database::table('files');
-		try {
-			$stmt = $pdo->prepare("SELECT `delete_token` FROM `{$table}` WHERE `id` = ?");
-			$stmt->execute([$fileId]);
-			$hash = $stmt->fetchColumn();
-			return !empty($hash) && password_verify($token, (string) $hash);
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
-	/** All of a user's files, newest first. */
-	public static function forUser(int $userId): array
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return [];
-		}
-		$table = Database::table('files');
-		try {
-			$stmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE `user_id` = ? ORDER BY `uploaded_at` DESC");
-			$stmt->execute([$userId]);
-			return $stmt->fetchAll(PDO::FETCH_ASSOC);
-		} catch (PDOException $e) {
-			return [];
 		}
 	}
 

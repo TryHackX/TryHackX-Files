@@ -21,7 +21,7 @@ final class CollectionAddTest extends RepoTestCase
         $this->otherId = $this->makeUser();
 
         $this->collectionId = 'c' . bin2hex(random_bytes(6));
-        Database::createCollection($this->collectionId, 'Test', $this->userId, password_hash('t', PASSWORD_DEFAULT));
+        $this->insertCollection($this->collectionId, 'Test', $this->userId);
     }
 
     private function makeUser(): int

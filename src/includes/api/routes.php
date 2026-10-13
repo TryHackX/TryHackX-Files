@@ -60,10 +60,8 @@ $routes = [
 	// the upload server run its readiness probe, which must not be free to repeat unthrottled.
 	'health' => $read([FileController::class, 'handleHealth']),
 	'verify_captcha' => $write([FileController::class, 'handleVerifyCaptcha'], false, null, 'auth'),
-	'verify_token' => $read([FileController::class, 'handleVerifyToken']),
 	'upload_status' => $read([FileController::class, 'handleUploadStatus']),
 	'token_info' => $read([FileController::class, 'handleTokenInfo']),
-	'increment_token' => $write([FileController::class, 'handleIncrementToken']),
 
 	// ---- A user's own files, options, collections, keys and webhooks ----
 	'user_files' => $read([FileController::class, 'handleUserFiles'], true),
@@ -77,7 +75,6 @@ $routes = [
 	'user_collections' => $read([FileController::class, 'handleUserCollections'], true),
 	'verify_collection_password' => $write([FileController::class, 'handleVerifyCollectionPassword']),
 	'collection_zip_token' => $write([FileController::class, 'handleCollectionZipToken']),
-	'user_rename_collection' => $write([FileController::class, 'handleUserRenameCollection'], true),
 	'user_update_collection' => $write([FileController::class, 'handleUserUpdateCollection'], true),
 	'user_collection_files' => $read([FileController::class, 'handleUserCollectionFiles'], true),
 	'user_collection_remove_file' => $write([FileController::class, 'handleUserCollectionRemoveFile'], true),

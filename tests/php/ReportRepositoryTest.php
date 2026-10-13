@@ -35,7 +35,7 @@ final class ReportRepositoryTest extends RepoTestCase
 		$this->assertSame('Copyright', Database::getReportDetails($rid)['report_title']);
 
 		// Deleting the file closes its reports.
-		$this->assertSame(1, Database::deleteReportsByFileIds(['rep_file']));
+		$this->assertTrue(FileManager::deleteFileAdmin('rep_file'));
 		$this->assertSame(0, Database::getReportedFiles(1, 20)['total']);
 	}
 
@@ -45,18 +45,6 @@ final class ReportRepositoryTest extends RepoTestCase
 		$rid = (int) Database::addReport('rep_file', $this->reportData())['report_id'];
 		$this->assertTrue(Database::rejectReport($rid));
 		$this->assertNull(Database::getReportDetails($rid));
-	}
-
-	public function testSpamThreshold(): void
-	{
-		$this->insertFile('rep_file');
-		for ($i = 0; $i < 5; $i++) {
-			Database::addReport('rep_file', $this->reportData('spammer@e.pl'));
-		}
-		$this->assertFalse(Database::checkSpam('spammer@e.pl')); // 5 is not yet > 5
-		Database::addReport('rep_file', $this->reportData('spammer@e.pl'));
-		$this->assertTrue(Database::checkSpam('spammer@e.pl'));  // 6 > 5
-		$this->assertFalse(Database::checkSpam('innocent@e.pl'));
 	}
 
 	public function testReportCountResetsAfterVerification(): void

@@ -209,7 +209,7 @@ final class FileBrowseTest extends RepoTestCase
 	public function testInactiveFilterCountsNeverDownloadedFromUpload(): void
 	{
 		// A recent download keeps a file out of the "inactive for 5 days" set.
-		Database::logTraffic('10.0.0.1', 100, 'download', 'fbig', $this->aliceId);
+		$this->insertTraffic('10.0.0.1', 100, 'download', 'fbig', $this->aliceId);
 
 		$inactive = $this->ids(['inactive_days' => 5]);
 		$this->assertNotContains('fbig', $inactive, 'a just-downloaded file is active');

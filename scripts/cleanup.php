@@ -2,19 +2,20 @@
 /**
  * TryHackX Files — periodic housekeeping (P5).
  *
- * Deletes rows past their useful life (expired upload/download tokens, stale
- * active-download rows, old recovery attempts). These DELETEs used to run inline
- * in hot request paths; this script moves them to a scheduled job so normal
- * traffic stays lean. Read paths filter by timestamp, so behaviour is correct
- * regardless of how often this runs.
+ * One pass over everything that has to happen on a schedule:
+ *   - expired tokens, stale active-transfer rows, old recovery attempts and notifications;
+ *   - the durable file/banner deletion queues and the file quarantine's expiry;
+ *   - storage limits (accounts over quota after a downgrade) and file retention;
+ *   - payment reconciliation for orders whose provider notification never arrived;
+ *   - expiry warnings (files, plans, ads), ad expiry and purge;
+ *   - folding old transfer-log detail into daily totals.
+ * Read paths filter by timestamp, so behaviour is correct however often this runs.
  *
- * Run from cron / Task Scheduler, e.g. every 15 minutes:
- *   *\/15 * * * *  php /path/to/filehost/scripts/cleanup.php >> /var/log/filehost-cleanup.log 2>&1
+ * The upload server runs it on a schedule by itself; it can also be run from cron / Task
+ * Scheduler, e.g. every 15 minutes:
+ *   *\/15 * * * *  php /path/to/app/scripts/cleanup.php >> /var/log/filehost-cleanup.log 2>&1
  *
- * Windows Task Scheduler (daily/hourly):
- *   php.exe C:\wamp64\www\filehost\scripts\cleanup.php
- *
- * Safe to run by hand; it is idempotent and prints a one-line summary.
+ * Safe to run by hand; it is idempotent and prints a summary per stage.
  */
 
 if (PHP_SAPI !== 'cli') {
