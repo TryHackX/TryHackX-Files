@@ -75,7 +75,10 @@ Options -Indexes -MultiViews
 	# blank with a CSP violation. Framing our own origin is already limited by
 	# frame-ancestors 'self'.
 	<FilesMatch "\.(?:js|mjs|css|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|eot|map|txt|json|webmanifest)$">
-		Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+		Header setifempty Content-Security-Policy "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+		# HSTS for the same static files, and only over HTTPS. Documents get it from PHP
+		# (config.php, emitStrictTransportSecurity) under the same condition.
+		Header always set Strict-Transport-Security "max-age=31536000" "expr=%{HTTPS} == 'on'"
 	</FilesMatch>
 	Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
 </IfModule>
@@ -89,12 +92,6 @@ Options -Indexes -MultiViews
 		Deny from all
 	</IfModule>
 </FilesMatch>
-
-<Files "requirements.txt">
-	<IfModule mod_authz_core.c>
-		Require all denied
-	</IfModule>
-</Files>
 
 # /ads.txt must get past the .txt deny above: the access check runs against the requested
 # filename BEFORE the rewrite to adstxt.php happens, so without this the request dies as
@@ -119,23 +116,6 @@ Options -Indexes -MultiViews
 		Allow from all
 	</IfModule>
 </FilesMatch>
-
-<Files "config.php">
-	<IfModule mod_authz_core.c>
-		Require all denied
-	</IfModule>
-	<IfModule !mod_authz_core.c>
-		Order Allow,Deny
-		Deny from all
-	</IfModule>
-</Files>
-
-<IfModule mod_rewrite.c>
-	RewriteRule ^includes/ - [F,L]
-	RewriteRule ^data/ - [F,L]
-	RewriteRule ^venv/ - [F,L]
-	RewriteRule ^scripts/ - [F,L]
-</IfModule>
 
 <IfModule mod_deflate.c>
 	AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json

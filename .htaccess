@@ -1,16 +1,21 @@
-# Safety net for a development checkout (WAMP and similar) that sits under the default
-# localhost document root. The real virtual host's DocumentRoot is public/, so Apache never
-# applies this file to it; here everything EXCEPT public/ is blocked, which keeps src/, config/
-# (config.local.php), data/, uploads/ and the Python server unreachable at
-# http://localhost/<project>/* while public/ stays reachable at http://localhost/<project>/public/.
-Options -Indexes
+# Read only when this project directory sits inside a web server's document root — typically
+# a local development setup reached as http://localhost/<project>/public/. Production and the
+# Docker image point DocumentRoot at public/ itself, so Apache never consults this file there
+# (docs/DEBIAN.md, docker/apache-vhost.conf).
+#
+# Everything outside public/ is refused: source, config/config.local.php, data/, uploads/,
+# tests/, tools/, vendor/, docs/, the Python server and .git/. Listing the forbidden directories
+# one by one (as this file used to) silently missed whatever was added later.
+Options -Indexes -MultiViews
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^(src|config|data|uploads|scripts|venv|docs|__pycache__)/ - [F,L]
+    RewriteRule !^public(?:/|$) - [F,L]
 </IfModule>
 
-<FilesMatch "\.(py|pyc|md|lock|service|bat)$">
+# Fallback for a server without mod_rewrite, and a second line for files that must never be
+# served even from public/.
+<FilesMatch "(?:^\.|\.(?:py|pyc|md|lock|service|bat|sh|neon|sql|log)$)">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>
