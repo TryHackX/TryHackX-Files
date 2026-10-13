@@ -228,9 +228,11 @@
 		var api = sdk();
 		if (!api || typeof api.render !== 'function') return null;
 
+		// Follow the page: the widget used to be dark on the light theme.
+		var pageTheme = document.body && document.body.classList.contains('light') ? 'light' : 'dark';
 		var params = {
 			sitekey: state.siteKey,
-			theme: options.theme || 'dark'
+			theme: options.theme || pageTheme
 		};
 		if (typeof options.callback === 'function') params.callback = options.callback;
 		if (typeof options['error-callback'] === 'function') {

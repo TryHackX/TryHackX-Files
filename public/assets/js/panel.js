@@ -23,15 +23,15 @@
 	let pendingConfirmAction = null;
 
 	window.FHPanelState = Object.freeze({
-		getUsers: () => window.FHPanelUsers.getUsers(),
-		isRootAdmin: (userId) => window.FHPanelUsers.isRootAdmin(userId)
+		getUsers: () => (window.FHPanelUsers ? window.FHPanelUsers.getUsers() : []),
+		isRootAdmin: (userId) => Boolean(window.FHPanelUsers && window.FHPanelUsers.isRootAdmin(userId))
 	});
 	window.FHPanelCore = Object.freeze({
 		fetchLive,
 		showSkeleton,
 		finishSkeleton,
 		renderPager: (...args) => window.FHPanelFiles.renderPager(...args),
-		refreshUsers: () => window.FHPanelUsers.refreshCurrentPage(),
+		refreshUsers: () => window.FHPanelUsers?.refreshCurrentPage(),
 		resetCreateUserValidation: () => {
 			if (resetNewPw) resetNewPw();
 			if (resetNewEmail) resetNewEmail();
@@ -40,6 +40,8 @@
 			if (resetMuPw) resetMuPw();
 		},
 		reloadFiles: () => window.FHPanelFiles.loadFiles(1),
+		wirePwStrength: (...args) => wirePwStrength(...args),
+		bindLabels: (...args) => bindLabels(...args),
 		resetCollectionValidation: (kind) => {
 			if (kind === 'create' && resetCcPw) resetCcPw();
 			if (kind === 'settings' && resetCsPw) resetCsPw();
@@ -52,13 +54,15 @@
 	const esc = window.FHUtil.esc;
 	const formatSize = window.FHUtil.formatSize;
 	const formatDate = window.FHUtil.formatDate;
-	const attr = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
-		'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-	})[ch]);
 
-	function copyUrl(e, id) {
-		navigator.clipboard.writeText(appUrl + '/download.php?id=' + id);
-		showNotification(t('common.copied'), 'copy', e ? e.target : null);
+	async function copyUrl(e, id) {
+		// The target must be read before the await: the event's currentTarget is gone afterwards.
+		const target = e ? e.target : null;
+		if (await window.FHUtil.copyText(appUrl + '/download.php?id=' + id)) {
+			showNotification(t('common.copied'), 'copy', target);
+		} else {
+			showNotification(t('panel.coll.copy_failed'), 'error', target);
+		}
 	}
 
 	// ETag-aware GET for the live auto-refresh (A6). Stores the last ETag per
@@ -317,6 +321,40 @@
 				el.setAttribute('aria-label', el.getAttribute('title'));
 			}
 		});
+		bindLabels(document);
+	}
+
+	/**
+	 * Tie every bare `<label>Text</label><input id=…>` pair together. The panel's templates write
+	 * the label as a sibling of its field without `for`, so clicking the label did nothing and
+	 * screen readers announced an unnamed field. A label is bound only when the target is
+	 * unambiguous: the control right after it (or one wrapped in the next element), or the only
+	 * control in its form group. Wrapping labels (`<label><input> text</label>`) already work and
+	 * are left alone.
+	 */
+	let labelSeq = 0;
+	const LABEL_CONTROL = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), select, textarea';
+	function bindLabels(root) {
+		root.querySelectorAll('label:not([for])').forEach(label => {
+			if (label.querySelector('input, select, textarea')) return;
+			let control = null;
+			const next = label.nextElementSibling;
+			if (next) {
+				if (next.matches(LABEL_CONTROL)) control = next;
+				else {
+					const inside = next.querySelectorAll(LABEL_CONTROL);
+					if (inside.length >= 1 && !next.matches('label')) control = inside[0];
+				}
+			}
+			if (!control) {
+				const group = label.closest('.form-group');
+				const all = group ? group.querySelectorAll(LABEL_CONTROL) : [];
+				if (all.length === 1) control = all[0];
+			}
+			if (!control) return;
+			if (!control.id) control.id = 'fl_' + (++labelSeq);
+			label.htmlFor = control.id;
+		});
 	}
 
 	function showNotification(text, type = 'success', targetEl = null) {
@@ -363,16 +401,8 @@
 	/* ------------------------------------------------------------------ *
 	 * Theme + header
 	 * ------------------------------------------------------------------ */
-	function toggleTheme() {
-		document.body.classList.toggle('light');
-		const theme = document.body.classList.contains('light') ? 'light' : 'dark';
-		document.cookie = `theme=${theme};path=/;max-age=31536000`;
-	}
-
-	function toggleUserDropdown(e) {
-		if (e) e.stopPropagation();
-		document.getElementById('userDropdown')?.classList.toggle('show');
-	}
+	// One implementation for every page (ui.js); the `theme` cookie is the only state.
+	const toggleTheme = () => window.FHUi.toggleTheme();
 
 	async function handleLogout(e) {
 		if (e) e.preventDefault();
@@ -494,7 +524,7 @@
 		const evalStrength = () => {
 			const val = pass.value;
 			let score = 0;
-			[[o.len, val.length >= (Number(input.minLength) || 8)], [o.upper, /[A-Z]/.test(val)], [o.digit, /\d/.test(val)], [o.spec, /[^a-zA-Z0-9]/.test(val)]]
+			[[o.len, val.length >= (Number(pass.minLength) || 8)], [o.upper, /[A-Z]/.test(val)], [o.digit, /\d/.test(val)], [o.spec, /[^a-zA-Z0-9]/.test(val)]]
 				.forEach(([id, ok]) => { const el = id && document.getElementById(id); if (el) el.classList.toggle('valid', ok); if (ok) score++; });
 			if (bar) { const pct = (score / 4) * 100; bar.style.width = pct + '%'; bar.style.backgroundColor = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : pct < 75 ? '#f59e0b' : 'var(--success)'; }
 			evalMatch();
@@ -532,7 +562,7 @@
 	const {
 		loadUsers, sortUsers, userAction, executeUserAction,
 		openBanModal, executeAdvancedBan, showCreateUserModal, createUser
-	} = window.FHPanelUsers;
+	} = window.FHPanelUsers || {};
 
 	/* Premium plans, payments and subscriptions live in panel-premium.js. */
 	const {
@@ -571,7 +601,7 @@
 		goGroupsPage, onPermToggle, onGroupRetentionToggle, openSetUserGroup,
 		confirmSetUserGroup, renderGroupPreview, openManageUser, saveManageUser,
 		onManageRoleChange
-	} = window.FHPanelGroups;
+	} = window.FHPanelGroups || {};
 
 	/* Bans, reports and audit live in panel-moderation.js. */
 	const {
@@ -580,7 +610,7 @@
 		showRejectReport, confirmRejectReport, showDeleteReported,
 		confirmDeleteReported, rejectFromDetails, deleteFromDetails, loadAuditLog,
 		refreshReports, refreshAuditLog
-	} = window.FHPanelModeration;
+	} = window.FHPanelModeration || {};
 
 	/* Dashboard widgets and live transfers live in panel-dashboard.js. */
 	const {
@@ -588,7 +618,7 @@
 		openTopFilesSettings, onTopFilesPeriodChange, applyTopFilesSettings,
 		setTrafficRange, openTrafficRange, applyTrafficRange, loadTraffic,
 		loadActiveDownloads, killDownload, killUpload, initActiveDownloadsLive
-	} = window.FHPanelDashboard;
+	} = window.FHPanelDashboard || {};
 
 	/* Settings and account self-service live in panel-settings.js. */
 	const {
@@ -639,7 +669,7 @@
 		openMyAdRenew, confirmMyAdRenew, adCropClear, adCropApply,
 		adCropCancel, adCropCenter, adUploaderRecrop, initAdUploader,
 		adFormDims, myAdFormDims
-	} = window.FHPanelAds;
+	} = window.FHPanelAds || {};
 
 	/* ------------------------------------------------------------------ *
 	 * Init / dispatch
@@ -829,10 +859,6 @@
 		// never expose shifting headings, names or badges to the user.
 		initTableSkeletons();
 
-		document.addEventListener('click', e => {
-			if (!e.target.closest('.user-dropdown')) document.getElementById('userDropdown')?.classList.remove('show');
-		});
-
 		// One box, whichever list the scope is on — the term carries across a scope switch,
 		// because "szukam tego" does not stop being true when the object type changes.
 		bindFileControls();
@@ -945,7 +971,7 @@
 	 * Explicit action surface consumed by the declarative event dispatcher.
 	 * ------------------------------------------------------------------ */
 	const publicActions = {
-		openModal, closeModal, showModal, showNotification, flashMessage, toggleTheme, toggleUserDropdown, handleLogout,
+		openModal, closeModal, showModal, showNotification, flashMessage, toggleTheme, handleLogout,
 		showAuthModal, hideAuthModal, copyUrl,
 		sortBy, goPage, showDeleteFile, executeFileDelete,
 		toggleFileSelect, toggleSelectAllFiles, bulkDeleteFiles,

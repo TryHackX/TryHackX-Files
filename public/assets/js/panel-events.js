@@ -133,7 +133,7 @@
 
     function reportRejectedHandler(error) {
         if (window.FHUi?.toast) {
-            window.FHUi.toast(window.t?.('common.error') || 'Action unavailable.', 'error');
+            window.FHUi.toast(window.t?.('common.error') || 'Action unavailable.', { type: 'error' });
         }
         console.error('Rejected declarative panel handler:', error);
     }

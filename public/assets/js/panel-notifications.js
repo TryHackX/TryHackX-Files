@@ -11,7 +11,7 @@
         if (typeof window.showNotification === 'function') {
             window.showNotification(message, type, anchor);
         } else {
-            window.FHUi?.toast(message, type, { anchor });
+            window.FHUi?.toast(message, { type, target: anchor });
         }
     };
 

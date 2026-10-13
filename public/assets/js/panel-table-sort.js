@@ -149,8 +149,14 @@
 		table.style.setProperty('--table-min-width', `${Math.max(680, headers.length * 110)}px`);
 		headers.forEach((th, index) => {
 			if (!th.title) th.title = (th.textContent || '').replace(/\s+/g, ' ').trim();
+			// Headers the server sorts (`data-sort` + a declarative click) are skipped below, but
+			// they are just as clickable — make them reachable and operable from the keyboard.
+			if (th.hasAttribute('data-sort') || /sort/i.test(th.dataset.fhClick || '')) {
+				th.setAttribute('tabindex', '0');
+			}
 			if (actionHeader(th, index, headers.length)) return;
 			th.dataset.tableSortIndex = String(index);
+			th.setAttribute('tabindex', '0');
 			th.classList.add('table-sortable');
 			th.setAttribute('aria-sort', 'none');
 			if (!th.querySelector('.sort-icon')) {
@@ -175,6 +181,16 @@
 			if (!state) return;
 			state.sorts = nextSorts(state.sorts, Number(th.dataset.tableSortIndex), event.shiftKey, canMultiSort);
 			applySort(table);
+		});
+
+		// Enter / Space on a focused sortable header behaves like a click (generic sorter and the
+		// server-side `data-fh-click` sorters alike — both listen for the click).
+		document.addEventListener('keydown', event => {
+			if (event.key !== 'Enter' && event.key !== ' ') return;
+			const th = event.target;
+			if (!th || !th.matches || !th.matches('th[data-table-sort-index], th[data-sort]')) return;
+			event.preventDefault();
+			th.click();
 		});
 
 		const observer = new MutationObserver(mutations => {

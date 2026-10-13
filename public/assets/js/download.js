@@ -22,35 +22,6 @@
     let filePassword = '';
     let passwordPromptMode = 'download';
 
-    function startParallax() {
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        let mouseX = 0;
-        let mouseY = 0;
-        let currentX = 0;
-        let currentY = 0;
-        const orbs = [
-            { element: byId('orb1'), speed: 0.02 },
-            { element: byId('orb2'), speed: 0.015 },
-        ];
-
-        document.addEventListener('mousemove', (event) => {
-            mouseX = (event.clientX / window.innerWidth - 0.5) * 2;
-            mouseY = (event.clientY / window.innerHeight - 0.5) * 2;
-        });
-
-        function animate() {
-            currentX += (mouseX - currentX) * 0.05;
-            currentY += (mouseY - currentY) * 0.05;
-            orbs.forEach(({ element, speed }) => {
-                if (element) {
-                    element.style.transform = `translate(${currentX * 1000 * speed}px, ${currentY * 1000 * speed}px)`;
-                }
-            });
-            window.requestAnimationFrame(animate);
-        }
-        animate();
-    }
-
     async function copyLink() {
         try {
             await navigator.clipboard.writeText(window.location.href);
@@ -239,7 +210,12 @@
         }
     }
 
-    async function doDownload() {
+    /** One token request at a time — a double click must not mint (and burn) two links. */
+    function doDownload() {
+        return window.FHUi.singleFlight('download-token', doDownloadNow, document.querySelector('[data-download-action="download"]'));
+    }
+
+    async function doDownloadNow() {
         try {
             const result = await window.FHApi.post('get_download_token', {
                 id: config.fileId,
@@ -295,7 +271,7 @@
         if (slot.dataset.type === 'image') {
             element = document.createElement('img');
             element.src = sourceUrl;
-            element.alt = 'preview';
+            element.alt = window.t('download.preview_alt');
         } else if (slot.dataset.type === 'video') {
             element = document.createElement('video');
             element.controls = true;
@@ -414,8 +390,12 @@
         }
     }
 
-    async function submitReport(event) {
+    function submitReport(event) {
         event.preventDefault();
+        return window.FHUi.singleFlight('download-report', sendReport, event.submitter || null);
+    }
+
+    async function sendReport() {
         if (reportCaptchaRequired && !captchaVerified) {
             showToast(window.t('report.captcha_required'));
             return;
@@ -533,6 +513,5 @@
     });
 
     initializeEmbedCodes();
-    startParallax();
     loadCaptcha();
 }());

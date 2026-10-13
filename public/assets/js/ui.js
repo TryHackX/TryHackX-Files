@@ -108,6 +108,9 @@
 	}
 
 	function toast(message, opts) {
+		// Older call sites pass the type as a bare string — toast(msg, 'error') — and some a
+		// third options object. Both still mean what they say instead of silently becoming "info".
+		if (typeof opts === 'string') opts = { type: opts };
 		opts = opts || {};
 		var tpl = template(opts.el);
 		if (!tpl) return;
@@ -186,12 +189,84 @@
 		if (event.key === 'Escape' && activeItems.length) dismissLast();
 	});
 
+	/**
+	 * The one theme switch. The `theme` cookie is the single source of truth: the server reads it
+	 * to render `<body class="light">`, so nothing has to be re-applied from storage on load
+	 * (which is what used to flip the page back after the panel changed only the cookie).
+	 */
+	function toggleTheme() {
+		document.body.classList.toggle('light');
+		var theme = document.body.classList.contains('light') ? 'light' : 'dark';
+		document.cookie = 'theme=' + theme + '; path=/; max-age=31536000; SameSite=Lax';
+		// Older builds also kept a copy in localStorage and let it override the cookie.
+		if (window.FHStorage) window.FHStorage.local.remove('theme');
+		syncThemeIcons();
+		return theme;
+	}
+
+	/** Sun in the dark theme, moon in the light one — not every stylesheet carries that rule. */
+	function syncThemeIcons() {
+		if (!document.body || typeof document.querySelectorAll !== 'function') return;
+		var light = document.body.classList.contains('light');
+		Array.prototype.forEach.call(document.querySelectorAll('.sun'), function (el) {
+			el.style.display = light ? 'none' : 'block';
+		});
+		Array.prototype.forEach.call(document.querySelectorAll('.moon'), function (el) {
+			el.style.display = light ? 'block' : 'none';
+		});
+	}
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', syncThemeIcons);
+	} else {
+		syncThemeIcons();
+	}
+
+	/**
+	 * Run `task` unless the same `key` is already running, and mark `control` busy meanwhile.
+	 *
+	 * The API does not de-duplicate writes, so a double click on "Create" used to create two
+	 * collections / API keys / reports. Returns the task's promise, or a resolved `undefined`
+	 * when the call was swallowed.
+	 */
+	var inFlight = Object.create(null);
+	function singleFlight(key, task, control) {
+		if (inFlight[key]) return Promise.resolve(undefined);
+		inFlight[key] = true;
+		var target = control && control.nodeType === 1 ? control : null;
+		if (!target && typeof document !== 'undefined') {
+			var active = document.activeElement;
+			if (active && active.tagName === 'BUTTON') target = active;
+		}
+		var wasDisabled = target ? target.disabled : false;
+		if (target) {
+			target.disabled = true;
+			target.setAttribute('aria-busy', 'true');
+		}
+		var release = function () {
+			delete inFlight[key];
+			if (target) {
+				target.disabled = wasDisabled;
+				target.removeAttribute('aria-busy');
+			}
+		};
+		var result;
+		try {
+			result = Promise.resolve(task());
+		} catch (error) {
+			release();
+			return Promise.reject(error);
+		}
+		return result.then(
+			function (value) { release(); return value; },
+			function (error) { release(); throw error; }
+		);
+	}
+
 	document.addEventListener('click', function (event) {
 		var trigger = event.target.closest ? event.target.closest('[data-fh-action]') : null;
 		if (!trigger) return;
-		if (trigger.getAttribute('data-fh-action') === 'toggle-theme'
-			&& typeof window.toggleTheme === 'function') {
-			window.toggleTheme();
+		if (trigger.getAttribute('data-fh-action') === 'toggle-theme') {
+			toggleTheme();
 		} else if (trigger.getAttribute('data-fh-action') === 'open-auth'
 			&& typeof window.showAuthModal === 'function') {
 			window.showAuthModal();
@@ -201,6 +276,10 @@
 	window.FHUi = window.FHUi || {};
 	window.FHUi.toast = toast;
 	window.FHUi.dismissLastToast = dismissLast;
+	window.FHUi.toggleTheme = toggleTheme;
+	window.FHUi.singleFlight = singleFlight;
+	// Kept as a global for the panel's command palette and its declarative actions.
+	window.toggleTheme = toggleTheme;
 })();
 
 /**

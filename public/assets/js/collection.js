@@ -24,7 +24,7 @@
 
     function showError(message) {
         if (window.FHUi && typeof window.FHUi.toast === 'function') {
-            window.FHUi.toast(String(message || config.connectionError || ''), 'error');
+            window.FHUi.toast(String(message || config.connectionError || ''), { type: 'error' });
             return;
         }
         window.alert(String(message || config.connectionError || ''));
@@ -96,7 +96,7 @@
         if (passwordToken) url.searchParams.set('t', passwordToken);
         if (response.member_token) url.searchParams.set('m', response.member_token);
         if (Array.isArray(response.skipped) && response.skipped.length && window.FHUi?.toast) {
-            window.FHUi.toast(String(config.skippedNotice || '').replace(':n', response.skipped.length), 'info');
+            window.FHUi.toast(String(config.skippedNotice || '').replace(':n', response.skipped.length), { type: 'info' });
         }
         window.location.assign(url.toString());
     }

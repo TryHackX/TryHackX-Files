@@ -77,3 +77,31 @@ test('dashboard actions use delegated data attributes instead of inline handlers
 	assert.match(source, /data-fh-click="killUpload\(/);
 	assert.doesNotMatch(source, /\son(?:click|change|input|submit|load)\s*=/i);
 });
+
+test('live transfer tables update only the cells that changed', () => {
+	const { diffRows } = loadModule();
+	const row = (key, ...cells) => ({ key, cells });
+	const before = [row('d1', 'file-a', '1.2.3.4', '10s', '<button>kill</button>'), row('d2', 'file-b', '5.6.7.8', '3s', '<button>kill</button>')];
+
+	// a tick: only the running-time cell of d1 differs, d2 is gone, d3 is new
+	const plan = diffRows(before, [
+		row('d1', 'file-a', '1.2.3.4', '11s', '<button>kill</button>'),
+		row('d3', 'file-c', '9.9.9.9', '1s', '<button>kill</button>')
+	]);
+	assert.deepEqual(Array.from(plan.remove), ['d2']);
+	assert.deepEqual(plan.rows.map(step => [step.key, step.op]), [['d1', 'update'], ['d3', 'add']]);
+	assert.deepEqual(Array.from(plan.rows[0].changed), [2], 'the action button cell is left alone');
+
+	// an unchanged snapshot touches nothing at all
+	assert.deepEqual(
+		diffRows(before, before).rows.map(step => step.op),
+		['keep', 'keep']
+	);
+	// a different column count replaces the row rather than patching cells by index
+	assert.equal(diffRows(before, [row('d1', 'a', 'b')]).rows[0].op, 'replace');
+});
+
+test('the transfer tables are polled every few seconds, not every second', () => {
+	assert.match(source, /const ACTIVE_POLL_MS = (?:[3-9]\d{3}|\d{5,})/);
+	assert.doesNotMatch(source, /\}, 1000\);/);
+});

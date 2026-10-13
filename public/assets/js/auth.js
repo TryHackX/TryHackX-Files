@@ -155,12 +155,7 @@
 
             // Re-eval captcha requirements after config load
             if (appConfig.recaptcha_register_always && appConfig.recaptcha_enabled) {
-                // If we are currently on register tab or just init it anyway (it's hidden by CSS if tab not active? No, container is inside form)
-                // Safest is to just init if enabled, it won't render if widget usage is explicit/lazy, 
-                // but here we want to ensure container is visible if needed.
-                // Actually initRegisterCaptchachecks display none? No it sets it.
-                // We should only init if the form is active OR just pre-init.
-                // Let's check if register form is active.
+                // Only render the widget when the register form is the one on screen.
                 if (document.getElementById('registerForm').classList.contains('active')) {
                     initRegisterCaptcha();
                 }
@@ -271,7 +266,7 @@
                 password,
                 remember: Number.isFinite(remember) ? remember : 0,
                 captcha_response: captchaResponse,
-                upload_token: sessionStorage.getItem('uploadToken') || ''
+                upload_token: window.FHStorage.session.get('uploadToken') || ''
             });
 
             // 2FA: the password checked out but the account needs a code — swap to step two.
@@ -286,14 +281,8 @@
                 updateAuthUI();
                 showAuthMessage(t('auth.login_success'), 'success');
 
-                // Fetch stats immediately to populate the view
+                // The modal stays open (no reload); fill in the account view straight away.
                 fetchUserStats();
-
-                // User requested to keep the modal open instead of reloading
-                // setTimeout(() => {
-                //     hideAuthModal();
-                //     window.location.reload();
-                // }, 1000);
             } else {
                 showAuthMessage(data.error || t('auth.login_error'), 'error');
 
@@ -398,15 +387,15 @@
         clearAuthNode(container);
         const prompt = authTextElement(
             'div',
-            'Czy na pewno wysłać ponownie?',
+            t('js.resend_confirm'),
             'resend-confirm-prompt'
         );
         const actions = document.createElement('div');
         actions.className = 'resend-confirm-actions';
-        const confirm = authTextElement('button', 'Tak', 'btn btn-sm btn-primary');
+        const confirm = authTextElement('button', t('js.resend_yes'), 'btn btn-sm btn-primary');
         confirm.type = 'button';
         confirm.addEventListener('click', () => executeResendVerification(container));
-        const cancel = authTextElement('button', 'Nie', 'btn btn-sm');
+        const cancel = authTextElement('button', t('js.resend_no'), 'btn btn-sm');
         cancel.type = 'button';
         cancel.addEventListener('click', () => cancelResendVerification(cancel));
         actions.append(confirm, cancel);
@@ -444,7 +433,7 @@
 
     async function executeResendVerification(container) {
         clearAuthNode(container);
-        container.appendChild(authTextElement('div', 'Wysyłanie...', 'mono resend-status'));
+        container.appendChild(authTextElement('div', t('js.sending'), 'mono resend-status'));
 
         try {
             const data = await FHApi.post('resend_verification', {});
@@ -453,7 +442,7 @@
                 // Start cooldown manually or just hide
                 clearAuthNode(container);
                 container.appendChild(
-                    authTextElement('div', 'Wysłano! Sprawdź email.', 'resend-status success')
+                    authTextElement('div', t('js.resend_sent'), 'resend-status success')
                 );
             } else {
                 showAuthMessage(data.error || t('js.generic_error'), 'error');
@@ -550,11 +539,7 @@
             if (data.success) {
                 // Check if activation required
                 if (data.activation_required) {
-                    // Custom messages based on context (assuming backend sends 'activation_mode' or we determine from message)
-                    // But simplest is to trust the message from backend or generic one
-                    // Update: User requested specific messages. We should get mode from backend or infer.
-                    // For now, let's look at data.message provided by backend registerUser.
-
+                    // The backend words the activation instructions (mode-dependent), so show its message.
                     showAuthMessage(data.message, 'success');
                 } else {
                     showAuthMessage(t('js.account_created'), 'success');
@@ -587,14 +572,14 @@
                 // Show attempts remaining if provided
                 let msg = data.message || t('js.recovery_sent');
                 if (data.remaining_attempts !== undefined) {
-                    msg += ` — Pozostało prób: ${Number(data.remaining_attempts) || 0}`;
+                    msg += ' — ' + t('js.attempts_left', { n: Number(data.remaining_attempts) || 0 });
                 }
                 showAuthMessage(msg, 'success');
                 form.reset();
             } else {
                 let errorMsg = data.error || t('js.generic_error');
                 if (data.remaining_attempts !== undefined) {
-                    errorMsg += ` — Pozostało prób: ${Number(data.remaining_attempts) || 0}`;
+                    errorMsg += ' — ' + t('js.attempts_left', { n: Number(data.remaining_attempts) || 0 });
                 }
                 showAuthMessage(errorMsg, 'error');
             }
@@ -667,32 +652,7 @@
         msg.style.display = 'block';
     }
 
-    // Theme toggle helper (if not already defined)
-    if (typeof window.toggleTheme !== 'function') {
-        window.toggleTheme = function () {
-            document.body.classList.toggle('light');
-            const isLight = document.body.classList.contains('light');
-            localStorage.setItem('theme', isLight ? 'light' : 'dark');
-            document.cookie = "theme=" + (isLight ? 'light' : 'dark') + "; path=/; max-age=31536000";
-
-            // Try to update icons if they exist
-            updateThemeIcons();
-        };
-    }
-
-    function updateThemeIcons() {
-        const suns = document.querySelectorAll('.sun');
-        const moons = document.querySelectorAll('.moon');
-        const isLight = document.body.classList.contains('light');
-
-        suns.forEach(el => el.style.display = isLight ? 'none' : 'block');
-        moons.forEach(el => el.style.display = isLight ? 'block' : 'none');
-    }
-
-    // Init theme
-    if (localStorage.getItem('theme') === 'light' && !document.body.classList.contains('light')) {
-        document.body.classList.add('light');
-    }
+    // The theme switch lives in ui.js (FHUi.toggleTheme): the `theme` cookie is the only state.
     // Auth Validation Logic
     function initAuthValidation() {
         const regUsername = document.getElementById('regUsername');
@@ -888,34 +848,7 @@
         }, 300);
     }
 
-    function resetPasswordMeter() {
-        const bar = document.getElementById('pwdBar');
-        if (bar) bar.style.width = '0%';
-
-        document.querySelectorAll('.pwd-reqs li').forEach(li => li.classList.remove('valid'));
-
-        const passStatus = document.getElementById('passMatchStatus');
-        if (passStatus) passStatus.className = 'field-status';
-
-        const userStatus = document.getElementById('usernameStatus');
-        if (userStatus) userStatus.className = 'field-status';
-
-        const emailStatus = document.getElementById('emailStatus');
-        if (emailStatus) emailStatus.className = 'field-status';
-
-        const regUsername = document.getElementById('regUsername');
-        if (regUsername) regUsername.classList.remove('error', 'success');
-
-        const regEmail = document.getElementById('regEmail');
-        if (regEmail) regEmail.classList.remove('error', 'success');
-
-        const regPassword2 = document.getElementById('regPassword2');
-        if (regPassword2) regPassword2.classList.remove('error', 'success');
-    }
-
     function initAuthScripts() {
-
-        updateThemeIcons();
         initAuthValidation();
         fetchConfig(); // Load config immediately
 
@@ -985,8 +918,7 @@
                         const tokenInput = document.getElementById('resetToken');
                         if (tokenInput) tokenInput.value = token;
 
-                        // Clean URL - keep token for refresh safety? No, better clean.
-                        // But wait until user sees it? No, clean immediately to avoid sharing link.
+                        // Drop the token from the address bar right away so the link cannot be shared by accident.
                         const url = new URL(window.location);
                         url.searchParams.delete('action');
                         url.searchParams.delete('token');

@@ -295,21 +295,88 @@
 		} catch (e) { /* ignore transient errors */ }
 	}
 
+	/**
+	 * Which rows of a live table have to change?
+	 *
+	 * prev and next are [{ key, cells: [outerHTML, ...] }]. The transfer tables refresh every few
+	 * seconds; rebuilding them with innerHTML each time dropped hover and focus on the kill button
+	 * and any text selection (an IP address) on every tick. Only cells whose markup really changed
+	 * — in practice the running-time cell — are touched.
+	 */
+	function diffRows(prev, next) {
+		const before = new Map(prev.map(row => [row.key, row]));
+		const wanted = new Set(next.map(row => row.key));
+		return {
+			remove: prev.filter(row => !wanted.has(row.key)).map(row => row.key),
+			rows: next.map(row => {
+				const old = before.get(row.key);
+				if (!old) return { key: row.key, op: 'add', changed: [] };
+				if (old.cells.length !== row.cells.length) return { key: row.key, op: 'replace', changed: [] };
+				const changed = [];
+				row.cells.forEach((cell, index) => { if (old.cells[index] !== cell) changed.push(index); });
+				return { key: row.key, op: changed.length ? 'update' : 'keep', changed };
+			})
+		};
+	}
+
+	/** Apply rows ([{ key, html }]) to a live table body, keeping unchanged nodes in place. */
+	function syncRows(tbody, rows, emptyHtml, prefix) {
+		if (!rows.length) {
+			if (tbody.dataset.syncState !== 'empty') tbody.innerHTML = emptyHtml;
+			tbody.dataset.syncState = 'empty';
+			tbody.liveRows = [];
+			return;
+		}
+		const holder = document.createElement('tbody');
+		holder.innerHTML = rows.map(row => row.html).join('');
+		const fresh = Array.from(holder.children).map((tr, index) => ({
+			key: prefix + rows[index].key,
+			tr,
+			cells: Array.from(tr.cells).map(cell => cell.outerHTML)
+		}));
+		const hadRows = tbody.dataset.syncState === 'rows';
+		const prev = hadRows ? (tbody.liveRows || []) : [];
+		if (!hadRows) tbody.replaceChildren(); // the "Loading…" / empty placeholder row
+		const plan = diffRows(prev, fresh);
+		const liveByKey = new Map(prev.map(row => [row.key, row]));
+		plan.remove.forEach(key => liveByKey.get(key).tr.remove());
+		// Existing rows keep their place (panel-table-sort may have reordered them on purpose); new
+		// ones are appended and, if a sort is active, slotted in by its own observer.
+		const live = fresh.map((row, index) => {
+			const step = plan.rows[index];
+			let entry = row;
+			if (step.op !== 'add') {
+				entry = liveByKey.get(row.key);
+				if (step.op === 'replace') {
+					entry.tr.replaceWith(row.tr);
+					entry = row;
+				} else if (step.op === 'update') {
+					step.changed.forEach(cell => entry.tr.cells[cell].replaceWith(row.tr.cells[cell]));
+					entry = { key: row.key, tr: entry.tr, cells: row.cells };
+				}
+			}
+			if (step.op === 'add') tbody.appendChild(entry.tr);
+			return entry;
+		});
+		tbody.dataset.syncState = 'rows';
+		tbody.liveRows = live;
+	}
+
 	function renderActiveDownloads(list, now) {
 		const tbody = document.getElementById('activeDownloadsBody');
 		if (!tbody) return;
-		if (!list.length) { tbody.innerHTML = `<tr><td colspan="5" class="empty">${esc(t('panel.dash.no_active'))}</td></tr>`; return; }
-		tbody.innerHTML = list.map(d => {
+		const empty = `<tr><td colspan="5" class="empty">${esc(t('panel.dash.no_active'))}</td></tr>`;
+		syncRows(tbody, list.map(d => {
 			const name = esc(d.original_name || d.file_id || '—');
 			const dur = formatDuration((now || 0) - (Number(d.started_at) || 0));
-			return `<tr>
+			return { key: d.id, html: `<tr>
 				<td><div class="file-cell"><div class="file-icon">${getIcon(d.original_name || '', d.mime || '')}</div><div class="file-info"><strong title="${name}">${name}</strong><small>${d.file_id}</small></div></div></td>
 				<td><code style="font-size:0.75rem">${esc(d.ip_address || '-')}</code></td>
 				<td data-sort-value="${Number(d.size) || 0}">${formatSize(d.size)}</td>
 				<td data-sort-value="${Math.max(0, (now || 0) - (Number(d.started_at) || 0))}">${dur}</td>
 				<td><div class="actions"><button class="action-btn del" data-fh-click="killDownload(${d.id})" title="${esc(t('panel.dash.kill_tooltip'))}"><i class="fa-solid fa-scissors"></i></button></div></td>
-			</tr>`;
-		}).join('');
+			</tr>` };
+		}), empty, 'd');
 	}
 
 	/**
@@ -319,8 +386,8 @@
 	function renderActiveUploads(list, now) {
 		const tbody = document.getElementById('activeUploadsBody');
 		if (!tbody) return;
-		if (!list.length) { tbody.innerHTML = `<tr><td colspan="6" class="empty">${esc(t('panel.dash.no_uploads'))}</td></tr>`; return; }
-		tbody.innerHTML = list.map(u => {
+		const empty = `<tr><td colspan="6" class="empty">${esc(t('panel.dash.no_uploads'))}</td></tr>`;
+		syncRows(tbody, list.map(u => {
 			const name = esc(u.filename || '—');
 			const total = Number(u.size) || 0;
 			const got = Number(u.received) || 0;
@@ -331,7 +398,7 @@
 				? `<small>${esc(formatSize(got))}</small>`
 				: `<div class="upload-progress" title="${pct}%"><span style="width:${pct}%"></span></div>
 				   <small>${esc(formatSize(got))} / ${esc(formatSize(total))} · ${pct}%</small>`;
-			return `<tr>
+			return { key: u.id, html: `<tr>
 				<td><div class="file-cell"><div class="file-icon">${getIcon(u.filename || '', '')}</div>
 					<div class="file-info"><strong title="${name}">${name}</strong></div></div></td>
 				<td>${u.username ? `<span class="owner-name">${esc(u.username)}</span>` : `<span class="badge badge-muted">${esc(t('panel.coll.owner_guest'))}</span>`}</td>
@@ -339,8 +406,8 @@
 				<td data-sort-value="${pct === null ? got : pct}">${bar}</td>
 				<td data-sort-value="${Math.max(0, (now || 0) - (Number(u.started_at) || 0))}">${formatDuration((now || 0) - (Number(u.started_at) || 0))}</td>
 				<td><div class="actions"><button class="action-btn del" data-fh-click="killUpload(${u.id})" title="${esc(t('panel.dash.kill_upload_tooltip'))}"><i class="fa-solid fa-scissors"></i></button></div></td>
-			</tr>`;
-		}).join('');
+			</tr>` };
+		}), empty, 'u');
 	}
 
 	async function killDownload(id) {
@@ -359,6 +426,10 @@
 		} catch (e) { showNotification(t('common.connection_error'), 'error'); }
 	}
 
+	// Transfers move slowly on the scale of a person watching a table; every second was a request
+	// (a fifth of the per-IP read budget) and a full table rebuild for nothing.
+	const ACTIVE_POLL_MS = 3000;
+
 	function initActiveDownloadsLive() {
 		if (PANEL.tab !== 'dashboard') return;
 		loadActiveDownloads();
@@ -366,7 +437,7 @@
 			if (document.visibilityState !== 'visible') return;
 			if (document.querySelector('.modal-bg.show, .auth-modal.show')) return;
 			loadActiveDownloads();
-		}, 1000);
+		}, ACTIVE_POLL_MS);
 	}
 
 
@@ -374,6 +445,6 @@
 		loadTopFilesPref, loadTrafficPref, loadDashboard, loadTopFiles,
 		openTopFilesSettings, onTopFilesPeriodChange, applyTopFilesSettings,
 		setTrafficRange, openTrafficRange, applyTrafficRange, loadTraffic,
-		loadActiveDownloads, killDownload, killUpload, initActiveDownloadsLive
+		loadActiveDownloads, killDownload, killUpload, initActiveDownloadsLive, diffRows
 	});
 }());
