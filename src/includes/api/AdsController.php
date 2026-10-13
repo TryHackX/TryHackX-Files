@@ -1200,7 +1200,8 @@ final class AdsController
 	 */
 	private static function validateCreative(array $input, bool $adminForm): array
 	{
-		$name = trim((string) ($input['name'] ?? ''));
+		// Cleaned first, measured second: the limit is on what would be stored.
+		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 1000);
 		if ($name === '' || mb_strlen($name) > 120) {
 			return ['error' => __('ads.err_name')];
 		}
@@ -1216,7 +1217,7 @@ final class AdsController
 			}
 			$data[$field] = $url;
 		}
-		$data['alt_text'] = mb_substr(trim((string) ($input['alt_text'] ?? '')), 0, 200);
+		$data['alt_text'] = InputLimits::cleanLabel((string) ($input['alt_text'] ?? ''), 200);
 
 		if (!$adminForm) {
 			return $data; // type/zone/status/schedule come from the package and the lifecycle

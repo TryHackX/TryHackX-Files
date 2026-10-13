@@ -56,4 +56,22 @@ final class InputLimitsTest extends RepoTestCase
 		$this->assertTrue(Database::loginUser('legacy-user', $password)['success']);
 		$this->assertFalse(InputLimits::validUsername('legacy-user'));
 	}
+
+	/** Free-text labels keep markup-breaking characters out of the database. */
+	public function testCleanLabelStripsWhatEndsAnAttributeOrAScriptString(): void
+	{
+		$this->assertSame('Holiday 2026', InputLimits::cleanLabel('  Holiday 2026  ', 255));
+		$this->assertSame('x_ data-fh-click=_evil()', InputLimits::cleanLabel('x" data-fh-click="evil()', 255));
+		$this->assertSame('_img src=x onerror=evil()_', InputLimits::cleanLabel('<img src=x onerror=evil()>', 255));
+		$this->assertSame('back_slash', InputLimits::cleanLabel('back\\slash', 255));
+		$this->assertSame('a b', InputLimits::cleanLabel("a\x00\r\nb", 255));
+		$this->assertSame('', InputLimits::cleanLabel(" \x07 ", 255));
+		// apostrophes and non-ASCII text are ordinary names and survive
+		$this->assertSame("Ola's zdjęcia 日本", InputLimits::cleanLabel("Ola's zdjęcia 日本", 255));
+		// invalid UTF-8 is repaired rather than stored
+		$this->assertTrue(mb_check_encoding(InputLimits::cleanLabel("bad \xC3\x28 bytes", 255), 'UTF-8'));
+		// length is counted in characters, after cleaning
+		$this->assertSame(5, mb_strlen(InputLimits::cleanLabel('ąęśćż-more', 5)));
+		$this->assertSame('ab', InputLimits::cleanLabel('ab  cd', 3));
+	}
 }

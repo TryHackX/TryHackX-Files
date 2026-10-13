@@ -16,6 +16,7 @@
 	const perPage = 20;
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const safeHttpUrl = window.FHUtil.safeHttpUrl;
 	const formatSize = window.FHUtil.formatSize;
 	const formatDate = window.FHUtil.formatDate;
@@ -123,9 +124,9 @@
 	function copyPremiumToken(ev) {
 		const el = document.getElementById('premTokenValue');
 		if (!el) return;
-		navigator.clipboard.writeText(el.textContent).then(
-			() => showNotification(t('common.copied'), 'copy', ev ? ev.currentTarget : null),
-			() => showNotification(t('panel.coll.copy_failed'), 'error')
+		const anchor = ev ? ev.currentTarget : null;
+		window.FHUtil.copyText(el.textContent).then(
+			copied => (copied ? showNotification(t('common.copied'), 'copy', anchor) : showNotification(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
@@ -146,7 +147,7 @@
 			const state = (total && filled === total)
 				? `<span class="plugin-state ok"><i class="fa-solid fa-circle-check"></i> ${esc(t('panel.plug.ready'))}</span>`
 				: `<span class="plugin-state">${esc(t('panel.plug.todo', { n: total - filled }))}</span>`;
-			return `<button type="button" class="plugin-card" data-fh-click="openPlugin('${esc(p.id)}')">
+			return `<button type="button" class="plugin-card" data-fh-click="openPlugin(${jsArg(p.id)})">
 				<span class="plugin-card-top">
 					<i class="${esc(p.iconStyle)} ${esc(p.icon)}"></i>
 					<span class="plugin-flags">
@@ -260,7 +261,7 @@
 				: '';
 			const del = Number(p.is_system)
 				? ''
-				: `<button class="action-btn del" data-fh-click="askDeletePlan(${p.id}, '${esc(p.name).replace(/'/g, "\\'")}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
+				: `<button class="action-btn del" data-fh-click="askDeletePlan(${p.id}, ${jsArg(p.name)})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
 			return `<tr>
 				<td><strong>${esc(p.name)}</strong>${kind}${system}${Number(p.highlighted) ? ` <span class="badge badge-success">${esc(t('panel.prem.highlighted'))}</span>` : ''}</td>
 				<td>${group}</td>
@@ -717,7 +718,7 @@
 					: `<div class="premium-order-cell">
 						<code>${esc(p.provider_order_id || p.ext_order_id)}</code>
 						<span class="premium-order-actions">${canPremiumRefund && p.status === 'COMPLETED' && p.kind === 'purchase' && ['payu', 'przelewy24'].includes(p.provider) && p.provider_order_id
-							? `<button class="action-btn" data-fh-click="askPremiumRefund('${esc(p.ext_order_id)}')" title="${esc(t('panel.prem.refund_btn'))}"><i class="fa-solid fa-rotate-left"></i></button>`
+							? `<button class="action-btn" data-fh-click="askPremiumRefund(${jsArg(p.ext_order_id)})" title="${esc(t('panel.prem.refund_btn'))}"><i class="fa-solid fa-rotate-left"></i></button>`
 							: ''}${d.invoicesEnabled && ['COMPLETED', 'REFUNDED'].includes(p.status)
 							? `<a class="action-btn" href="${apiUrl}?action=invoice&order=${encodeURIComponent(p.ext_order_id)}" target="_blank" rel="noopener noreferrer" title="${esc(t('panel.prem.invoice_btn'))}"><i class="fa-solid fa-file-invoice"></i></a>`
 							: ''}</span>
@@ -864,7 +865,7 @@
 						? `<span class="badge badge-danger">${esc(t('panel.prem.expired'))}</span>`
 						: `${formatDate(exp)} <small style="color:var(--text-muted)">(${esc(t('panel.prem.days_left', { n: Math.ceil((exp - now) / 86400) }))})</small>`)
 					: `<span class="badge badge-muted">${esc(t('panel.prem.no_expiry'))}</span>`;
-				const safeName = esc(u.username).replace(/'/g, "\\'");
+				const safeName = jsArg(u.username);
 				return `<tr>
 					<td><strong>${esc(u.username)}</strong><br><small style="color:var(--text-muted)">${esc(u.email || '')}</small></td>
 					<td><span class="badge badge-info">${esc(u.group_name || '—')}</span></td>
@@ -872,7 +873,7 @@
 					<td>${Number(u.purchases) || 0}</td>
 					<td>${u.last_paid ? formatDate(u.last_paid) : '—'}</td>
 					<td><div class="actions">${canPremiumGrant
-						? `<button class="action-btn" data-fh-click="openPlanGrant(${u.id}, '${safeName}')" title="${esc(t('panel.prem.grant_title'))}"><i class="fa-solid fa-gem"></i></button>`
+						? `<button class="action-btn" data-fh-click="openPlanGrant(${u.id}, ${safeName})" title="${esc(t('panel.prem.grant_title'))}"><i class="fa-solid fa-gem"></i></button>`
 						: ''}</div></td>
 				</tr>`;
 			}).join('');

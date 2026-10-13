@@ -15,11 +15,10 @@
 	const apiUrl = panel.apiUrl || '';
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const formatSize = window.FHUtil.formatSize;
 	const formatDate = window.FHUtil.formatDate;
-	const attr = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
-		'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-	})[character]);
+	const attr = window.FHUtil.attr;
 	const showModal = (id) => window.showModal(id);
 	const closeModal = (id) => window.closeModal(id);
 	const showNotification = (message, type = 'success', anchor = null) =>
@@ -75,7 +74,7 @@
 						<td><span class="badge badge-info">${esc(b.type)}</span></td>
 						<td>${esc(b.reason || '-')}</td>
 						<td>${expires}</td>
-						<td><button class="action-btn del" data-fh-click="unbanIP(${b.id}, '${esc(b.type)}', '${esc(b.value)}', '${esc(expires)}')" title="${esc(t('panel.modal.unban_tooltip'))}"><i class="fa-solid fa-trash"></i></button></td>
+						<td><button class="action-btn del" data-fh-click="unbanIP(${b.id}, ${jsArg(b.type)}, ${jsArg(b.value)}, ${jsArg(expires)})" title="${esc(t('panel.modal.unban_tooltip'))}"><i class="fa-solid fa-trash"></i></button></td>
 					</tr>`;
 				}).join('');
 			} else {
@@ -336,7 +335,7 @@
 					<h4><i class="fa-solid fa-user-shield"></i> ${esc(t('panel.mod.d_reported_by'))}</h4>
 					<div class="report-details-grid">
 						${detailCell(t('common.name'), rep.reporter_name)}
-						${detailCell('E-mail', `<a href="${attr(emailHref)}" class="detail-link">${esc(rep.reporter_email)}</a>`, { raw: true })}
+						${detailCell(t('auth.email'), `<a href="${attr(emailHref)}" class="detail-link">${esc(rep.reporter_email)}</a>`, { raw: true })}
 						${detailCell(t('panel.mod.d_reporter_info'), rep.reporter_entity)}
 						${detailCell(t('panel.mod.d_org'), rep.reporter_org)}
 					</div>

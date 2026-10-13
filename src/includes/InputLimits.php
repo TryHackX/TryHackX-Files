@@ -98,4 +98,21 @@ final class InputLimits
 	{
 		return mb_strlen($value, 'UTF-8') <= $max;
 	}
+
+	/**
+	 * A short free-text label (a collection name, an ad's name or alt text) as it may be stored.
+	 *
+	 * Control characters become spaces, and the characters that end an HTML attribute or a quoted
+	 * script string (`"`, `<`, `>`, `\`) become `_` — the same stand-in the upload server uses for file
+	 * names. The panel escapes on output as well; this keeps hostile text out of the database so a
+	 * single missed escape somewhere downstream has nothing to work with.
+	 */
+	public static function cleanLabel(string $value, int $max): string
+	{
+		$value = mb_scrub($value, 'UTF-8');
+		$value = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $value) ?? '';
+		$value = str_replace(['"', '<', '>', '\\'], '_', $value);
+		$value = trim($value);
+		return mb_strlen($value, 'UTF-8') > $max ? rtrim(mb_substr($value, 0, $max, 'UTF-8')) : $value;
+	}
 }

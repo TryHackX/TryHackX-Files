@@ -3,6 +3,7 @@
 
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const safeHttpUrl = window.FHUtil.safeHttpUrl;
 	const formatDate = window.FHUtil.formatDate;
 	const openModal = (id) => window.openModal(id);
@@ -372,7 +373,7 @@
 		list.innerHTML = movable.length
 			? movable.map(a => `<div class="zone-assign-row">
 					<span>${esc(a.name)} <small style="color:var(--text-muted)">${esc(adTypeLabel(a.type))} · ${esc(a.zoneLabel)}</small> ${adStatusBadge(a.status)}</span>
-					<button type="button" class="btn btn-sm btn-primary" data-fh-click="assignAdToZone(${a.id}, '${esc(zoneId)}')">
+					<button type="button" class="btn btn-sm btn-primary" data-fh-click="assignAdToZone(${a.id}, ${jsArg(zoneId)})">
 						<i class="fa-solid fa-arrow-right"></i> ${esc(t('panel.ads.assign_here'))}
 					</button>
 				</div>`).join('')
@@ -988,7 +989,7 @@
 			<div class="myad-addon-file" style="display:none;">
 				<label class="btn btn-sm"><i class="fa-solid fa-image"></i> ${esc(t('panel.myads.addon_own'))}
 					<input type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden
-						data-fh-change="myAdAddonFilePicked(this, '${esc(a.zone)}')">
+						data-fh-change="myAdAddonFilePicked(this, ${jsArg(a.zone)})">
 				</label>
 				<span class="myad-addon-filename" style="color:var(--text-muted); font-size:0.82rem;">${esc(t('panel.myads.addon_reuse'))}</span>
 			</div>
@@ -1220,7 +1221,7 @@
 	 * Animated GIFs skip the stage — a canvas export would freeze the first frame.
 	 * ------------------------------------------------------------------ */
 	const adUploaders = {};
-	const adCrop = { img: null, file: null, dims: null, cb: null, zoom: 1, ox: 0, oy: 0, fw: 0, fh: 0, wired: false };
+	const adCrop = { img: null, file: null, url: null, dims: null, cb: null, zoom: 1, ox: 0, oy: 0, fw: 0, fh: 0, wired: false };
 
 	function adCropCover() { return Math.max(adCrop.fw / adCrop.img.naturalWidth, adCrop.fh / adCrop.img.naturalHeight); }
 	function adCropClamp() {
@@ -1290,8 +1291,16 @@
 		adCrop.file = file;
 		adCrop.dims = dims;
 		adCrop.cb = cb;
+		releaseCropUrl();
 		const url = URL.createObjectURL(file);
+		adCrop.url = url;
 		const probe = new Image();
+		// A file the browser cannot decode used to do nothing at all.
+		probe.onerror = () => {
+			releaseCropUrl();
+			adCrop.cb = null;
+			showNotification(t('panel.ads.crop_bad'), 'error');
+		};
 		probe.onload = () => {
 			adCrop.img = probe;
 			const frame = document.getElementById('adCropFrame');
@@ -1308,6 +1317,14 @@
 			});
 		};
 		probe.src = url;
+	}
+
+	/** The crop stage keeps one object URL alive; free it as soon as the stage is done with it. */
+	function releaseCropUrl() {
+		if (adCrop.url) {
+			URL.revokeObjectURL(adCrop.url);
+			adCrop.url = null;
+		}
 	}
 
 	function adCropApply() {
@@ -1328,6 +1345,7 @@
 			closeModal('adCropModal');
 			adCrop.img = null;
 			adCrop.cb = null;
+			releaseCropUrl();
 			cb(out, canvas.toDataURL(type, 0.7));
 		}, type, 0.9);
 	}
@@ -1336,6 +1354,7 @@
 		closeModal('adCropModal');
 		adCrop.img = null;
 		adCrop.cb = null;
+		releaseCropUrl();
 	}
 
 	function initAdUploader(prefix, getDims) {
@@ -1358,7 +1377,9 @@
 			if (file.type === 'image/gif') {
 				// As picked — the server leaves GIFs alone and CSS fits them at display time.
 				st.file = file;
-				showDone(URL.createObjectURL(file));
+				if (st.gifUrl) URL.revokeObjectURL(st.gifUrl);
+				st.gifUrl = URL.createObjectURL(file);
+				showDone(st.gifUrl);
 				showNotification(t('panel.ads.crop_gif_note'), 'success', drop);
 				return;
 			}
@@ -1395,6 +1416,10 @@
 		if (!st) return;
 		st.file = null;
 		st.raw = null;
+		if (st.gifUrl) {
+			URL.revokeObjectURL(st.gifUrl);
+			st.gifUrl = null;
+		}
 		const input = document.getElementById(prefix + 'File');
 		if (input) input.value = '';
 		document.getElementById(prefix + 'DropIdle').style.display = '';

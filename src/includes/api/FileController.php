@@ -1275,12 +1275,9 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.invalid_request')]);
 			return;
 		}
-		$name = trim((string) ($input['name'] ?? ''));
+		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
 		if ($name === '') {
 			$name = __('panel.cc.default_name');
-		}
-		if (mb_strlen($name) > 255) {
-			$name = mb_substr($name, 0, 255);
 		}
 
 		if (count($fileIds) < self::COLLECTION_MIN_FILES) {
@@ -1489,12 +1486,9 @@ final class FileController
 			return;
 		}
 
-		$name = trim((string) ($input['name'] ?? ''));
+		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
 		if ($name === '') {
 			$name = __('panel.cc.default_name');
-		}
-		if (mb_strlen($name) > 255) {
-			$name = mb_substr($name, 0, 255);
 		}
 
 		$opts = [];
@@ -1819,13 +1813,10 @@ final class FileController
 		}
 		$input = json_decode(file_get_contents('php://input'), true) ?: [];
 		$id = (string) ($input['id'] ?? '');
-		$name = trim((string) ($input['name'] ?? ''));
+		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
 		if ($id === '' || $name === '') {
 			echo json_encode(['success' => false, 'error' => __('api.missing_data')]);
 			return;
-		}
-		if (mb_strlen($name) > 255) {
-			$name = mb_substr($name, 0, 255);
 		}
 		$ownerId = empty($_SESSION['is_admin']) ? (int) $_SESSION['user_id'] : null;
 		echo json_encode(['success' => Database::renameCollection($id, $name, $ownerId)]);
@@ -2021,11 +2012,8 @@ final class FileController
 			return;
 		}
 
-		$name = trim((string) ($input['name'] ?? ''));
+		$name = InputLimits::cleanLabel((string) ($input['name'] ?? ''), 255);
 		if ($name !== '') {
-			if (mb_strlen($name) > 255) {
-				$name = mb_substr($name, 0, 255);
-			}
 			Database::renameCollection($id, $name, $ownerId);
 		}
 

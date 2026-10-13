@@ -3,6 +3,7 @@
 
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const showModal = (id) => window.showModal(id);
 	const closeModal = (id) => window.closeModal(id);
 	const showNotification = (message, type = 'success', anchor = null) =>
@@ -156,7 +157,7 @@
 			const locked = isSystem || Number(g.is_default) === 1;
 			const delBtn = locked
 				? `<span class="action-btn locked" title="${esc(t(isSystem ? 'panel.grp.system_lock_tooltip' : 'api.group_default_locked'))}"><i class="fa-solid fa-lock"></i></span>`
-				: `<button class="action-btn del" data-fh-click="deleteGroup(${g.id}, '${esc(g.name).replace(/'/g, "\\'")}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
+				: `<button class="action-btn del" data-fh-click="deleteGroup(${g.id}, ${jsArg(g.name)})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
 			const members = g.slug === 'guest'
 				? '—'
 				: (isModerator

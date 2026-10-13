@@ -16,6 +16,7 @@
 	const MB_UNIT_LABEL = { MB: 'MiB', GB: 'GiB', TB: 'TiB' };
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const safeHttpUrl = window.FHUtil.safeHttpUrl;
 	const formatSize = window.FHUtil.formatSize;
 	const formatDate = window.FHUtil.formatDate;
@@ -397,7 +398,7 @@
 		if (bar) {
 			bar.style.display = chips.length ? '' : 'none';
 			bar.innerHTML = chips.map(c =>
-				`<span class="filter-chip">${esc(c.text)}<button type="button" data-fh-click="removeFilter('${esc(c.key)}')" title="${esc(t('panel.flt.remove'))}"><i class="fa-solid fa-xmark"></i></button></span>`
+				`<span class="filter-chip">${esc(c.text)}<button type="button" data-fh-click="removeFilter(${jsArg(c.key)})" title="${esc(t('panel.flt.remove'))}"><i class="fa-solid fa-xmark"></i></button></span>`
 			).join('');
 		}
 	}
@@ -588,7 +589,7 @@
 
 		el.innerHTML = shown.map(i =>
 			`<button type="button" class="chip ${sel.has(String(i.value)) ? 'active' : ''}" data-value="${esc(i.value)}"
-				data-fh-click="toggleChip('${esc(holder)}', this)">${esc(i.label)}${i.count !== undefined ? ` <span class="chip-count">${i.count}</span>` : ''}</button>`
+				data-fh-click="toggleChip(${jsArg(holder)}, this)">${esc(i.label)}${i.count !== undefined ? ` <span class="chip-count">${i.count}</span>` : ''}</button>`
 		).join('') + (hidden > 0 ? `<span class="chip-more">${esc(t('panel.flt.more_hidden', { n: hidden }))}</span>` : '');
 	}
 
@@ -812,7 +813,7 @@
 		const showCheck = PANEL.isAdmin || can('files.collection_all');
 
 		tbody.innerHTML = files.map(f => {
-			const safeName = esc(f.name).replace(/'/g, "\\'");
+			const safeName = jsArg(f.name);
 			const checked = selectedFiles.has(f.id) ? 'checked' : '';
 			const mime = f.mimeType || f.mime || '';
 			const isMedia = mime && (mime.indexOf('image/') === 0 || mime.indexOf('video/') === 0);
@@ -834,9 +835,9 @@
 					<a href="${appUrl}/download.php?id=${f.id}" target="_blank" class="action-btn" title="${esc(t('panel.files.view'))}"><i class="fa-solid fa-eye"></i></a>
 					<button class="action-btn" data-fh-click="downloadFile('${f.id}', ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.files.download_tooltip'))}"><i class="fa-solid fa-download"></i></button>
 					<button class="action-btn" data-fh-click="copyUrl(event, '${f.id}')" title="${esc(t('panel.files.copy_link'))}"><i class="fa-solid fa-copy"></i></button>
-					${canAddToCollection(false) ? `<button class="action-btn" data-fh-click="openAddToCollection('${f.id}', '${safeName}', ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.atc.tooltip'))}"><i class="fa-solid fa-plus"></i></button>` : ''}
+					${canAddToCollection(false) ? `<button class="action-btn" data-fh-click="openAddToCollection('${f.id}', ${safeName}, ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.atc.tooltip'))}"><i class="fa-solid fa-plus"></i></button>` : ''}
 					${PANEL.isAdmin ? `<button class="action-btn" data-fh-click="openFileOptions('${f.id}', true)" title="${esc(t('panel.my.options_tooltip'))}"><i class="fa-solid fa-gear"></i></button>` : ''}
-					${PANEL.isAdmin ? `<button class="action-btn del" data-fh-click="showDeleteFile('${f.id}', '${safeName}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>` : ''}
+					${PANEL.isAdmin ? `<button class="action-btn del" data-fh-click="showDeleteFile('${f.id}', ${safeName})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>` : ''}
 				</div></td>
 			</tr>`;
 		}).join('');
@@ -1157,7 +1158,7 @@
 		if (bar) {
 			bar.style.display = chips.length ? '' : 'none';
 			bar.innerHTML = chips.map(c =>
-				`<span class="filter-chip">${esc(c.text)}<button type="button" data-fh-click="removeMyFilter('${esc(c.key)}')" title="${esc(t('panel.flt.remove'))}"><i class="fa-solid fa-xmark"></i></button></span>`
+				`<span class="filter-chip">${esc(c.text)}<button type="button" data-fh-click="removeMyFilter(${jsArg(c.key)})" title="${esc(t('panel.flt.remove'))}"><i class="fa-solid fa-xmark"></i></button></span>`
 			).join('');
 		}
 	}
@@ -1379,7 +1380,7 @@
 		}
 
 		document.getElementById('myFilesBody').innerHTML = pageFiles.map(f => {
-			const safeName = esc(f.name).replace(/'/g, "\\'");
+			const safeName = jsArg(f.name);
 			const badges = [];
 			if (f.oneTime) badges.push(`<span class="file-badge ${f.consumed ? 'used' : ''}" title="${esc(f.consumed ? t('panel.my.badge_onetime_used') : t('panel.my.badge_onetime'))}"><i class="fa-solid fa-fire"></i> ${f.consumed ? esc(t('panel.my.badge_used')) : '1×'}</span>`);
 			if (f.hasPassword) badges.push(`<span class="file-badge" title="${esc(t('panel.my.badge_pw'))}"><i class="fa-solid fa-lock"></i></span>`);
@@ -1403,9 +1404,9 @@
 					<a href="${appUrl}/download.php?id=${f.id}" target="_blank" class="action-btn" title="${esc(t('panel.files.view'))}"><i class="fa-solid fa-eye"></i></a>
 					<button class="action-btn" data-fh-click="downloadFile('${f.id}', ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.files.download_tooltip'))}"><i class="fa-solid fa-download"></i></button>
 					<button class="action-btn" data-fh-click="copyUrl(event, '${f.id}')" title="${esc(t('panel.files.copy_link'))}"><i class="fa-solid fa-copy"></i></button>
-					${canAddToCollection(true) ? `<button class="action-btn" data-fh-click="openAddToCollection('${f.id}', '${safeName}', ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.atc.tooltip'))}"><i class="fa-solid fa-plus"></i></button>` : ''}
+					${canAddToCollection(true) ? `<button class="action-btn" data-fh-click="openAddToCollection('${f.id}', ${safeName}, ${f.hasPassword ? 'true' : 'false'})" title="${esc(t('panel.atc.tooltip'))}"><i class="fa-solid fa-plus"></i></button>` : ''}
 					<button class="action-btn" data-fh-click="openFileOptions('${f.id}')" title="${esc(t('panel.my.options_tooltip'))}"><i class="fa-solid fa-gear"></i></button>
-					<button class="action-btn del" data-fh-click="deleteMyFile('${f.id}', '${safeName}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>
+					<button class="action-btn del" data-fh-click="deleteMyFile('${f.id}', ${safeName})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>
 				</div></td>
 			</tr>`;
 		}).join('');
@@ -1514,16 +1515,27 @@
 	 * "you have no collections" is a button that wastes a click.
 	 */
 	let myCollectionsCache = null;
+	let myCollectionsRequest = null;
+
+	/**
+	 * One `user_collections` request at a time. "My files" starts both the picker cache and the
+	 * collections table on load, and each used to fetch the same list on its own. `fresh` skips
+	 * a request already in flight (its answer may predate a change the caller just made).
+	 */
+	function fetchMyCollections(fresh = false) {
+		if (!myCollectionsRequest || fresh) {
+			const request = FHApi.get('user_collections')
+				.then(d => ((d && d.success && d.collections) ? d.collections : []), () => [])
+				.finally(() => { if (myCollectionsRequest === request) myCollectionsRequest = null; });
+			myCollectionsRequest = request;
+		}
+		return myCollectionsRequest;
+	}
 
 	async function ensureMyCollections(force = false) {
 		if (myCollectionsCache && !force) return myCollectionsCache;
 		if (!can('myfiles.collections')) return (myCollectionsCache = []);
-		try {
-			const d = await FHApi.get('user_collections');
-			myCollectionsCache = (d && d.success && d.collections) ? d.collections : [];
-		} catch (e) {
-			myCollectionsCache = [];
-		}
+		myCollectionsCache = await fetchMyCollections(force);
 		return myCollectionsCache;
 	}
 
@@ -1581,7 +1593,7 @@
 
 		holder.innerHTML = shown.map(c => `
 			<button type="button" class="atc-item ${atcPicked === c.id ? 'is-picked' : ''}" data-id="${esc(c.id)}"
-				data-fh-click="pickAddToCollection('${esc(c.id)}')">
+				data-fh-click="pickAddToCollection(${jsArg(c.id)})">
 				<span class="atc-item-name">
 					<i class="fa-solid fa-box-archive"></i> ${esc(c.name)}
 					${c.hasPassword ? `<i class="fa-solid fa-lock atc-item-lock" title="${esc(t('panel.my.badge_pw'))}"></i>` : ''}
@@ -1691,7 +1703,12 @@
 			</div>`).join('');
 	}
 
-	async function submitCreateCollection() {
+	/** One in flight at a time: the API does not de-duplicate, so a double click made two. */
+	function submitCreateCollection() {
+		return window.FHUi.singleFlight('panel-collection-create', submitCreateCollectionNow);
+	}
+
+	async function submitCreateCollectionNow() {
 		const name = document.getElementById('ccName').value.trim();
 		const ids = collectionFromAll ? Array.from(selectedFiles) : Array.from(selectedMyFiles);
 		if (ids.length < COLLECTION_MIN_FILES) {
@@ -1787,7 +1804,7 @@
 		document.getElementById('ccModalHeader').style.display = 'none';
 		// The subtitle promises the link is on the clipboard, so put it there (as the home page
 		// does) rather than making that a lie.
-		navigator.clipboard.writeText(createdCollectionUrl).catch(() => { });
+		window.FHUtil.copyText(createdCollectionUrl);
 		// Re-assert the modal: the create can be reached through the locked-files step, which
 		// closes one modal and opens another, and the result must be on screen either way.
 		showModal('createCollectionModal');
@@ -1810,19 +1827,18 @@
 	}
 
 	function copyCollectionResult(ev) {
-		navigator.clipboard.writeText(createdCollectionUrl).then(
-			() => showNotification(t('common.copied'), 'copy', ev ? ev.currentTarget : null),
-			() => showNotification(t('panel.coll.copy_failed'), 'error')
+		// currentTarget is cleared once the event finishes dispatching, so read it before the await.
+		const anchor = ev ? ev.currentTarget : null;
+		window.FHUtil.copyText(createdCollectionUrl).then(
+			copied => (copied ? showNotification(t('common.copied'), 'copy', anchor) : showNotification(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
 	async function loadCollections() {
 		const body = document.getElementById('collectionsBody');
 		if (!body) return;
-		try {
-			const d = await FHApi.get('user_collections');
-			collections = (d.success && d.collections) ? d.collections : [];
-		} catch (e) { collections = []; }
+		collections = await fetchMyCollections();
+		myCollectionsCache = collections;
 		renderCollections();
 		openCollectionFromUrl();
 	}
@@ -1936,7 +1952,7 @@
 		const pageList = list.slice((collectionsPage - 1) * perPage, collectionsPage * perPage);
 
 		body.innerHTML = pageList.map(c => {
-			const safeName = esc(c.name).replace(/'/g, "\\'");
+			const safeName = jsArg(c.name);
 			const collectionUrl = safeHttpUrl(c.url)
 				|| `${appUrl}/collection.php?id=${encodeURIComponent(c.id)}`;
 			// C2: mirror the per-file badges so active sharing controls are visible at a glance.
@@ -1959,7 +1975,7 @@
 					<button class="action-btn" data-fh-click="downloadCollection('${c.id}')" title="${esc(t('panel.coll.zip_tooltip'))}"><i class="fa-solid fa-download"></i></button>
 					<button class="action-btn" data-fh-click="copyCollectionUrl(event, '${c.id}')" title="${esc(t('panel.coll.copy_tooltip'))}"><i class="fa-solid fa-copy"></i></button>
 					<button class="action-btn" data-fh-click="openCollectionSettings('${c.id}')" title="${esc(t('panel.cc.edit_tooltip'))}"><i class="fa-solid fa-gear"></i></button>
-					<button class="action-btn del" data-fh-click="askDeleteCollection('${c.id}', '${safeName}')" title="${esc(t('panel.coll.delete_tooltip'))}"><i class="fa-solid fa-trash"></i></button>
+					<button class="action-btn del" data-fh-click="askDeleteCollection('${c.id}', ${safeName})" title="${esc(t('panel.coll.delete_tooltip'))}"><i class="fa-solid fa-trash"></i></button>
 				</div></td>
 			</tr>`;
 		}).join('');
@@ -2028,9 +2044,8 @@
 		const copyUrl = url || `${appUrl}/collection.php?id=${encodeURIComponent(id)}`;
 		// C5: use the same anchored "Copied" toast as file links (copyUrl) instead of a
 		// bespoke bottom success toast, so copy feedback is consistent across the project.
-		navigator.clipboard.writeText(copyUrl).then(
-			() => showNotification(t('common.copied'), 'copy', ev ? ev.target : null),
-			() => showNotification(t('panel.coll.copy_failed'), 'error')
+		window.FHUtil.copyText(copyUrl).then(
+			copied => (copied ? showNotification(t('common.copied'), 'copy', ev ? ev.target : null) : showNotification(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
@@ -2144,7 +2159,7 @@
 		const acPages = Math.max(1, Math.ceil(adminCollectionsTotal / perPage));
 
 		body.innerHTML = adminCollections.map(c => {
-			const safeName = esc(c.name).replace(/'/g, "\\'");
+			const safeName = jsArg(c.name);
 			const collectionUrl = safeHttpUrl(c.url)
 				|| `${appUrl}/collection.php?id=${encodeURIComponent(c.id)}`;
 			// The member files the term matched, rendered exactly as the own-collections list
@@ -2171,7 +2186,7 @@
 				<button class="action-btn" data-fh-click="downloadCollection('${c.id}', true)" title="${esc(t('panel.coll.zip_tooltip'))}"><i class="fa-solid fa-download"></i></button>
 				<button class="action-btn" data-fh-click="copyAdminCollectionUrl(event, '${c.id}')" title="${esc(t('panel.coll.copy_tooltip'))}"><i class="fa-solid fa-copy"></i></button>
 				<button class="action-btn" data-fh-click="openCollectionSettings('${c.id}', true)" title="${esc(t('panel.cc.edit_tooltip'))}"><i class="fa-solid fa-gear"></i></button>
-				<button class="action-btn del" data-fh-click="askDeleteCollection('${c.id}', '${safeName}', true)" title="${esc(t('panel.coll.delete_tooltip'))}"><i class="fa-solid fa-trash"></i></button>
+				<button class="action-btn del" data-fh-click="askDeleteCollection('${c.id}', ${safeName}, true)" title="${esc(t('panel.coll.delete_tooltip'))}"><i class="fa-solid fa-trash"></i></button>
 			</div></td>
 		</tr>`;
 		}).join('');
@@ -2192,9 +2207,8 @@
 		const c = adminCollections.find(x => x.id === id);
 		const url = c ? safeHttpUrl(c.url) : '';
 		const copyUrl = url || `${appUrl}/collection.php?id=${encodeURIComponent(id)}`;
-		navigator.clipboard.writeText(copyUrl).then(
-			() => showNotification(t('common.copied'), 'copy', ev ? ev.target : null),
-			() => showNotification(t('panel.coll.copy_failed'), 'error')
+		window.FHUtil.copyText(copyUrl).then(
+			copied => (copied ? showNotification(t('common.copied'), 'copy', ev ? ev.target : null) : showNotification(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 

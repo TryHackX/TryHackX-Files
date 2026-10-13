@@ -13,6 +13,7 @@
 	const inputLimits = PANEL.inputLimits || { usernameMin: 3, passwordMin: 8 };
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const formatSize = window.FHUtil.formatSize;
 	const formatDate = window.FHUtil.formatDate;
 	const roleLabel = (role) => {
@@ -114,7 +115,7 @@
 				? `<span class="badge badge-success">${esc(t('panel.users.active'))}</span>`
 				: `<span class="badge badge-danger">${esc(t('panel.users.inactive'))}</span>`;
 			const storageText = u.storage_used ? formatSize(u.storage_used) : '0 B';
-			const safeName = esc(u.username).replace(/'/g, "\\'");
+			const safeName = jsArg(u.username);
 			// group_name is NULL when the user has no explicit group → they resolve to the default.
 			const groupLabel = u.group_name ? esc(u.group_name) : esc(t('panel.users.group_default'));
 			const groupCls = u.group_name ? 'badge-info' : 'badge-muted';
@@ -129,7 +130,7 @@
 			const isRoot = rootAdminId > 0 && u.id === rootAdminId;
 			const delBtn = isRoot
 				? `<span class="action-btn locked" title="${esc(t('panel.users.root_lock'))}"><i class="fa-solid fa-shield-halved"></i></span>`
-				: `<button class="action-btn del" data-fh-click="userAction(${u.id}, 'delete', '${safeName}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
+				: `<button class="action-btn del" data-fh-click="userAction(${u.id}, 'delete', ${safeName})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
 			return `<tr>
 				<td class="col-primary"><strong>${esc(u.username)}</strong></td>
 				<td class="col-text col-email" title="${esc(u.email || '-')}">${esc(u.email || '-')}</td>
@@ -144,12 +145,12 @@
 				<td class="col-date">${formatDate(u.created_at)}</td>
 				<td class="col-actions"><div class="actions">
 					<button class="action-btn" data-fh-click="openManageUser(${u.id})" title="${esc(t('panel.users.manage_tooltip'))}"><i class="fa-solid fa-pen"></i></button>
-					<button class="action-btn" data-fh-click="openSetUserGroup(${u.id}, '${safeName}', ${u.group_id || 0})" title="${esc(t('panel.users.group_tooltip'))}"><i class="fa-solid fa-users"></i></button>
-					<button class="action-btn" data-fh-click="openPlanGrant(${u.id}, '${safeName}')" title="${esc(t('panel.prem.grant_title'))}"><i class="fa-solid fa-gem"></i></button>
-					${!isActive ? `<button class="action-btn" data-fh-click="userAction(${u.id}, 'activate', '${safeName}')" title="${esc(t('panel.users.activate_tooltip'))}"><i class="fa-solid fa-circle-check"></i></button>` : ''}
-					${isActive && !isRoot ? `<button class="action-btn" data-fh-click="openBanModal(${u.id}, '${safeName}', '${esc(u.last_ip || '')}')" title="${esc(t('panel.users.ban_tooltip'))}"><i class="fa-solid fa-ban"></i></button>` : ''}
-					${isActive && !isRoot ? `<button class="action-btn" data-fh-click="userAction(${u.id}, 'deactivate', '${safeName}')" title="${esc(t('panel.users.deactivate_tooltip'))}"><i class="fa-solid fa-pause"></i></button>` : ''}
-					<button class="action-btn" data-fh-click="userAction(${u.id}, 'clean', '${safeName}', ${u.files_count})" title="${esc(t('panel.users.clean_tooltip'))}"><i class="fa-solid fa-broom"></i></button>
+					<button class="action-btn" data-fh-click="openSetUserGroup(${u.id}, ${safeName}, ${u.group_id || 0})" title="${esc(t('panel.users.group_tooltip'))}"><i class="fa-solid fa-users"></i></button>
+					<button class="action-btn" data-fh-click="openPlanGrant(${u.id}, ${safeName})" title="${esc(t('panel.prem.grant_title'))}"><i class="fa-solid fa-gem"></i></button>
+					${!isActive ? `<button class="action-btn" data-fh-click="userAction(${u.id}, 'activate', ${safeName})" title="${esc(t('panel.users.activate_tooltip'))}"><i class="fa-solid fa-circle-check"></i></button>` : ''}
+					${isActive && !isRoot ? `<button class="action-btn" data-fh-click="openBanModal(${u.id}, ${safeName}, ${jsArg(u.last_ip || '')})" title="${esc(t('panel.users.ban_tooltip'))}"><i class="fa-solid fa-ban"></i></button>` : ''}
+					${isActive && !isRoot ? `<button class="action-btn" data-fh-click="userAction(${u.id}, 'deactivate', ${safeName})" title="${esc(t('panel.users.deactivate_tooltip'))}"><i class="fa-solid fa-pause"></i></button>` : ''}
+					<button class="action-btn" data-fh-click="userAction(${u.id}, 'clean', ${safeName}, ${u.files_count})" title="${esc(t('panel.users.clean_tooltip'))}"><i class="fa-solid fa-broom"></i></button>
 					${delBtn}
 				</div></td>
 			</tr>`;
@@ -258,7 +259,12 @@
 		showModal('createUserModal');
 	}
 
-	async function createUser() {
+	/** One in flight at a time: the API does not de-duplicate, so a double click made two. */
+	function createUser() {
+		return window.FHUi.singleFlight('panel-user-create', createUserNow);
+	}
+
+	async function createUserNow() {
 		const username = document.getElementById('newUsername').value.trim();
 		const email = document.getElementById('newEmail').value.trim();
 		const password = document.getElementById('newPassword').value;

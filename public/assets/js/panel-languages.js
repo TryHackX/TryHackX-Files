@@ -3,6 +3,7 @@
 
 	const t = (key, params) => window.t(key, params);
 	const esc = window.FHUtil.esc;
+	const jsArg = window.FHUtil.jsArg;
 	const showModal = (id) => window.showModal(id);
 	const closeModal = (id) => window.closeModal(id);
 	const showNotification = (message, type = 'success', anchor = null) =>
@@ -81,7 +82,7 @@
 		// `event.currentTarget` is passed on so the confirmation tooltip can be anchored to the
 		// switch that was flipped, like every other bit of feedback in the panel (pkt 2).
 		const sw = (code, scope, on) => `<label class="lang-toggle"><input type="checkbox" ${on ? 'checked' : ''}
-			data-fh-change="toggleLanguage('${esc(code)}', this.checked, '${scope}')"><span></span></label>`;
+			data-fh-change="toggleLanguage(${jsArg(code)}, this.checked, '${scope}')"><span></span></label>`;
 
 		body.innerHTML = languages.map(l => {
 			const badges =
@@ -95,7 +96,7 @@
 				: sw(l.code, 'enabled', l.enabled);
 			const del = l.builtIn
 				? ''
-				: `<button class="action-btn del" data-fh-click="askDeleteLanguage('${esc(l.code)}', '${esc(l.name).replace(/'/g, "\\'")}')" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
+				: `<button class="action-btn del" data-fh-click="askDeleteLanguage(${jsArg(l.code)}, ${jsArg(l.name)})" title="${esc(t('common.delete'))}"><i class="fa-solid fa-trash"></i></button>`;
 			return `<tr>
 				<td><strong>${esc(l.name)}</strong>${badges}</td>
 				<td><code>${esc(l.code)}</code></td>
@@ -106,8 +107,8 @@
 				<td>${l.enabled ? sw(l.code, 'switcher', l.switcher) : '<span class="lang-na">—</span>'}</td>
 				<td>${l.enabled ? sw(l.code, 'users', l.users) : '<span class="lang-na">—</span>'}</td>
 				<td><div class="actions">
-					<button class="action-btn" data-fh-click="askDuplicateLanguage('${esc(l.code)}')" title="${esc(t('panel.lang.duplicate'))}"><i class="fa-solid fa-copy"></i></button>
-					<button class="action-btn" data-fh-click="exportLanguage('${esc(l.code)}')" title="${esc(t('panel.lang.export'))}"><i class="fa-solid fa-download"></i></button>
+					<button class="action-btn" data-fh-click="askDuplicateLanguage(${jsArg(l.code)})" title="${esc(t('panel.lang.duplicate'))}"><i class="fa-solid fa-copy"></i></button>
+					<button class="action-btn" data-fh-click="exportLanguage(${jsArg(l.code)})" title="${esc(t('panel.lang.export'))}"><i class="fa-solid fa-download"></i></button>
 					${del}
 				</div></td>
 			</tr>`;
@@ -220,7 +221,7 @@
 		const free = (knownLanguages || []).filter(l => !l.installed);
 		if (!free.length) { holder.innerHTML = ''; return; }
 		holder.innerHTML = `<span class="lang-suggest-label">${esc(t('panel.lang.suggestions'))}</span>` +
-			free.map(l => `<button type="button" class="chip" data-fh-click="pickLanguageCode('${esc(l.code)}')">
+			free.map(l => `<button type="button" class="chip" data-fh-click="pickLanguageCode(${jsArg(l.code)})">
 				<strong>${esc(l.code)}</strong> ${esc(l.name)}</button>`).join('');
 	}
 

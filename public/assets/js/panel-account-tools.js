@@ -98,7 +98,12 @@
 		setTimeout(() => document.getElementById('akLabel')?.focus(), 60);
 	}
 
-	async function submitCreateApiKey() {
+	/** One in flight at a time: the API does not de-duplicate, so a double click made two. */
+	function submitCreateApiKey() {
+		return window.FHUi.singleFlight('panel-apikey-create', submitCreateApiKeyNow);
+	}
+
+	async function submitCreateApiKeyNow() {
 		const label = document.getElementById('akLabel').value.trim();
 		try {
 			const result = await api().post('user_create_api_key', { label });
@@ -130,9 +135,8 @@
 	function copyApiKey() {
 		const input = document.getElementById('akKey');
 		input.select();
-		navigator.clipboard.writeText(input.value).then(
-			() => notify(t('panel.apikey.copied')),
-			() => notify(t('panel.coll.copy_failed'), 'error')
+		window.FHUtil.copyText(input.value).then(
+			copied => (copied ? notify(t('panel.apikey.copied')) : notify(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
@@ -277,7 +281,12 @@
 		setTimeout(() => document.getElementById('whUrl')?.focus(), 60);
 	}
 
-	async function submitCreateWebhook() {
+	/** One in flight at a time: the API does not de-duplicate, so a double click made two. */
+	function submitCreateWebhook() {
+		return window.FHUi.singleFlight('panel-webhook-create', submitCreateWebhookNow);
+	}
+
+	async function submitCreateWebhookNow() {
 		const url = document.getElementById('whUrl').value.trim();
 		const events = [];
 		if (document.getElementById('whEvUpload').checked) events.push('upload');
@@ -314,9 +323,8 @@
 	function copyWebhookSecret() {
 		const input = document.getElementById('whSecret');
 		input.select();
-		navigator.clipboard.writeText(input.value).then(
-			() => notify(t('panel.wh.copied')),
-			() => notify(t('panel.coll.copy_failed'), 'error')
+		window.FHUtil.copyText(input.value).then(
+			copied => (copied ? notify(t('panel.wh.copied')) : notify(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
@@ -492,7 +500,7 @@
 				qrObjectUrl = URL.createObjectURL(svgBlob);
 				const image = document.createElement('img');
 				image.src = qrObjectUrl;
-				image.alt = 'QR';
+				image.alt = t('qr.alt');
 				qr.replaceChildren(image);
 				document.getElementById('twofaCode').focus();
 			} catch {
@@ -588,9 +596,8 @@
 	}
 
 	function copyRecoveryCodes() {
-		navigator.clipboard.writeText(lastRecoveryCodes.join('\n')).then(
-			() => notify(t('common.copied')),
-			() => notify(t('panel.coll.copy_failed'), 'error')
+		window.FHUtil.copyText(lastRecoveryCodes.join('\n')).then(
+			copied => (copied ? notify(t('common.copied')) : notify(t('panel.coll.copy_failed'), 'error'))
 		);
 	}
 
