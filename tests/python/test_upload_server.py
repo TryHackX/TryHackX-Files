@@ -872,6 +872,90 @@ class TestDownloadReservationLifecycle:
 
         assert events == [("d" * 32, "completed", 3)]
 
+    @staticmethod
+    def _record_finalisation(monkeypatch, events):
+        async def no_op(*args, **kwargs):
+            return None
+
+        async def finish(reservation_id, state, size):
+            events.append((reservation_id, state, size))
+
+        monkeypatch.setattr(us, "mark_download_reservation_started", no_op)
+        monkeypatch.setattr(us, "heartbeat_download", no_op)
+        monkeypatch.setattr(us, "finish_download_reservation", finish)
+        monkeypatch.setattr(us, "log_traffic", no_op)
+        return no_op
+
+    def test_every_promised_byte_sent_counts_even_without_the_closing_message(
+        self, monkeypatch
+    ):
+        # Apache proxies these routes without persistent connections and hangs up as soon as
+        # Content-Length is satisfied; the disconnect cancels the stream before its closing
+        # empty message. The download is still complete.
+        events = []
+        no_op = self._record_finalisation(monkeypatch, events)
+
+        async def app(scope, receive, send):
+            scope["filehost.traffic"] = {
+                "ip": "203.0.113.16", "file_id": "file5", "active_id": 8,
+                "reservation_id": "a" * 32,
+            }
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-length", b"6")]})
+            await send({"type": "http.response.body", "body": b"abc", "more_body": True})
+            await send({"type": "http.response.body", "body": b"def", "more_body": True})
+            # ... and the stream is cancelled here, as StreamingResponse is on disconnect.
+
+        asyncio.run(us.ActualTransferAccountingMiddleware(app)(
+            {"type": "http"}, no_op, lambda _message: no_op()
+        ))
+
+        assert events == [("a" * 32, "completed", 6)]
+
+    def test_a_disconnect_raised_after_the_last_byte_still_counts(self, monkeypatch):
+        events = []
+        no_op = self._record_finalisation(monkeypatch, events)
+
+        async def app(scope, receive, send):
+            scope["filehost.traffic"] = {
+                "ip": "203.0.113.17", "file_id": "file6", "active_id": 9,
+                "reservation_id": "b" * 32,
+            }
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-length", b"3")]})
+            await send({"type": "http.response.body", "body": b"xyz", "more_body": True})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        async def send(message):
+            if message["type"] == "http.response.body" and not message.get("more_body"):
+                raise OSError("peer closed after reading Content-Length bytes")
+
+        try:
+            asyncio.run(us.ActualTransferAccountingMiddleware(app)({"type": "http"}, no_op, send))
+        except OSError:
+            pass
+
+        assert events == [("b" * 32, "completed", 3)]
+
+    def test_chunked_body_without_its_terminating_message_is_not_complete(self, monkeypatch):
+        # No Content-Length (the collection ZIP): only the closing message ends the body.
+        events = []
+        no_op = self._record_finalisation(monkeypatch, events)
+
+        async def app(scope, receive, send):
+            scope["filehost.traffic"] = {
+                "ip": "203.0.113.18", "file_id": None, "active_id": 10,
+                "reservation_id": "c" * 32,
+            }
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"zip-part", "more_body": True})
+
+        asyncio.run(us.ActualTransferAccountingMiddleware(app)(
+            {"type": "http"}, no_op, lambda _message: no_op()
+        ))
+
+        assert events == [("c" * 32, "released", 8)]
+
 
 class TestApiKeyResolution:
     def test_key_requires_an_active_existing_user(self, monkeypatch):
@@ -2408,3 +2492,147 @@ class TestStagedUploadSealing:
         assert us._seal_staged_upload(tmp_path, "payload.bin", 3, digest)
         manifest = json.loads((tmp_path / us.STORAGE_MANIFEST_NAME).read_text(encoding="utf-8"))
         assert manifest["sha256"] == digest
+
+
+class TestDownloadsBehindAProxyThatHangsUp:
+    """Real uvicorn, real sockets, a client that behaves like Apache's [P] proxy.
+
+    mod_rewrite's [P] runs mod_proxy without persistent connections: once Content-Length bytes
+    have arrived, Apache ends the request and closes the backend socket. The upload server
+    sees that close while its reader is still looking for end-of-file and cancels the stream
+    before the closing message. Every download that reached the client in full was recorded
+    as "released", so counters never moved and max_downloads was never enforced.
+    """
+
+    @staticmethod
+    def _serve_and_fetch(monkeypatch, tmp_path, rate, byte_range=None, stop_after=None):
+        from fastapi import BackgroundTasks, FastAPI, Request
+        from fastapi.responses import StreamingResponse
+        import uvicorn
+
+        payload = tmp_path / "payload.bin"
+        payload.write_bytes(b"FH-CI-" * 87382)
+        size = payload.stat().st_size
+        finalised = []
+
+        async def no_op(*_args, **_kwargs):
+            return None
+
+        async def not_killed(_active_id):
+            await asyncio.sleep(0.002)  # stands in for the database round trip
+            return False
+
+        async def finalize(_context, state, sent):
+            finalised.append((state, sent))
+
+        monkeypatch.setattr(us, "mark_download_reservation_started", no_op)
+        monkeypatch.setattr(us, "heartbeat_download", no_op)
+        monkeypatch.setattr(us, "download_was_killed", not_killed)
+        monkeypatch.setattr(us, "log_traffic", no_op)
+        monkeypatch.setattr(us, "_finalize_download_context", finalize)
+
+        app = FastAPI()
+        app.add_middleware(us.ActualTransferAccountingMiddleware)
+
+        @app.get("/download")
+        async def download(request: Request, background_tasks: BackgroundTasks):
+            request.scope["filehost.traffic"] = {
+                "ip": "203.0.113.40", "file_id": "f", "user_id": None, "active_id": 7,
+                "reservation_id": "a" * 32, "transfer_state": {"interrupted": False},
+                "completion": {},
+            }
+            start, end, status = 0, None, 200
+            headers = {"Content-Length": str(size)}
+            if byte_range:
+                start, end, status = byte_range[0], byte_range[1], 206
+                headers = {
+                    "Content-Length": str(end - start + 1),
+                    "Content-Range": f"bytes {start}-{end}/{size}",
+                }
+            reader = us.throttled_file_reader(payload, rate, 7, start, end)
+            background_tasks.add_task(us.close_stream_reader, reader)
+            return StreamingResponse(reader, status_code=status, headers=headers,
+                                     media_type="application/octet-stream")
+
+        def proxy_like_client(port):
+            sock = socket.create_connection(("127.0.0.1", port), timeout=20)
+            sock.sendall(b"GET /download HTTP/1.1\r\nHost: files\r\n\r\n")
+            buffer = b""
+            while b"\r\n\r\n" not in buffer:
+                buffer += sock.recv(65536)
+            head, body = buffer.split(b"\r\n\r\n", 1)
+            length = int(next(
+                line.split(b":", 1)[1] for line in head.split(b"\r\n")
+                if line.lower().startswith(b"content-length:")
+            ))
+            target = min(length, stop_after) if stop_after else length
+            while len(body) < target:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                body += chunk
+            sock.close()  # exactly what mod_proxy does once the body is complete
+            return len(body), length
+
+        async def scenario():
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            server = uvicorn.Server(uvicorn.Config(
+                app, host="127.0.0.1", port=port, log_level="warning", access_log=False,
+                lifespan="off",
+            ))
+            task = asyncio.create_task(server.serve())
+            for _ in range(500):  # bounded: a server that never starts fails the test
+                if server.started:
+                    break
+                await asyncio.sleep(0.02)
+            assert server.started, "uvicorn did not start"
+            try:
+                received = await asyncio.to_thread(proxy_like_client, port)
+                for _ in range(100):
+                    if finalised:
+                        break
+                    await asyncio.sleep(0.02)
+            finally:
+                server.should_exit = True
+                await task
+            return received
+
+        received = asyncio.run(scenario())
+        return received, finalised
+
+    def test_full_download_is_completed(self, monkeypatch, tmp_path):
+        (got, length), finalised = self._serve_and_fetch(monkeypatch, tmp_path, rate=0)
+
+        assert got == length == 524292
+        assert finalised == [("completed", 524292)]
+
+    def test_throttled_download_is_completed(self, monkeypatch, tmp_path):
+        # The Docker smoke's case: the throttled reader sleeps after its last chunk.
+        (got, length), finalised = self._serve_and_fetch(
+            monkeypatch, tmp_path, rate=4 * 1024 * 1024
+        )
+
+        assert got == length
+        assert finalised == [("completed", length)]
+
+    def test_complete_range_is_completed(self, monkeypatch, tmp_path):
+        (got, length), finalised = self._serve_and_fetch(
+            monkeypatch, tmp_path, rate=4 * 1024 * 1024, byte_range=(0, 262143)
+        )
+
+        assert got == length == 262144
+        assert finalised == [("completed", 262144)]
+
+    def test_client_gone_mid_body_is_released(self, monkeypatch, tmp_path):
+        (got, _length), finalised = self._serve_and_fetch(
+            monkeypatch, tmp_path, rate=1024 * 1024, stop_after=100_000
+        )
+
+        assert got >= 100_000
+        assert len(finalised) == 1
+        state, sent = finalised[0]
+        assert state == "released"
+        assert sent < 524292

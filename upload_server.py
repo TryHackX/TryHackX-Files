@@ -423,17 +423,26 @@ class ActualTransferAccountingMiddleware:
                 )
             reservation_id = str((context or {}).get("reservation_id") or "")
             if reservation_id:
+                interrupted = bool(
+                    (context.get("transfer_state") or {}).get("interrupted")
+                )
+                if response_content_length is not None:
+                    # Every promised byte was handed to the server: that IS completion. The
+                    # closing empty message is not required. Apache proxies these routes
+                    # without persistent connections, so it hangs up the moment Content-Length
+                    # is satisfied, and that disconnect cancels the stream before the closing
+                    # message, usually while the reader is still finding end-of-file. Waiting
+                    # for that message recorded nearly every finished download as "released":
+                    # counters never moved and download caps were never reached.
+                    body_complete = sent_bytes == response_content_length
+                else:
+                    # Chunked (the collection ZIP): only the terminating chunk tells the
+                    # client the body is over, so nobody can hang up before it is sent.
+                    body_complete = finished_normally and response_body_finished
                 response_complete = (
-                    finished_normally
-                    and 200 <= response_status < 400
-                    and response_body_finished
-                    and not bool(
-                        (context.get("transfer_state") or {}).get("interrupted")
-                    )
-                    and (
-                        response_content_length is None
-                        or sent_bytes == response_content_length
-                    )
+                    200 <= response_status < 400
+                    and not interrupted
+                    and body_complete
                 )
                 terminal_state = (
                     "completed" if response_complete else "released"

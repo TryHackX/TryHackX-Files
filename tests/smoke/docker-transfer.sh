@@ -17,7 +17,8 @@ failure_reported=0
 fail() {
   local label="$1" detail="$2" line="${3:-${BASH_LINENO[0]}}"
   echo "${label}: ${detail}" >&2
-  gh_annotate_error "Docker smoke: ${label}" "${detail}" "${SMOKE_FILE}" "${line}"
+  # The line also goes into the title: summaries of a run show the title, not the location.
+  gh_annotate_error "Docker smoke: ${label} (line ${line})" "${detail}" "${SMOKE_FILE}" "${line}"
   failure_reported=1
   exit 1
 }
@@ -212,6 +213,9 @@ cmp "${basic_payload}" "${basic_download}" \
 reuse_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
   "${FILEHOST_CANONICAL_URL}/api/download?token=${basic_token}")"
 expect "a consumed download token is refused" "403" "${reuse_status}"
+# Apache proxies without persistent connections and hangs up the moment Content-Length is met.
+# A finished download must still count; 2.80.0 and earlier recorded it as released.
+wait_for_value "SELECT downloads FROM fh_files WHERE id='${basic_id}'" "1"
 
 # Slow downloads make concurrency and disconnect states observable without a race against
 # the unthrottled streaming path. Five seconds is used only by this isolated stack, never as a
