@@ -88,6 +88,14 @@
 	text-decoration: underline;
 }
 
+/* A 15px-tall text button is hard to hit with a finger; grow the hit area, not the text. */
+@media (pointer: coarse) {
+	.notif-readall {
+		padding: 10px 6px;
+		margin: -10px -6px;
+	}
+}
+
 .notif-list {
 	max-height: min(60vh, 420px);
 	overflow-y: auto;
@@ -193,15 +201,18 @@
 }
 
 /* On a phone the popover stops being a dropdown and becomes a sheet pinned under the header —
-   380px anchored to the right edge would hang off the screen. */
+   380px anchored to the right edge would hang off the screen. With the wrapper static, the
+   popover's containing block is the header itself (positioned in base.css), so it spans the
+   header's width directly below it. Without that it anchored to the page container and opened
+   below the footer, out of sight. */
 @media (max-width: 480px) {
 	.notif-wrap {
 		position: static;
 	}
 
 	.notif-pop {
-		left: 16px;
-		right: 16px;
+		left: 0;
+		right: 0;
 		width: auto;
 	}
 }

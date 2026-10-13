@@ -61,16 +61,6 @@
     cursor: pointer;
 }
 
-/* Number inputs: theme the native up/down spinners (dark by default, light in light theme)
-   instead of the browser's white default. */
-input[type="number"] {
-    color-scheme: dark;
-}
-
-.light input[type="number"] {
-    color-scheme: light;
-}
-
 /* Filters */
 .filters {
     display: flex;
@@ -381,11 +371,6 @@ input[type="number"] {
 .badge-danger {
     background: rgba(239, 68, 68, 0.15);
     color: var(--danger);
-}
-
-.badge-warning {
-    background: rgba(245, 158, 11, 0.15);
-    color: var(--warning);
 }
 
 .badge-info {

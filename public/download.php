@@ -65,6 +65,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<script src="<?= $appUrl ?>/assets/js/captcha.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
 	<title><?= $file ? htmlspecialchars($file['name']) : _h('common.error') ?> - <?= APP_NAME ?></title>
+	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/download.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/notifications.css?v=<?= APP_VERSION ?>">
@@ -174,7 +175,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						echo '<div class="preview-icon" id="previewLocked">'
 							. '<div class="icon"><i class="fa-solid fa-lock"></i></div>'
 							. '<p>' . _h('download.preview_locked') . '</p>'
-							. '<button type="button" class="btn" data-download-action="unlock-preview" style="margin-top:12px;">' . _h('download.preview_show') . '</button>'
+							. '<button type="button" class="btn preview-unlock-btn" data-download-action="unlock-preview">' . _h('download.preview_show') . '</button>'
 							. '</div>';
 						echo '<div id="previewSlot" data-type="' . htmlspecialchars($type) . '" data-mime="' . htmlspecialchars($file['mimeType']) . '"></div>';
 					} elseif ($isPreviewable && !$previewPolicy['allowed']) {
@@ -215,13 +216,15 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 				</div>
 
 				<div class="actions">
-					<button class="btn" type="button" data-download-action="open-report" title="<?= _h('download.report_tooltip') ?>">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" color="#ff4444">
+					<button class="btn" type="button" data-download-action="open-report" title="<?= _h('download.report_tooltip') ?>" aria-label="<?= _h('download.report_tooltip') ?>">
+						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" color="#ff4444" aria-hidden="true">
 							<path
 								d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
 							<line x1="12" y1="9" x2="12" y2="13" />
 							<line x1="12" y1="17" x2="12.01" y2="17" />
 						</svg>
+						<?php /* Visible only where the actions stack on phones (download.css). */ ?>
+						<span class="report-label"><?= _h('download.report_tooltip') ?></span>
 					</button>
 
 					<button class="btn btn-primary" type="button" data-download-action="download">
@@ -310,9 +313,9 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<div class="toast" id="dlToast"><span id="dlToastText"></span></div>
 
 	<!-- Report Modal -->
-	<div class="auth-modal" id="reportModal" style="z-index: 2000;">
+	<div class="auth-modal" id="reportModal">
 		<div class="auth-box">
-			<button class="auth-close" type="button" data-download-action="close-report">
+			<button class="auth-close" type="button" data-download-action="close-report" aria-label="<?= _h('common.close') ?>">
 				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
 					<line x1="18" y1="6" x2="6" y2="18" />
 					<line x1="6" y1="6" x2="18" y2="18" />
@@ -356,15 +359,13 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						placeholder="<?= _h('report.info_ph') ?>"></textarea>
 				</div>
 
-				<div id="reportMessage" class="report-message"
-					style="display:none; padding:10px; margin-bottom:10px; border-radius:4px;"></div>
+				<div id="reportMessage" class="report-message"></div>
 
-				<div style="display: flex; align-items: center; justify-content: center;">
-					<div style="display: inline-grid; justify-items: center;">
-						<div id="reportCaptchaContainer" style="margin-bottom: 20px; display: none;"></div>
+				<div class="report-actions-wrap">
+					<div class="report-actions-inner">
+						<div id="reportCaptchaContainer"></div>
 
-						<div class="form-actions"
-							style="display: flex;gap: 0.6vw;justify-content: center;align-items: center;">
+						<div class="form-actions report-buttons">
 							<button type="button" class="btn" data-download-action="close-report"><?= _h('common.cancel') ?></button>
 							<button type="submit" class="btn btn-danger"><?= _h('report.submit') ?></button>
 						</div>
@@ -378,10 +379,10 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			<div class="captcha-box">
 				<h3><?= _h('pwprompt.title') ?></h3>
 				<p><?= _h('pwprompt.subtitle') ?></p>
-				<div id="pwPromptError" style="display:none; color:#ff6b6b; margin-bottom:10px; font-size:0.9rem;"><?= _h('pwprompt.wrong') ?></div>
+				<div id="pwPromptError" class="pw-prompt-error"><?= _h('pwprompt.wrong') ?></div>
 				<form id="pwPromptForm">
-					<input type="password" id="pwPromptInput" maxlength="1024" placeholder="<?= _h('pwprompt.placeholder') ?>" style="width:100%; padding:12px 14px; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text); font-size:0.95rem;">
-					<div style="display:flex; gap:10px; justify-content:center; margin-top:16px;">
+					<input type="password" id="pwPromptInput" class="pw-prompt-input" maxlength="1024" placeholder="<?= _h('pwprompt.placeholder') ?>">
+					<div class="pw-prompt-actions">
 						<button type="button" class="btn" data-download-action="close-password"><?= _h('common.cancel') ?></button>
 						<button type="submit" class="btn btn-primary"><?= _h('pwprompt.submit') ?></button>
 					</div>
@@ -396,7 +397,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			<div class="captcha-widget" id="captchaWidget"></div>
 			<div class="captcha-error" id="captchaError"><?= _h('captcha.failed') ?></div>
 			<div class="captcha-loading" id="captchaLoading"><?= _h('common.loading') ?></div>
-			<button class="btn" type="button" data-download-action="close-captcha" style="margin-top: 16px;"><?= _h('common.cancel') ?></button>
+			<button class="btn captcha-cancel" type="button" data-download-action="close-captcha"><?= _h('common.cancel') ?></button>
 		</div>
 	</div>
 	<?php

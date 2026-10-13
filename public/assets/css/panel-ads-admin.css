@@ -252,27 +252,6 @@
 .ad-dropzone.has-file { padding: 10px 16px; }
 .ad-dropzone small { color: var(--text-muted); }
 
-.ad-cropper { margin-top: 10px; }
-.ad-cropper-frame {
-	position: relative;
-	overflow: hidden;
-	width: 100%;
-	max-width: 420px;
-	margin: 0;
-	padding: 0;
-	text-align: left;
-	touch-action: none;
-	user-select: none;
-}
-.ad-cropper-frame img {
-	position: absolute;
-	top: 0;
-	left: 0;
-	max-width: none;
-	cursor: grab;
-	will-change: transform;
-}
-.ad-cropper-frame img:active { cursor: grabbing; }
 .ad-cropper-controls {
 	display: flex;
 	align-items: center;
@@ -281,7 +260,6 @@
 	color: var(--text-muted);
 }
 .ad-cropper-controls input[type="range"] { flex: 1; max-width: 200px; }
-.ad-cropper-hint { display: block; margin-top: 4px; color: var(--text-muted); }
 
 .myad-addons { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .myad-addon-row {
@@ -418,51 +396,3 @@
 
 /* A disabled surcharge input must LOOK disabled (runda 5, pt 1). */
 .myad-addon-row input:disabled { opacity: 0.45; cursor: not-allowed; }
-.resend-activation-container {
-	margin-top: 16px;
-	padding-top: 16px;
-	border-top: 1px solid rgba(255, 255, 255, 0.1);
-	text-align: center;
-	width: 100%;
-}
-
-.btn-resend {
-	background: transparent;
-	border: 1px solid #32323b;
-	color: var(--text);
-	padding: 8px 16px;
-	border-radius: 6px;
-	cursor: pointer;
-	transition: all 0.2s;
-	font-size: 0.9rem;
-	width: 75%;
-	justify-content: center;
-	margin: 0 auto;
-	display: inline-flex;
-}
-
-.btn-resend:hover {
-	background: rgba(255, 255, 255, 0.05);
-	border-color: var(--text-muted, #666);
-}
-
-.resend-confirm-prompt {
-	margin-bottom: 8px;
-	font-size: 0.9em;
-	color: var(--text-secondary);
-}
-
-.resend-confirm-actions {
-	display: flex;
-	gap: 8px;
-	justify-content: center;
-}
-
-.resend-status {
-	font-size: 0.9em;
-	color: var(--text-muted);
-}
-
-.resend-status.success {
-	color: var(--success);
-}

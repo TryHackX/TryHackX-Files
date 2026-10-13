@@ -84,6 +84,15 @@
 	}
 }
 
+/* Fingers: a taller hit area around the short footer links, without moving the text. */
+@media (pointer: coarse) {
+	.site-footer a {
+		display: inline-block;
+		padding: 8px 2px;
+		margin: -8px -2px;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.site-footer a {
 		transition: none;

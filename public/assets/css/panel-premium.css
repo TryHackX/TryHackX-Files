@@ -226,6 +226,15 @@
 	pointer-events: auto;
 }
 
+/* Phones: the filter row wraps, and the two collapsed buttons — zero width but still full
+   height — formed a second, empty row of their own between the search box and the table.
+   There is no room for the slide on a wrapping row anyway, so they simply appear. */
+@media (max-width: 600px) {
+	.btn.collect-slide:not(.is-shown) {
+		display: none;
+	}
+}
+
 /* The count rides in its own pill so the label does not reflow every time it changes. */
 .collect-count {
 	display: inline-flex;
@@ -310,14 +319,11 @@
    near-white, which on a dark panel reads as a glitch rather than as "you are here".
    `:focus-visible` (not `:focus`) so a mouse click never draws it — the ring is for people
    navigating by keyboard, and after Esc that is exactly who is looking. */
-.btn:focus-visible,
-.btn-icon:focus-visible,
-.action-btn:focus-visible,
+/* .btn, .btn-icon, .action-btn and .lang-opt get the same ring from base.css. */
 .tab:focus-visible,
 .sub-tab:focus-visible,
 .scope-btn:focus-visible,
-.chip:focus-visible,
-.lang-opt:focus-visible {
+.chip:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: 2px;
 	border-radius: 8px;

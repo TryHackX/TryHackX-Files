@@ -17,10 +17,16 @@ const panelCss = fs.readFileSync(
 	path.join(__dirname, '../../public/assets/css/panel.css'),
 	'utf8'
 );
+// The collection page's rules live in download.css (it used to carry an inline <style> block).
+const pageCss = fs.readFileSync(
+	path.join(__dirname, '../../public/assets/css/download.css'),
+	'utf8'
+);
 
 test('public collection password modal follows shared dismissal and focus behaviour', () => {
 	assert.match(page, /id="collMembersModal"[^>]*role="dialog"[^>]*aria-modal="true"[^>]*aria-hidden="true"/);
-	assert.match(page, /#collMembersModal\s*\{[^}]*align-items:\s*flex-start/s);
+	assert.doesNotMatch(page, /<style[\s>]/, 'no inline stylesheet on the collection page');
+	assert.match(pageCss, /#collMembersModal\s*\{[^}]*align-items:\s*flex-start/s);
 	assert.match(source, /event\.key\s*!==\s*'Escape'/);
 	assert.match(source, /event\.key\s*!==\s*'Tab'/);
 	assert.match(source, /addEventListener\('mousedown'/);

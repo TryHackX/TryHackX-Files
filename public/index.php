@@ -92,6 +92,7 @@ $homeNotice = [
 	<?php require_once __DIR__ . '/../src/includes/csrf_head.php'; ?>
 	<?php require_once __DIR__ . '/../src/includes/i18n_head.php'; ?>
 	<title><?= APP_NAME ?> - <?= _h('home.tagline') ?></title>
+	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/index.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/notifications.css?v=<?= APP_VERSION ?>">
@@ -133,15 +134,17 @@ $homeNotice = [
 					/ <span id="limitCount"><?= $maxFiles ?></span> <?= _h('home.limit_files_suffix') ?></span>
 			</div>
 			<div class="upload-body">
-				<div class="drop-zone" id="dropZone">
+				<div class="drop-zone" id="dropZone" role="group" aria-label="<?= _h('home.upload_title') ?>">
 					<svg class="drop-zone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
 						stroke-width="1.5">
 						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
 						<polyline points="17 8 12 3 7 8" />
 						<line x1="12" y1="3" x2="12" y2="15" />
 					</svg>
-					<p class="drop-zone-text"><?= _h('home.drop_text') ?> <span id="browseBtn"><?= _h('home.drop_browse') ?></span></p>
-					<input type="file" id="fileInput" multiple>
+					<p class="drop-zone-text"><?= _h('home.drop_text') ?> <button type="button" class="drop-zone-browse" id="browseBtn"><?= _h('home.drop_browse') ?></button></p>
+					<?php /* Keyboard path: "browse" is a real button (Enter/Space open the picker); the
+					         input stays out of sight and out of the tab order. */ ?>
+					<input type="file" id="fileInput" class="visually-hidden" multiple tabindex="-1" aria-hidden="true">
 				</div>
 				<div class="file-list" id="fileList"></div>
 				<div class="session-info" id="sessionInfo"></div>
@@ -321,7 +324,7 @@ $homeNotice = [
 					</div>
 					<label class="coll-check">
 						<input type="checkbox" id="collOneTime">
-						<span><i class="fa-solid fa-fire" style="color:#f97316"></i> <?= _h('panel.fo.onetime') ?></span>
+						<span><i class="fa-solid fa-fire coll-onetime-icon"></i> <?= _h('panel.fo.onetime') ?></span>
 					</label>
 					<div class="coll-field">
 						<label for="collPassword"><?= _h('panel.cc.password') ?></label>

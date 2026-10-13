@@ -6,10 +6,22 @@
 .col-check { width: 32px; text-align: center; }
 .myfile-check,
 .mycoll-check { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+/* Larger row checkboxes for fingers. */
+@media (pointer: coarse) {
+	.file-check,
+	.myfile-check,
+	.mycoll-check { width: 22px; height: 22px; }
+}
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 /* A section head whose right side carries more than one control — a slide-out selection
    action beside the ordinary buttons. */
 .section-head-actions { display: flex; align-items: center; gap: 12px; }
+/* Phones: title and controls share a row only while they fit; the controls wrap rather than
+   widen the page (the notifications head was 540px wide on a 375px phone). */
+@media (max-width: 600px) {
+	.section-head { flex-wrap: wrap; }
+	.section-head-actions { flex-wrap: wrap; min-width: 0; }
+}
 
 /* Progress of an upload still arriving (dashboard). A bar rather than a number alone, because
    the question being asked of this widget is "is it moving", which a bar answers at a glance. */
@@ -36,7 +48,9 @@
 	grid-template-columns: 2fr 1fr;
 	gap: 16px;
 }
-@media (max-width: 800px) { .dash-grid { grid-template-columns: 1fr; } }
+/* minmax(0, 1fr), not 1fr: a plain 1fr track never shrinks below its widest content, and the
+   traffic card's range picker made every dashboard card 600px wide on a phone. */
+@media (max-width: 800px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
 
 .chart-holder {
 	min-height: 200px;
@@ -60,21 +74,6 @@
 .top-file-meta { color: var(--text-muted); white-space: nowrap; }
 .top-file-bar { height: 7px; border-radius: 4px; background: var(--bg-secondary); overflow: hidden; }
 .top-file-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
-
-/* Language switcher (Faza 4.3) */
-.lang-switch { display: inline-flex; gap: 2px; align-items: center; margin-right: 6px; }
-.lang-switch .lang-opt {
-    padding: 4px 7px;
-    border-radius: 6px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: .04em;
-    text-decoration: none;
-    color: var(--text-muted, #94a3b8);
-    transition: background .15s, color .15s;
-}
-.lang-switch .lang-opt:hover { background: var(--bg-hover, rgba(148, 163, 184, .12)); color: var(--text); }
-.lang-switch .lang-opt.active { background: var(--accent); color: #fff; }
 
 /* Group permissions (Faza 6 · #1) — the checkbox grid in the group form and the
    "what will this user get" preview in the change-group modal. */
@@ -111,7 +110,6 @@
 	background: var(--bg-secondary);
 }
 .perm-preview h4 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text); }
-.perm-preview-limits { font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 10px; }
 .perm-preview-note { font-size: 0.86rem; color: var(--text-muted); margin: 0; }
 .perm-preview-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .perm-preview-list li { font-size: 0.86rem; color: var(--text-secondary); }
@@ -236,6 +234,23 @@
 .range-btn.active {
 	background: var(--accent);
 	color: #fff;
+}
+
+/* Phones: the six spans wrap under the card title instead of widening the whole page, with
+   finger-sized buttons. */
+@media (max-width: 600px) {
+	.widget-head {
+		flex-wrap: wrap;
+	}
+
+	.range-picker {
+		flex-shrink: 1;
+		min-width: 0;
+	}
+
+	.range-btn {
+		padding: 8px 10px;
+	}
 }
 
 /* Advanced file filters (pt 9) — the Filters button, its badge, the red-glow clear-all
@@ -490,44 +505,6 @@
 }
 .lang-coverage i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
 
-/* Browser autofill. Chrome paints a hard-coded near-white background on autofilled inputs
-   that no `background` declaration can override — the documented way out is to cover it with
-   an inset box-shadow and repaint the text via -webkit-text-fill-color. The long transition
-   delay keeps the browser's own fade from flashing white before ours lands. */
-input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:active,
-textarea:-webkit-autofill,
-select:-webkit-autofill {
-    background-clip: padding-box !important;
-    -webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
-    box-shadow: 0 0 0 1000px var(--bg-secondary) inset !important;
-    -webkit-text-fill-color: var(--text) !important;
-    caret-color: var(--text);
-    border-color: var(--border) !important;
-    transition: background-color 100000s ease-in-out 0s;
-}
-
-/* Focused *and* autofilled: the fill, then the ordinary focus ring on top of it. Without
-   this the !important fill wins outright and a just-autofilled field loses its glow, leaving a
-   bare bright border — the "white edge" that only ever appears with autofill. */
-input:-webkit-autofill:focus,
-textarea:-webkit-autofill:focus,
-select:-webkit-autofill:focus {
-    background-clip: padding-box !important;
-    -webkit-box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
-    box-shadow: 0 0 0 1000px var(--bg-secondary) inset, 0 0 0 3px rgba(99, 102, 241, 0.2) !important;
-    -webkit-text-fill-color: var(--text) !important;
-    border-color: var(--accent) !important;
-    caret-color: var(--text);
-}
-/* Firefox marks autofilled fields with its own highlight; this is the equivalent hook. */
-input:autofill,
-textarea:autofill {
-    background-color: var(--bg-secondary) !important;
-    color: var(--text) !important;
-}
-
 /* Inline links inside body copy (settings hints, doc references). Without this they fall back
    to the UA's pure blue, which reads as "unstyled page" against the panel's palette. Anchors
    that are really controls (.btn, .tab, .action-btn, .auth-link) set their own colour and win
@@ -743,37 +720,3 @@ textarea:autofill {
 	font-weight: 500;
 	color: var(--text-secondary);
 }
-
-/* Stacked toasts (FHUi.toast). Each entry is a clone of the page's own toast element, so it
-   arrives carrying `position: fixed; bottom; left; transform` — all of which have to be
-   neutralised here, because inside the stack the container does the positioning and the
-   items simply flow. Newest sits at the bottom, nearest the corner it grew from. */
-.toast-stack {
-	position: fixed;
-	bottom: 24px;
-	left: 50%;
-	transform: translateX(-50%);
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 8px;
-	z-index: 10001;
-	pointer-events: none;
-}
-.toast-stack .toast-item {
-	position: static;
-	left: auto;
-	right: auto;
-	bottom: auto;
-	top: auto;
-	margin: 0;
-	transform: translateY(8px);
-	opacity: 0;
-	transition: opacity 0.25s ease, transform 0.25s ease;
-	pointer-events: auto;
-}
-.toast-stack .toast-item.show {
-	transform: translateY(0);
-	opacity: 1;
-}
-
