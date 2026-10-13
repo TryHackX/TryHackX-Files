@@ -375,6 +375,7 @@ return [
 	'api.group_delete_failed' => 'Failed to delete the group.',
 	'api.group_system_locked' => 'System group — it cannot be deleted.',
 	'api.group_default_locked' => 'The default group cannot be deleted.',
+	'api.group_has_pending_payments' => 'A plan that sells this group has payments still in progress. Wait until they are settled, then delete the group.',
 	'api.group_over_system' => 'The file-size limit cannot exceed the system maximum (:system MiB).',
 	'api.token_gen_failed' => 'Could not generate a token',
 	'api.token_gen_failed2' => 'Failed to generate token',

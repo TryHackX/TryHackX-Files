@@ -377,6 +377,7 @@ return [
 	'api.group_delete_failed' => 'Błąd usuwania grupy.',
 	'api.group_system_locked' => 'Grupa systemowa — nie można jej usunąć.',
 	'api.group_default_locked' => 'Nie można usunąć grupy domyślnej.',
+	'api.group_has_pending_payments' => 'Plan, który sprzedaje tę grupę, ma jeszcze nierozliczone płatności. Poczekaj, aż się zakończą, i dopiero wtedy usuń grupę.',
 	'api.group_over_system' => 'Limit rozmiaru pliku nie może przekraczać systemowego maksimum (:system MiB).',
 	'api.token_gen_failed' => 'Nie można wygenerować tokenu',
 	'api.token_gen_failed2' => 'Nie udało się wygenerować tokenu',

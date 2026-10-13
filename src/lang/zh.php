@@ -351,6 +351,7 @@ return array (
   'api.group_delete_failed' => '删除用户组失败。',
   'api.group_system_locked' => '系统用户组——不可删除。',
   'api.group_default_locked' => '默认用户组不可删除。',
+  'api.group_has_pending_payments' => '出售此用户组的套餐仍有未完成的付款。请等这些付款结算后再删除该用户组。',
   'api.group_over_system' => '文件大小上限不能超过系统最大值（:system MiB）。',
   'api.token_gen_failed' => '无法生成令牌',
   'api.token_gen_failed2' => '生成令牌失败',

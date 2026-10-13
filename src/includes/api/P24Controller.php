@@ -60,7 +60,10 @@ final class P24Controller
 		}
 		if (!PaymentReconciler::fulfil($payment, $amount, $currency, 'p24-notify')) {
 			$fresh = PaymentRepository::byExtOrderId($sessionId);
-			if (($fresh['status'] ?? '') !== PaymentRepository::COMPLETED) {
+			// A permanent failure is recorded for an operator; asking P24 to call again would
+			// only repeat it, so the notification counts as understood.
+			if (($fresh['status'] ?? '') !== PaymentRepository::COMPLETED
+				&& !PaymentReconciler::isPermanentError($fresh['fulfillment_last_error'] ?? null)) {
 				http_response_code(503);
 				echo json_encode(['success' => false]);
 				return;

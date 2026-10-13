@@ -1138,7 +1138,14 @@ final class PremiumController
 
 		if ($supplied === '' || !hash_equals($expected, $supplied)) {
 			http_response_code(401);
-			Database::logAudit('premium_activate_denied', 'bad or missing token');
+			// Anyone can call this URL, so a refusal must not be a way to write to the audit
+			// log at the request rate: one line per address per security window says the same.
+			$ip = getClientIP();
+			$seen = Database::getSecurityEvent($ip, 'premium_activate_denied');
+			Database::incrementSecurityEvent($ip, 'premium_activate_denied');
+			if ($seen === 0) {
+				Database::logAudit('premium_activate_denied', 'bad or missing token');
+			}
 			echo json_encode(['success' => false, 'error' => __('api.unauthorized')]);
 			return;
 		}

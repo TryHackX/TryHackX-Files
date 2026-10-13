@@ -205,6 +205,25 @@ final class PromoCodeRepository
 			if ($row['status'] === 'redeemed') {
 				return true;
 			}
+			if ($row['status'] === 'released') {
+				// The checkout was given up on (no answer for 72 hours) and its use handed back,
+				// but the buyer paid after all — a bank transfer can take that long. The price was
+				// frozen when the order was made, so the use is spent now, even past the cap:
+				// refusing would leave a paid order that can never be fulfilled.
+				$late = $pdo->prepare(
+					"UPDATE `" . self::table() . "` SET `used_count` = `used_count` + 1 WHERE `id` = ?"
+				);
+				$late->execute([(int) $row['promo_id']]);
+				if ($late->rowCount() !== 1) {
+					return false;
+				}
+				$done = $pdo->prepare(
+					"UPDATE `{$reservations}` SET `status` = 'redeemed', `updated_at` = ?
+					 WHERE `ext_order_id` = ? AND `status` = 'released'"
+				);
+				$done->execute([time(), $extOrderId]);
+				return $done->rowCount() === 1;
+			}
 			if ($row['status'] !== 'reserved') {
 				return false;
 			}

@@ -351,6 +351,7 @@ return array (
   'api.group_delete_failed' => 'No se pudo eliminar el grupo.',
   'api.group_system_locked' => 'Grupo del sistema: no se puede eliminar.',
   'api.group_default_locked' => 'El grupo predeterminado no se puede eliminar.',
+  'api.group_has_pending_payments' => 'Un plan que vende este grupo todavía tiene pagos en curso. Espera a que se completen y elimina el grupo después.',
   'api.group_over_system' => 'El límite de tamaño de archivo no puede superar el máximo del sistema (:system MiB).',
   'api.token_gen_failed' => 'No se pudo generar un token',
   'api.token_gen_failed2' => 'No se pudo generar el token',

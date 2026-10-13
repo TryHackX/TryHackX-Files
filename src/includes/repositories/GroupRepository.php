@@ -468,6 +468,29 @@ final class GroupRepository
 				}
 				return ['success' => false, 'error' => __('api.group_default_locked')];
 			}
+			// A paid order still in flight was priced to grant this group. Deleting it now would
+			// leave money taken for something that can no longer be delivered.
+			$inFlight = $pdo->prepare(
+				"SELECT 1 FROM `" . Database::table('payments') . "` pay
+				 LEFT JOIN `" . Database::table('plans') . "` pl ON pl.`id` = pay.`plan_id`
+				 WHERE pay.`granted_at` IS NULL AND pay.`status` IN (?, ?, ?)
+				   AND (pl.`group_id` = ?
+				        OR JSON_UNQUOTE(JSON_EXTRACT(pay.`product_snapshot`, '$.product.group_id')) = ?)
+				 LIMIT 1"
+			);
+			$inFlight->execute([
+				PaymentRepository::NEW,
+				PaymentRepository::PENDING,
+				PaymentRepository::PROCESSING,
+				$id,
+				(string) $id,
+			]);
+			if ($inFlight->fetchColumn()) {
+				if ($ownsTransaction) {
+					$pdo->rollBack();
+				}
+				return ['success' => false, 'error' => __('api.group_has_pending_payments')];
+			}
 			// Reassign members to NULL → they resolve to the default group.
 			$pdo->prepare(
 				"UPDATE `{$u}`

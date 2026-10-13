@@ -229,7 +229,9 @@ final class Notifications
 			// is muted — otherwise a cron running every quarter hour would mail the same warning
 			// ninety-six times a day to anyone who kept mail and turned the bell off. In that
 			// case it is written already-read, so it is history rather than something new.
-			$once = !empty($opts['once']) && $group !== '';
+			// The key is the caller's `group`, which a type that does not stack may pass too.
+			$onceKey = !empty($opts['once']) ? (string) ($opts['group'] ?? $group) : '';
+			$once = $onceKey !== '';
 			$requestedChannels = is_array($opts['channels'] ?? null)
 				? array_values(array_intersect(['app', 'mail'], $opts['channels']))
 				: ['app', 'mail'];
@@ -248,7 +250,7 @@ final class Notifications
 					$group,
 					$by,
 					!$app,
-					$once ? $group : ''
+					$once ? $onceKey : ''
 				);
 				if ($once && !$written) {
 					return false;

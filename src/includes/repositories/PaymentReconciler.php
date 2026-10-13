@@ -205,11 +205,7 @@ final class PaymentReconciler
 			);
 			// The buyer is owed an explanation here more than anywhere else in this flow: money
 			// moved and nothing was granted, and the audit log is not somewhere they can look.
-			$tab = ($payment['kind'] ?? '') === PaymentRepository::KIND_AD ? 'myads' : 'premium';
-			Notifications::send((int) $payment['user_id'], 'payment.failed', [
-				'subject' => $extOrderId,
-				'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=' . $tab,
-			]);
+			self::notifyFailedOnce($payment);
 			return false;
 		}
 
@@ -375,7 +371,14 @@ final class PaymentReconciler
 		}
 		if (!$plan) {
 			Database::logAudit('payment_plan_missing', $extOrderId, (int) $payment['user_id']);
-			return self::finishGrant($pdo, $payment, $via, $token, false, 'plan_missing');
+			return self::finishGrant($pdo, $payment, $via, $token, false, self::PERMANENT . 'plan_missing');
+		}
+		// The group the plan sold was deleted after checkout. No retry can bring it back, so
+		// this is recorded once for an operator to settle (grant by hand or refund) instead of
+		// failing — and telling the buyer — on every sweep for ever.
+		$targetGroup = !empty($plan['group_id']) ? GroupRepository::getById((int) $plan['group_id']) : null;
+		if (!$targetGroup || ($targetGroup['slug'] ?? null) === 'moderator') {
+			return self::finishGrant($pdo, $payment, $via, $token, false, self::PERMANENT . 'plan_group_missing');
 		}
 
 			$result = PlanRepository::grant(
@@ -551,23 +554,43 @@ final class PaymentReconciler
 		}
 
 		Database::logAudit(
-			'payment_fulfillment_failed',
+			self::isPermanentError($error) ? 'payment_fulfillment_stuck' : 'payment_fulfillment_failed',
 			$payment['provider'] . ' (' . $via . '), order ' . $extOrderId . ', reason ' . $error,
 			(int) $payment['user_id']
 		);
-		$tab = ($payment['kind'] ?? '') === PaymentRepository::KIND_AD
-			|| ($payment['kind'] ?? '') === PaymentRepository::KIND_AD_ADDON
+		self::notifyFailedOnce($payment);
+		return false;
+	}
+
+	/** Prefix of a fulfilment error no retry can fix; such orders leave the sweep. */
+	public const PERMANENT = 'permanent:';
+
+	public static function isPermanentError(?string $error): bool
+	{
+		return $error !== null && str_starts_with($error, self::PERMANENT);
+	}
+
+	/**
+	 * Tell the buyer that a paid order did not go through — once per order. A sweep every
+	 * quarter hour and a provider retrying its callback must not turn one problem into a bell
+	 * and an e-mail every few minutes.
+	 */
+	private static function notifyFailedOnce(array $payment): void
+	{
+		$extOrderId = (string) $payment['ext_order_id'];
+		$tab = in_array($payment['kind'] ?? '', [PaymentRepository::KIND_AD, PaymentRepository::KIND_AD_ADDON], true)
 			? 'myads'
 			: 'premium';
 		try {
 			Notifications::send((int) $payment['user_id'], 'payment.failed', [
 				'subject' => $extOrderId,
+				'group' => 'payment.failed:' . $extOrderId,
+				'once' => true,
 				'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=' . $tab,
 			]);
 		} catch (Throwable $e) {
 			error_log('Payment failure notification failed for ' . $extOrderId . ': ' . $e->getMessage());
 		}
-		return false;
 	}
 
 	/**
@@ -586,17 +609,21 @@ final class PaymentReconciler
 		}
 
 		try {
+			// An order parked with a permanent error is an operator's job now (see fulfil());
+			// polling it again would only fail again.
 			$stmt = $pdo->prepare("SELECT * FROM `" . Database::table('payments') . "`
 				WHERE `granted_at` IS NULL AND (
 					`status` IN (?, ?)
 					OR (`status` = ? AND (`processing_expires_at` IS NULL OR `processing_expires_at` <= ?))
 				)
+				AND (`fulfillment_last_error` IS NULL OR `fulfillment_last_error` NOT LIKE ?)
 				ORDER BY `created_at` ASC LIMIT 200");
 			$stmt->execute([
 				PaymentRepository::NEW,
 				PaymentRepository::PENDING,
 				PaymentRepository::PROCESSING,
 				time(),
+				self::PERMANENT . '%',
 			]);
 			$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 		} catch (PDOException $e) {
