@@ -108,7 +108,12 @@ final class AuthController
 				return;
 			}
 
-			completeLogin($result['user'], $uploadToken, $remember);
+			$handedOver = completeLogin($result['user'], $uploadToken, $remember);
+			if ($handedOver !== null) {
+				// The page held another account's upload token; this is its own from now on.
+				$result['upload_token'] = $handedOver['token'];
+				$result['upload_token_expires_at'] = $handedOver['expires_at'];
+			}
 		} else {
 			// Increment attempts
 			Database::incrementSecurityEvent($ipKey, 'login_fail');
@@ -222,13 +227,14 @@ final class AuthController
 			echo json_encode(['success' => false, 'error' => __('api.2fa_bad_code_retry')]);
 			return;
 		}
+		$keepDevice = RememberTokenRepository::remainingLifetime(RememberTokenRepository::presentedCookie(), $userId);
 		$codes = Database::enableTotpWithRecoveryCodes($userId);
 		if (!$codes) {
 			echo json_encode(['success' => false, 'error' => __('api.2fa_enable_failed')]);
 			return;
 		}
 		unset($_SESSION['pending_2fa_setup']);
-		self::refreshSessionAfterReauthentication($userId);
+		self::refreshSessionAfterReauthentication($userId, $keepDevice);
 		Database::logAudit('2fa_enabled', 'user: ' . ($_SESSION['user_name'] ?? ''), $userId, $_SESSION['user_name'] ?? null);
 
 		echo json_encode(['success' => true, 'recovery_codes' => $codes]);
@@ -255,11 +261,12 @@ final class AuthController
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
+		$keepDevice = RememberTokenRepository::remainingLifetime(RememberTokenRepository::presentedCookie(), $userId);
 		if (!Database::setTotpEnabled($userId, false)) {
 			echo json_encode(['success' => false, 'error' => __('api.system_error')]);
 			return;
 		}
-		self::refreshSessionAfterReauthentication($userId);
+		self::refreshSessionAfterReauthentication($userId, $keepDevice);
 		Database::logAudit('2fa_disabled', 'user: ' . ($user['username'] ?? ''), $userId, $user['username'] ?? null);
 		echo json_encode(['success' => true]);
 	}
@@ -355,12 +362,13 @@ final class AuthController
 			return;
 		}
 
+		$keepDevice = RememberTokenRepository::remainingLifetime(RememberTokenRepository::presentedCookie(), $userId);
 		$codes = Database::regenerateRecoveryCodesAndInvalidateAccess($userId);
 		if (!$codes) {
 			echo json_encode(['success' => false, 'error' => __('api.2fa_codes_failed')]);
 			return;
 		}
-		self::refreshSessionAfterReauthentication($userId);
+		self::refreshSessionAfterReauthentication($userId, $keepDevice);
 		Database::logAudit('2fa_recovery_regenerated', 'user: ' . ($user['username'] ?? ''), $userId, $user['username'] ?? null);
 		echo json_encode(['success' => true, 'recovery_codes' => $codes]);
 	}
@@ -442,13 +450,18 @@ final class AuthController
 
 		Database::clearSecurityEvent($ipKey, 'totp_fail');
 		$user['is_admin'] = ($user['role'] === 'admin');
-		completeLogin($user, (string) ($pending['upload_token'] ?? ''), (int) ($pending['remember'] ?? 0));
+		$handedOver = completeLogin($user, (string) ($pending['upload_token'] ?? ''), (int) ($pending['remember'] ?? 0));
 
-		echo json_encode(['success' => true, 'user' => [
+		$response = ['success' => true, 'user' => [
 			'id' => (int) $user['id'],
 			'username' => $user['username'],
 			'is_admin' => $user['is_admin'],
-		]]);
+		]];
+		if ($handedOver !== null) {
+			$response['upload_token'] = $handedOver['token'];
+			$response['upload_token_expires_at'] = $handedOver['expires_at'];
+		}
+		echo json_encode($response);
 	}
 
 	public static function handleUserRegister()
@@ -640,6 +653,12 @@ final class AuthController
 			RememberTokenRepository::forget($cookie);
 			RememberTokenRepository::sendCookie('', 0);
 		}
+		// The same goes for the upload session this tab held for the account: uploads after
+		// signing out (or after the next person signs in here) must not land in it.
+		$userId = (int) ($_SESSION['user_id'] ?? 0);
+		if ($userId > 0) {
+			TokenRepository::forgetForUser(self::inputString('upload_token'), $userId);
+		}
 
 		$_SESSION = [];
 		if (ini_get("session.use_cookies")) {
@@ -815,13 +834,15 @@ final class AuthController
 		}
 
 		$userId = (int) $_SESSION['user_id'];
+		$keepDevice = RememberTokenRepository::remainingLifetime(RememberTokenRepository::presentedCookie(), $userId);
 		if (Database::updateUserPassword($userId, $newPass)) {
 			// Clear rate limit on success
 			unset($_SESSION['rate_limits']['change_password_' . $userId]);
 			// The change ended every session and revoked every device token and API key. This
 			// browser is the one that just proved the old password, so — exactly like the 2FA
-			// flows — it is the one kept signed in; everything else has to sign in again.
-			self::refreshSessionAfterReauthentication($userId);
+			// flows — it is the one kept signed in (and still remembered, if it was); everything
+			// else has to sign in again.
+			self::refreshSessionAfterReauthentication($userId, $keepDevice);
 			// A password change the account holder did not make is the thing they most need to
 			// hear about, so this one is announced on both channels by default.
 			Notifications::send($userId, 'security.password', [
@@ -1091,7 +1112,7 @@ final class AuthController
 	/**
 	 * Keep only the browser that just supplied a fresh factor after a global credential revoke.
 	 */
-	private static function refreshSessionAfterReauthentication(int $userId): void
+	private static function refreshSessionAfterReauthentication(int $userId, int $keepDeviceSeconds = 0): void
 	{
 		$user = Database::getUserById($userId);
 		if (!$user || (int) ($user['is_active'] ?? 0) !== 1) {
@@ -1103,5 +1124,20 @@ final class AuthController
 		}
 		SessionAuth::establish($user);
 		$_SESSION['recent_auth_at'] = time();
+
+		// The change revoked every device token, this browser's included. If this browser was
+		// remembered, it gets a new token for the time its old one had left, so it is not
+		// signed out the moment the browser session ends.
+		if ($keepDeviceSeconds > 0) {
+			$cookie = RememberTokenRepository::issue(
+				$userId,
+				$keepDeviceSeconds,
+				function_exists('getClientIP') ? getClientIP() : '',
+				(string) ($_SERVER['HTTP_USER_AGENT'] ?? '')
+			);
+			if ($cookie !== '') {
+				RememberTokenRepository::sendCookie($cookie, $keepDeviceSeconds);
+			}
+		}
 	}
 }

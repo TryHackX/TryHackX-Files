@@ -1307,4 +1307,93 @@ final class HttpApiTest extends TestCase
 		$this->assertContains($res['status'], [200, 401]);
 		$this->assertSame([], preg_grep('/^Set-Cookie:/i', $res['headers']));
 	}
+
+	private static function uploadTokenOwner(string $token): ?int
+	{
+		$stmt = Database::getInstance()->prepare(
+			"SELECT `user_id` FROM `" . Database::table('upload_tokens') . "` WHERE `token` = ?"
+		);
+		$stmt->execute([$token]);
+		$value = $stmt->fetchColumn();
+		return $value === false || $value === null ? null : (int) $value;
+	}
+
+	/**
+	 * The upload token decides whose an upload is. Signing out revokes the tab's token, and
+	 * signing in while the tab still holds another account's token hands out a new one, so
+	 * later uploads in the same tab are never attributed to the previous account.
+	 */
+	public function testTheUploadTokenFollowsWhoeverIsSignedInInTheTab(): void
+	{
+		$first = self::freshUser('httptokenfirst');
+		$second = self::freshUser('httptokensecond');
+
+		$this->assertTrue(self::signIn('httptokenfirst', 'Fresh1Pass!')['success'] ?? false);
+		$token = (string) (self::postJson('/api.php?action=verify_captcha', [])['token'] ?? '');
+		$this->assertNotSame('', $token);
+		$this->assertSame($first, self::uploadTokenOwner($token));
+
+		// The second person signs in in the same tab, which still holds the first one's token.
+		self::refreshCsrf();
+		$switched = self::postJson('/api.php?action=user_login', [
+			'username' => 'httptokensecond',
+			'password' => 'Fresh1Pass!',
+			'upload_token' => $token,
+		]);
+		$this->assertTrue($switched['success'] ?? false, json_encode($switched));
+		$handed = (string) ($switched['upload_token'] ?? '');
+		$this->assertNotSame('', $handed, 'a token of the new account is handed back');
+		$this->assertNotSame($token, $handed);
+		$this->assertSame($second, self::uploadTokenOwner($handed));
+		$this->assertGreaterThan(time(), (int) ($switched['upload_token_expires_at'] ?? 0));
+
+		// Signing out takes the tab's token with it.
+		$this->assertTrue(self::postJson('/api.php?action=user_logout', ['upload_token' => $handed])['success'] ?? false);
+		$this->assertNull(self::uploadTokenOwner($handed));
+
+		// An anonymous token is still simply claimed on sign-in.
+		self::$cookies = [];
+		self::refreshCsrf();
+		$guest = (string) (self::postJson('/api.php?action=verify_captcha', [])['token'] ?? '');
+		$this->assertNull(self::uploadTokenOwner($guest));
+		$claimed = self::postJson('/api.php?action=user_login', [
+			'username' => 'httptokenfirst',
+			'password' => 'Fresh1Pass!',
+			'upload_token' => $guest,
+		]);
+		$this->assertTrue($claimed['success'] ?? false);
+		$this->assertArrayNotHasKey('upload_token', $claimed, 'the page keeps the one it has');
+		$this->assertSame($first, self::uploadTokenOwner($guest));
+	}
+
+	/** Changing the password keeps this browser remembered, not only signed in. */
+	public function testChangingThePasswordKeepsThisBrowserRemembered(): void
+	{
+		Database::setSetting('login_remember_enabled', '1');
+		self::serverSettingsChanged();
+		$userId = self::freshUser('httpkeepremembered', 'Before1Pass!');
+		$this->assertTrue(self::signIn('httpkeepremembered', 'Before1Pass!', 3600)['success'] ?? false);
+		$device = self::$cookies['fh_remember'] ?? '';
+		$this->assertNotSame('', $device);
+
+		$changed = self::postJson('/api.php?action=user_change_password', [
+			'current_password' => 'Before1Pass!',
+			'new_password' => 'After1Pass!',
+		]);
+		$this->assertTrue($changed['success'] ?? false, json_encode($changed));
+		$this->assertNotSame($device, self::$cookies['fh_remember'] ?? '', 'a new device token replaces the revoked one');
+
+		$rows = Database::getInstance()->prepare(
+			"SELECT `expires_at` FROM `" . Database::table('remember_tokens') . "` WHERE `user_id` = ?"
+		);
+		$rows->execute([$userId]);
+		$expires = $rows->fetchAll(PDO::FETCH_COLUMN);
+		$this->assertCount(1, $expires);
+		$this->assertLessThanOrEqual(time() + 3600, (int) $expires[0], 'for no longer than the old one had left');
+
+		// The browser closes: the new device token brings the session back.
+		unset(self::$cookies[session_name()], self::$cookies['PHPSESSID']);
+		$this->assertTrue(self::getJson('/api.php?action=notification_count')['success'] ?? false);
+	}
+
 }

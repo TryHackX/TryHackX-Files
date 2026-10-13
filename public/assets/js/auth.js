@@ -266,7 +266,7 @@
                 password,
                 remember: Number.isFinite(remember) ? remember : 0,
                 captcha_response: captchaResponse,
-                upload_token: window.FHStorage.session.get('uploadToken') || ''
+                upload_token: window.FHUploadSession ? window.FHUploadSession.current() : ''
             });
 
             // 2FA: the password checked out but the account needs a code — swap to step two.
@@ -277,6 +277,7 @@
             }
 
             if (data.success) {
+                adoptUploadToken(data);
                 currentUser = data.user;
                 updateAuthUI();
                 showAuthMessage(t('auth.login_success'), 'success');
@@ -357,6 +358,7 @@
             const data = await FHApi.post('user_2fa_login', { code: document.getElementById('twofaLoginCode').value.trim() });
 
             if (data.success) {
+                adoptUploadToken(data);
                 currentUser = data.user;
                 updateAuthUI();
                 cancel2faLogin(); // put the login form back for next time
@@ -591,12 +593,26 @@
         }
     }
 
+    /**
+     * The server hands back a new upload token when the one this tab held belonged to another
+     * account (whoever was signed in here before). Use it from now on, so the next upload is
+     * this account's.
+     */
+    function adoptUploadToken(data) {
+        if (data && data.upload_token && window.FHUploadSession) {
+            window.FHUploadSession.replace(data.upload_token, (Number(data.upload_token_expires_at) || 0) * 1000);
+        }
+    }
+
     async function handleLogout() {
         // Show immediate feedback
         showAuthMessage(t('js.logging_out'), 'success');
 
         try {
-            await FHApi.post('user_logout', {});
+            await FHApi.post('user_logout', {
+                upload_token: window.FHUploadSession ? window.FHUploadSession.current() : ''
+            });
+            if (window.FHUploadSession) window.FHUploadSession.clear();
             currentUser = null;
             updateAuthUI();
 
@@ -613,6 +629,7 @@
 
         } catch (e) {
             console.error('Logout error', e);
+            if (window.FHUploadSession) window.FHUploadSession.clear();
             if (window.location.pathname.includes('panel.php')) {
                 const baseUrl = authApiUrl.replace('/api.php', '');
                 window.location.href = baseUrl || './';

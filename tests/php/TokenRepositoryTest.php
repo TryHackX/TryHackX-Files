@@ -19,6 +19,58 @@ final class TokenRepositoryTest extends RepoTestCase
 		$this->assertFalse(Database::verifyUploadToken('bogus', '192.0.2.1'));
 	}
 
+	/**
+	 * The upload token is what files are attributed by, so it follows whoever signs in in the
+	 * tab: an anonymous one is claimed, another account's one is replaced (keeping its upload
+	 * session), and signing out removes the token of the account that left.
+	 */
+	public function testUploadTokenFollowsTheAccountSignedInInTheTab(): void
+	{
+		$ids = [];
+		foreach (['tokenowner', 'tokennext'] as $name) {
+			$suffix = bin2hex(random_bytes(3));
+			$this->assertTrue(Database::registerUser($name . $suffix, $name . $suffix . '@example.test', 'Str0ng!pass')['success']);
+			$ids[] = (int) Database::getUserByEmailOrUsername($name . $suffix)['id'];
+		}
+		[$first, $next] = $ids;
+		$owner = static function (string $token): ?int {
+			$stmt = Database::getInstance()->prepare(
+				"SELECT `user_id` FROM `" . Database::table('upload_tokens') . "` WHERE `token` = ?"
+			);
+			$stmt->execute([$token]);
+			$value = $stmt->fetchColumn();
+			return $value === false || $value === null ? null : (int) $value;
+		};
+
+		// An anonymous token is simply claimed: the page keeps it.
+		$guest = Database::createUploadToken('192.0.2.7', null);
+		$this->assertNull(TokenRepository::handOverOnLogin($guest, $first, '192.0.2.7'));
+		$this->assertSame($first, $owner($guest));
+		$this->assertNull(TokenRepository::handOverOnLogin($guest, $first, '192.0.2.7'), 'already this account\'s');
+
+		// Someone else signs in in the same tab: a new token for them, same upload session.
+		Database::getInstance()->exec(
+			"UPDATE `" . Database::table('upload_tokens') . "` SET `files_count` = 3 WHERE `token` = '" . $guest . "'"
+		);
+		$handed = TokenRepository::handOverOnLogin($guest, $next, '192.0.2.7');
+		$this->assertIsArray($handed);
+		$this->assertNotSame($guest, $handed['token']);
+		$this->assertSame($next, $owner($handed['token']));
+		$this->assertSame($first, $owner($guest), 'the previous account keeps its own token');
+		$this->assertSame(3, (int) Database::getTokenInfo($handed['token'], '192.0.2.7')['files_uploaded']);
+		$this->assertGreaterThan(time(), $handed['expires_at']);
+
+		// Not from this address, or unknown: left alone for the page to replace the usual way.
+		$this->assertNull(TokenRepository::handOverOnLogin($guest, $next, '192.0.2.99'));
+		$this->assertNull(TokenRepository::handOverOnLogin('bogus', $next, '192.0.2.7'));
+
+		// Signing out removes only the leaving account's token.
+		$this->assertFalse(TokenRepository::forgetForUser($handed['token'], $first));
+		$this->assertTrue(TokenRepository::forgetForUser($handed['token'], $next));
+		$this->assertNull($owner($handed['token']));
+		$this->assertSame($first, $owner($guest));
+	}
+
 	public function testTokenInfoReflectsSession(): void
 	{
 		$token = Database::createUploadToken('192.0.2.5', null);

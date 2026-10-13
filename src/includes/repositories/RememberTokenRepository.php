@@ -219,6 +219,49 @@ final class RememberTokenRepository
 		}
 	}
 
+	/**
+	 * Seconds left on the device token this request presented, when it is a live token of
+	 * $userId (the current secret, or the one rotated away from moments ago); 0 otherwise.
+	 *
+	 * A password or 2FA change revokes every device token of the account. The browser that
+	 * made the change keeps its session, and with this it can also keep being remembered: the
+	 * caller reads the remaining lifetime first, then issues a new token for that long.
+	 */
+	public static function remainingLifetime(string $cookie, int $userId): int
+	{
+		$parts = explode(':', $cookie, 2);
+		if ($userId < 1 || count($parts) !== 2
+			|| preg_match('/\A[a-f0-9]{64}\z/D', $parts[0]) !== 1
+			|| preg_match('/\A[a-f0-9]{64}\z/D', $parts[1]) !== 1) {
+			return 0;
+		}
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return 0;
+		}
+		[$series, $secret] = $parts;
+		$seriesHash = hash('sha256', $series);
+		try {
+			$stmt = $pdo->prepare(
+				"SELECT `user_id`, `token_hash`, `expires_at`, `last_used_at` FROM `"
+				. Database::table('remember_tokens') . "` WHERE `series` = ?"
+			);
+			$stmt->execute([$seriesHash]);
+			$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		} catch (Throwable $e) {
+			return 0;
+		}
+		$now = time();
+		if (!$row || (int) $row['user_id'] !== $userId || (int) $row['expires_at'] <= $now) {
+			return 0;
+		}
+		$current = hash_equals((string) $row['token_hash'], hash('sha256', $secret));
+		$justRotated = !$current
+			&& (int) ($row['last_used_at'] ?? 0) >= $now - self::ROTATION_GRACE_SECONDS
+			&& hash_equals((string) $row['token_hash'], hash('sha256', self::successor($seriesHash, $secret)));
+		return $current || $justRotated ? (int) $row['expires_at'] - $now : 0;
+	}
+
 	/** Drop one device's token, identified by the cookie it presented. */
 	public static function forget(string $cookie): void
 	{

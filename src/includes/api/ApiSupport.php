@@ -46,7 +46,11 @@ function previewGranted(string $id): bool
  * Grant the session after all factors have passed. Shared by the plain password login and
  * the 2FA second step, so both take exactly the same path (fresh session id, audit, token claim).
  */
-function completeLogin(array $user, string $uploadToken = '', int $rememberSeconds = 0): void
+/**
+ * @return array{token:string,expires_at:int}|null a replacement upload token for the page, or
+ *         null when the one it holds (if any) is still right
+ */
+function completeLogin(array $user, string $uploadToken = '', int $rememberSeconds = 0): ?array
 {
 	// Prevent session fixation: issue a fresh session ID on privilege change.
 	session_regenerate_id(true);
@@ -89,9 +93,14 @@ function completeLogin(array $user, string $uploadToken = '', int $rememberSecon
 		Database::logAudit('admin_login', 'user: ' . $user['username'], $user['id'], $user['username']);
 	}
 
-	if ($uploadToken !== '') {
-		Database::claimUploadToken($uploadToken, $user['id']);
-	}
+	// The browser's upload token follows the account now signed in (see
+	// TokenRepository::handOverOnLogin). A replacement, when one was needed, is handed back so
+	// the login response can give it to the page.
+	return TokenRepository::handOverOnLogin(
+		$uploadToken,
+		(int) $user['id'],
+		function_exists('getClientIP') ? getClientIP() : ''
+	);
 }
 
 /** A high-impact account/admin mutation must follow a fresh credential check. */

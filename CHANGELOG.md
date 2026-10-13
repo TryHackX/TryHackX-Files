@@ -83,6 +83,10 @@ in English for the first GitHub release.
   remembered device belong to the account. Several tabs opening at once no longer look like a
   stolen cookie, and a brief database outage signs nobody out. Maintenance mode keeps the 2FA step
   reachable, and changing the password keeps this browser signed in.
+- Uploads made after signing out, or after another account signs in in the same tab, no longer
+  belong to the previous account: signing out ends the tab's upload session and signing in hands
+  the new account its own. Changing the password or the 2FA settings keeps this browser
+  remembered, not only signed in.
 - Saving the uploads path no longer corrupts `config/config.local.php` when it contains `$0`.
   Removing html, svg, xml and similar types from the blocked extensions is no longer silently
   undone; they stay blocked and saving says so.

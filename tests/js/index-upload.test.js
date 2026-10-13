@@ -315,3 +315,31 @@ test('leaving the page while an upload is running asks for confirmation', async 
 	guard(event);
 	assert.equal(prevented, false, 'a finished upload no longer blocks navigation');
 });
+
+test('signing out or in switches the upload session the next upload uses', async () => {
+	const tokens = ['FIRST', 'GUEST'];
+	const page = loadIndex({
+		api: {
+			verify_captcha: async () => ({ success: true, token: tokens.shift() }),
+			token_info: () => ({ success: true, valid: true, expires_at: 4102444800 })
+		}
+	});
+	await flush();
+	page.pickFiles('a.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'FIRST');
+
+	// Signed out in the account modal: the previous account's token must not be reused.
+	page.window.FHUploadSession.clear();
+	assert.equal(page.sessionStore.getItem('uploadToken'), null, 'and it is gone from sessionStorage');
+	page.pickFiles('b.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'GUEST', 'a fresh session is fetched');
+
+	// Signed in again: the server handed over a token of the new account.
+	page.window.FHUploadSession.replace('HANDED', Date.now() + 3600000);
+	page.pickFiles('c.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[2].headers['X-Upload-Token'], 'HANDED');
+	assert.equal(page.sessionStore.getItem('uploadToken'), 'HANDED');
+});

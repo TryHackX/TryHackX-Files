@@ -79,6 +79,35 @@
 	}
 	window.FHStorage = { local: safeArea('localStorage'), session: safeArea('sessionStorage') };
 
+	// The upload token is what the upload server attributes files by. The upload page keeps it
+	// in sessionStorage and in memory; signing in or out changes whose token it must be, so the
+	// sign-in and sign-out code goes through here and the upload page subscribes. Before, a
+	// token survived sign-out and later uploads in the same tab went to the previous account.
+	var uploadSessionListeners = [];
+	function announceUploadSession(token, expiresAtMs) {
+		uploadSessionListeners.forEach(function (listener) {
+			try { listener(token, expiresAtMs); } catch (error) { /* one listener cannot stop the rest */ }
+		});
+	}
+	window.FHUploadSession = {
+		replace: function (token, expiresAtMs) {
+			window.FHStorage.session.set('uploadToken', token);
+			window.FHStorage.session.set('uploadTokenExpiry', String(expiresAtMs));
+			announceUploadSession(token, expiresAtMs);
+		},
+		clear: function () {
+			window.FHStorage.session.remove('uploadToken');
+			window.FHStorage.session.remove('uploadTokenExpiry');
+			announceUploadSession('', 0);
+		},
+		current: function () {
+			return window.FHStorage.session.get('uploadToken') || '';
+		},
+		subscribe: function (listener) {
+			if (typeof listener === 'function') uploadSessionListeners.push(listener);
+		}
+	};
+
 	if (window.fetch && !window.fetch.__fhCsrfWrapped) {
 		var originalFetch = window.fetch;
 		var wrappedFetch = function (input, init) {

@@ -119,6 +119,19 @@
 		storage.session.remove('uploadTokenExpiry');
 	}
 
+	// Signing in or out in the account modal changes whose upload session this tab holds
+	// (bootstrap.js, FHUploadSession). Follow it, or the next upload is attributed by the token
+	// this page loaded with: the previous account's after a sign-out or a switch of accounts.
+	if (window.FHUploadSession) {
+		window.FHUploadSession.subscribe((token, expiresAtMs) => {
+			uploadToken = token || null;
+			uploadTokenExpiry = token ? Number(expiresAtMs) || 0 : 0;
+			filesUploaded = 0;
+			filesLimit = 0;
+			updateSessionInfo();
+		});
+	}
+
 	/* ---------- captcha / upload session ---------- */
 
 	/**

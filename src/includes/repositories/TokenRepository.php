@@ -111,6 +111,85 @@ final class TokenRepository
 		}
 	}
 
+	/**
+	 * Make this browser's upload token belong to the account that just signed in.
+	 *
+	 * The upload token is what the upload server attributes files by, so it has to follow the
+	 * person at the keyboard. An anonymous token is claimed, as before. A token that already
+	 * belongs to a DIFFERENT account — the previous user of this tab — used to be left as it
+	 * was, so everything uploaded after the switch still went to that previous account. It is
+	 * now replaced by a new token for the signed-in account that keeps the same upload session
+	 * (start time, so the same expiry, and the per-session file count). An unknown, expired or
+	 * foreign-address token is left alone; the page fetches a new one the usual way.
+	 *
+	 * @return array{token:string,expires_at:int}|null the token the browser should use from
+	 *         now on, or null when it should keep what it has
+	 */
+	public static function handOverOnLogin(string $token, int $userId, string $ip): ?array
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $token === '' || $userId < 1) {
+			return null;
+		}
+		$table = Database::table('upload_tokens');
+		$lifetime = max(1, (int) Database::getSetting('recaptcha_token_lifetime', 120)) * 60;
+		try {
+			$stmt = $pdo->prepare(
+				"SELECT `user_id`, `created_at`, `files_count` FROM `{$table}`
+				 WHERE `token` = ? AND `ip_address` = ? AND `created_at` > ?"
+			);
+			$stmt->execute([$token, $ip, time() - $lifetime]);
+			$row = $stmt->fetch(PDO::FETCH_ASSOC);
+			if (!$row) {
+				return null;
+			}
+			$owner = $row['user_id'] === null ? null : (int) $row['user_id'];
+			if ($owner === $userId) {
+				return null;
+			}
+			if ($owner === null) {
+				$claim = $pdo->prepare(
+					"UPDATE `{$table}` SET `user_id` = ? WHERE `token` = ? AND `user_id` IS NULL"
+				);
+				$claim->execute([$userId, $token]);
+				if ($claim->rowCount() > 0) {
+					return null;
+				}
+			}
+			$fresh = bin2hex(random_bytes(32));
+			$pdo->prepare(
+				"INSERT INTO `{$table}` (`token`, `ip_address`, `user_id`, `created_at`, `files_count`)
+				 VALUES (?, ?, ?, ?, ?)"
+			)->execute([$fresh, $ip, $userId, (int) $row['created_at'], (int) $row['files_count']]);
+			return ['token' => $fresh, 'expires_at' => (int) $row['created_at'] + $lifetime];
+		} catch (Throwable $e) {
+			error_log('Upload token could not be handed over: ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Signing out ends the upload session the browser held for that account, so a later upload
+	 * in the same tab cannot be attributed to the account that just left. Only a token that
+	 * belongs to $userId is removed.
+	 */
+	public static function forgetForUser(string $token, int $userId): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $token === '' || $userId < 1) {
+			return false;
+		}
+		try {
+			$stmt = $pdo->prepare(
+				"DELETE FROM `" . Database::table('upload_tokens') . "` WHERE `token` = ? AND `user_id` = ?"
+			);
+			$stmt->execute([$token, $userId]);
+			return $stmt->rowCount() > 0;
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
 	public static function uploadInfo(string $token, string $ip): ?array
 	{
 		$pdo = Database::getInstance();

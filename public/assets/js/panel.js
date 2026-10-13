@@ -407,8 +407,13 @@
 	async function handleLogout(e) {
 		if (e) e.preventDefault();
 		try {
-			await FHApi.post('user_logout', {});
+			// The upload session goes with the sign-in (see FHUploadSession in bootstrap.js): the
+			// home page reads it from this tab's sessionStorage after the redirect.
+			await FHApi.post('user_logout', {
+				upload_token: window.FHUploadSession ? window.FHUploadSession.current() : ''
+			});
 		} finally {
+			if (window.FHUploadSession) window.FHUploadSession.clear();
 			window.location.href = appUrl + '/';
 		}
 	}
