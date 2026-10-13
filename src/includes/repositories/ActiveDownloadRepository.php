@@ -31,35 +31,6 @@ final class ActiveDownloadRepository
 	}
 
 	/**
-	 * How long a PHP-served stream counts without a heartbeat. The streamer refreshes its row
-	 * every few seconds, so a worker that died mid-transfer stops blocking new ones quickly.
-	 */
-	public const PHP_STREAM_FRESH_SECONDS = 30;
-
-	/** Live PHP-served streams (previews, embeds), for the whole site or one address. */
-	public static function countPhpStreams(?string $ip = null): int
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return 0;
-		}
-		$sql = "SELECT COUNT(*) FROM `" . Database::table('active_downloads') . "`
-			WHERE `instance_id` LIKE 'php-%' AND `heartbeat_at` >= ?";
-		$params = [time() - self::PHP_STREAM_FRESH_SECONDS];
-		if ($ip !== null) {
-			$sql .= ' AND `ip_address` = ?';
-			$params[] = $ip;
-		}
-		try {
-			$stmt = $pdo->prepare($sql);
-			$stmt->execute($params);
-			return (int) $stmt->fetchColumn();
-		} catch (PDOException $e) {
-			return 0;
-		}
-	}
-
-	/**
 	 * Refresh a stream's lease. False when the row is gone — an administrator killed the
 	 * transfer from the live list — so the streamer stops instead of carrying on unseen.
 	 */

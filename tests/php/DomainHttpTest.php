@@ -48,6 +48,7 @@ final class DomainHttpTest extends TestCase
 		// D-F9: a name with `+` and `%41` must reach the page exactly as stored.
 		self::$ids['plain'] = self::storeFile('a+b %41.png', 'image/png', 'plain-bytes');
 		self::$ids['once'] = self::storeFile('once.png', 'image/png', 'one-time-bytes', ['one_time' => 1]);
+		self::$ids['big'] = self::storeFile('big.mp4', 'video/mp4', str_repeat('v', FileManager::STREAM_RANGE_CAP + 4096));
 		self::$ids['locked'] = self::storeFile('locked.png', 'image/png', 'locked-bytes', [
 			'password_hash' => password_hash('right-password', PASSWORD_DEFAULT),
 		]);
@@ -274,7 +275,23 @@ final class DomainHttpTest extends TestCase
 		$bytes = self::request('GET', '/api.php?action=preview&id=' . self::$ids['plain'], null, ['X-Forwarded-For: 203.0.113.11']);
 		$this->assertSame(200, $bytes['status']);
 		$this->assertSame('plain-bytes', $bytes['body']);
-		$this->assertSame(0, ActiveDownloadRepository::countPhpStreams(), 'a finished stream frees its slot');
+	}
+
+	public function testLargePreviewsAreSlicedAndGiveTheirSlotBack(): void
+	{
+		// More consecutive ranged requests than the per-address cap: each must find its slot
+		// free again, and each answers with at most one slice.
+		for ($i = 0; $i < 3; $i++) {
+			$res = self::request('GET', '/api.php?action=preview&id=' . self::$ids['big'], null, [
+				'X-Forwarded-For: 203.0.113.12',
+				'Range: bytes=0-',
+			]);
+			$this->assertSame(206, $res['status']);
+			$this->assertSame(FileManager::STREAM_RANGE_CAP, strlen($res['body']));
+		}
+		$this->assertSame(0, (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('active_downloads') . "`"
+		)->fetchColumn(), 'previews are not listed as downloads the upload server would count');
 	}
 
 	public function testPreviewUnlockSharesTheFailedPasswordBudget(): void

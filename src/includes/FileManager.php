@@ -1740,21 +1740,37 @@ class FileManager
 			die("Too many concurrent downloads. Limit is $limit.");
 		}
 
-		// Every PHP-served stream holds a worker of a shared pool, so each one takes a slot.
-		$slot = self::acquireStreamSlot($ip, $id);
-		if (!$slot['ok']) {
-			http_response_code($slot['status']);
-			header('Retry-After: 5');
-			header('Cache-Control: no-store');
-			exit('Too many files are being streamed right now. Try again in a moment.');
-		}
-		$activeId = (int) $slot['id'];
-		register_shutdown_function(static function () use ($activeId): void {
-			Database::removeActiveDownload($activeId);
-		});
+		$plannedLength = $range['status'] === 206
+			? min($range['end'], $range['start'] + self::STREAM_RANGE_CAP - 1) - $range['start'] + 1
+			: (int) $file['size'];
 		$limits = self::streamLimits();
-		$group = self::downloaderGroup($userId ?: null);
-		$rate = max(0, (int) ($group['limit_download'] ?? 0));
+		$rate = 0;
+		$slotLocks = [];
+		if ($plannedLength > self::SMALL_STREAM_BYTES) {
+			// A longer stream holds a worker of a shared pool for its whole duration, so it
+			// takes a slot under the site-wide and per-address caps and is paced at the
+			// downloader's group speed. A small image answers in one or two writes and does
+			// neither — a page showing several embeds from here must not trip the per-address cap.
+			$slot = self::acquireStreamSlot($ip);
+			if (!$slot['ok']) {
+				http_response_code($slot['status']);
+				header('Retry-After: 5');
+				header('Cache-Control: no-store');
+				exit('Too many files are being streamed right now. Try again in a moment.');
+			}
+			$slotLocks = $slot['locks'];
+			$group = self::downloaderGroup($userId ?: null);
+			$rate = max(0, (int) ($group['limit_download'] ?? 0));
+		}
+		// A counted read (an embed) is a download: it is listed with the live downloads, where
+		// an administrator can stop it, and it counts towards the address's concurrent limits.
+		$activeId = $count ? Database::addActiveDownload($ip, $id) : null;
+		register_shutdown_function(static function () use ($activeId, $slotLocks): void {
+			if ($activeId) {
+				Database::removeActiveDownload($activeId);
+			}
+			self::releaseStreamSlot($slotLocks);
+		});
 		if (function_exists('set_time_limit')) {
 			@set_time_limit($limits['maxSeconds'] + 30);
 		}
@@ -1821,7 +1837,10 @@ class FileManager
 				fclose($handle);
 			}
 		} finally {
-			Database::removeActiveDownload($activeId);
+			if ($activeId) {
+				Database::removeActiveDownload($activeId);
+			}
+			self::releaseStreamSlot($slotLocks);
 		}
 		exit;
 	}
@@ -1832,28 +1851,71 @@ class FileManager
 	private const STREAM_HEARTBEAT_SECONDS = 5;
 	/** The most a ranged preview/embed answer carries; players request the next slice. */
 	public const STREAM_RANGE_CAP = 8388608;
+	/** Answers up to this size are served at once, without a stream slot or pacing. */
+	public const SMALL_STREAM_BYTES = 1048576;
 
 	/**
-	 * Take a stream slot for this address, or say why not.
+	 * Take a stream slot for this address under both caps, or say why not.
 	 *
-	 * The row is written first and the caps counted afterwards, so two requests racing for
-	 * the last slot cannot both get it (at worst both are refused and retry).
+	 * Slots are numbered MySQL named locks rather than rows: the database releases them by
+	 * itself when the PHP worker's connection ends, so a crashed stream never keeps one, and
+	 * the upload server's own concurrency counts (which read `active_downloads`) never see a
+	 * preview as somebody's download.
 	 *
-	 * @return array{ok: bool, id: ?int, status: int}
+	 * @return array{ok: bool, locks: list<string>, status: int}
 	 */
-	public static function acquireStreamSlot(string $ip, string $fileId): array
+	public static function acquireStreamSlot(string $ip): array
 	{
-		$activeId = Database::addActiveDownload($ip, $fileId);
-		if (!$activeId) {
-			return ['ok' => false, 'id' => null, 'status' => 503];
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return ['ok' => false, 'locks' => [], 'status' => 503];
 		}
 		$limits = self::streamLimits();
-		if (ActiveDownloadRepository::countPhpStreams($ip) > $limits['perIp']
-			|| ActiveDownloadRepository::countPhpStreams() > $limits['global']) {
-			Database::removeActiveDownload($activeId);
-			return ['ok' => false, 'id' => null, 'status' => 429];
+		$base = 'fh:ps:' . substr(sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . Database::table('files')), 0, 12);
+		try {
+			$perIp = self::takeNamedSlot($pdo, $base . ':i:' . substr(sha1($ip), 0, 16) . ':', $limits['perIp']);
+			if ($perIp === null) {
+				return ['ok' => false, 'locks' => [], 'status' => 429];
+			}
+			$global = self::takeNamedSlot($pdo, $base . ':g:', $limits['global']);
+			if ($global === null) {
+				self::releaseStreamSlot([$perIp]);
+				return ['ok' => false, 'locks' => [], 'status' => 429];
+			}
+		} catch (PDOException $e) {
+			return ['ok' => false, 'locks' => [], 'status' => 503];
 		}
-		return ['ok' => true, 'id' => $activeId, 'status' => 200];
+		return ['ok' => true, 'locks' => [$perIp, $global], 'status' => 200];
+	}
+
+	/** The first free numbered lock "$prefix1" … "$prefix$slots", taken; null when all are held. */
+	private static function takeNamedSlot(PDO $pdo, string $prefix, int $slots): ?string
+	{
+		$stmt = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+		for ($i = 1; $i <= $slots; $i++) {
+			$stmt->execute([$prefix . $i]);
+			if ((int) $stmt->fetchColumn() === 1) {
+				return $prefix . $i;
+			}
+		}
+		return null;
+	}
+
+	/** @param list<string> $locks */
+	public static function releaseStreamSlot(array $locks): void
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $locks === []) {
+			return;
+		}
+		try {
+			$stmt = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+			foreach ($locks as $lock) {
+				$stmt->execute([$lock]);
+			}
+		} catch (PDOException $e) {
+			// The locks go with the connection anyway.
+		}
 	}
 
 	/**

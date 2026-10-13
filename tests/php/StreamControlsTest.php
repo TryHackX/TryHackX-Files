@@ -33,39 +33,49 @@ final class StreamControlsTest extends RepoTestCase
 		$_SESSION = [];
 	}
 
+	/**
+	 * Run $work as another PHP worker would: on its own database connection, which keeps the
+	 * slots it took for as long as the returned connection is alive.
+	 */
+	private function asWorker(callable $work): array
+	{
+		Database::resetInstance();
+		$connection = Database::getInstance();
+		$result = $work();
+		Database::resetInstance();
+		return [$connection, $result];
+	}
+
 	public function testSlotsAreCappedPerAddressAndSiteWide(): void
 	{
-		$first = FileManager::acquireStreamSlot('198.51.100.1', 'f1');
-		$this->assertTrue($first['ok']);
-		$second = FileManager::acquireStreamSlot('198.51.100.1', 'f1');
+		[$first, $slot] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.1'));
+		$this->assertTrue($slot['ok']);
+		[, $second] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.1'));
 		$this->assertFalse($second['ok'], 'second stream from one address');
 		$this->assertSame(429, $second['status']);
 
-		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.2', 'f1')['ok']);
-		$this->assertFalse(FileManager::acquireStreamSlot('198.51.100.3', 'f1')['ok'], 'site-wide cap');
-		$this->assertSame(2, ActiveDownloadRepository::countPhpStreams());
+		[$other, $slot] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.2'));
+		$this->assertTrue($slot['ok']);
+		[, $third] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.3'));
+		$this->assertFalse($third['ok'], 'site-wide cap');
 
-		// A refused request leaves no row behind, and an ended stream frees its slot.
-		Database::removeActiveDownload((int) $first['id']);
-		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.3', 'f1')['ok']);
-	}
-
-	public function testStaleLeasesStopCounting(): void
-	{
-		$slot = FileManager::acquireStreamSlot('198.51.100.9', 'f1');
-		Database::getInstance()->prepare(
-			"UPDATE `" . Database::table('active_downloads') . "` SET `heartbeat_at` = ? WHERE `id` = ?"
-		)->execute([time() - ActiveDownloadRepository::PHP_STREAM_FRESH_SECONDS - 5, (int) $slot['id']]);
-		$this->assertTrue(FileManager::acquireStreamSlot('198.51.100.9', 'f1')['ok']);
+		// A worker that ends (its connection closes) gives its slots back by itself.
+		$first = null;
+		[, $after] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.3'));
+		$this->assertTrue($after['ok']);
+		$this->assertNotNull($other);
+		$this->assertSame(0, (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('active_downloads') . "`"
+		)->fetchColumn(), 'a preview slot is not a row the upload server would count as a download');
 	}
 
 	public function testKillIsReportedOnlyWhenSomethingWasStoppedAndTheStreamNotices(): void
 	{
-		$slot = FileManager::acquireStreamSlot('198.51.100.4', 'f1');
-		$this->assertTrue(ActiveDownloadRepository::heartbeat((int) $slot['id']));
-		$this->assertTrue(Database::killActiveDownload((int) $slot['id']));
-		$this->assertFalse(Database::killActiveDownload((int) $slot['id']));
-		$this->assertFalse(ActiveDownloadRepository::heartbeat((int) $slot['id']));
+		$id = (int) Database::addActiveDownload('198.51.100.4', 'f1');
+		$this->assertTrue(ActiveDownloadRepository::heartbeat($id));
+		$this->assertTrue(Database::killActiveDownload($id));
+		$this->assertFalse(Database::killActiveDownload($id));
+		$this->assertFalse(ActiveDownloadRepository::heartbeat($id));
 	}
 
 	public function testPumpFollowsTheSpeedLimitAndTheDeadline(): void
