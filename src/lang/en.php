@@ -2017,6 +2017,7 @@ return [
 	'notif.msg.file.expiring' => 'Your files (including :subject) will be deleted on :date',
 	'notif.type.file.deleted' => 'Files removed',
 	'notif.type.file.removed' => 'File removed by moderation',
+	'notif.desc.file.removed' => 'A moderator removed one of your files.',
 	'notif.desc.file.deleted' => 'Retention removed your files.',
 	'notif.msg.file.deleted' => 'Your files (including :subject) were removed after their retention period',
 	'notif.msg.file.removed' => 'Your file :subject was removed by moderation',

@@ -452,6 +452,12 @@ td:first-child,
 	.table-wrap table.table-stable:has(> tbody > tr:only-child > td.empty) {
 		min-width: 0 !important;
 	}
+
+	/* Sortable headers never wrap (above), which kept an empty table as wide as its header row,
+	   so the "nothing here yet" line was still cut at a 375px screen edge. */
+	.table-wrap table.table-stable:has(> tbody > tr:only-child > td.empty) th {
+		white-space: normal;
+	}
 }
 
 /* Phones: a row of five 32px buttons pinned to the edge left the name column ~40px. Three per

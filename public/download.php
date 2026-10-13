@@ -166,6 +166,11 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 					// so images embedded on other sites increment the counter (the on-page preview
 					// via $previewUrl does not).
 					$embedUrl = $appUrl . '/api.php?action=embed&id=' . $fileId;
+					// Embed codes are not offered for a one-time or download-capped file: every view of an
+					// embedded image counts as a download, so the first page showing it would burn the
+					// link (or eat the cap) before anyone pressed Download. Same rule as the preview.
+					$embedOffered = $type === 'image' && !$isProtected
+						&& !in_array($previewPolicy['reason'] ?? '', ['one_time', 'download_cap'], true);
 
 					$isPreviewable = in_array($type, ['image', 'video', 'audio', 'pdf'], true);
 					if ($isProtected && $isPreviewable) {
@@ -242,7 +247,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						</svg>
 						<span id="copyText"><?= _h('download.copy_link') ?></span>
 					</button>
-					<?php if ($type === 'image' && !$isProtected): ?>
+					<?php if ($embedOffered): ?>
 						<button class="btn" type="button" data-download-action="toggle-embed" id="embedToggleBtn" aria-expanded="false"
 							aria-controls="embedSection" title="<?= _h('download.embed_tooltip') ?>">
 							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -254,7 +259,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 					<?php endif; ?>
 				</div>
 
-				<?php if ($type === 'image' && !$isProtected): ?>
+				<?php if ($embedOffered): ?>
 					<div class="embed-section" id="embedSection" hidden>
 						<h3>
 							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -402,7 +407,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	</div>
 	<?php
 	$embedCodes = [];
-	if ($file && isset($type, $embedUrl) && $type === 'image' && !$isProtected) {
+	if ($file && isset($embedUrl) && !empty($embedOffered)) {
 		$embedName = htmlspecialchars(
 			(string) $file['name'],
 			ENT_QUOTES | ENT_SUBSTITUTE,

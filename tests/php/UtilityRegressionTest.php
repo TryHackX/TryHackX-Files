@@ -97,4 +97,25 @@ final class UtilityRegressionTest extends RepoTestCase
 		}
 		$this->assertSame([], $hits);
 	}
+
+	/**
+	 * Every notification type is listed in the preferences and the notification list with a
+	 * name and a description, and rendered with a message — in every shipped language. A
+	 * missing key shows up raw (`notif.desc.file.removed` did).
+	 */
+	public function testEveryNotificationTypeHasItsNameDescriptionAndMessage(): void
+	{
+		$missing = [];
+		foreach (['en', 'pl', 'es', 'zh'] as $code) {
+			$strings = require PROJECT_ROOT . "/src/lang/{$code}.php";
+			foreach (array_keys(Notifications::TYPES) as $type) {
+				foreach (['notif.type.', 'notif.desc.', 'notif.msg.'] as $prefix) {
+					if (trim((string) ($strings[$prefix . $type] ?? '')) === '') {
+						$missing[] = $code . ': ' . $prefix . $type;
+					}
+				}
+			}
+		}
+		$this->assertSame([], $missing);
+	}
 }

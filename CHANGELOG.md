@@ -87,6 +87,10 @@ in English for the first GitHub release.
   belong to the previous account: signing out ends the tab's upload session and signing in hands
   the new account its own. Changing the password or the 2FA settings keeps this browser
   remembered, not only signed in.
+- One-time and download-capped images no longer offer embed codes: every embedded view counts as a
+  download, so the first page showing one burned the link. The "File removed by moderation"
+  notification has a description instead of a raw key, and empty API-key and webhook tables no
+  longer cut their message off on phones.
 - Saving the uploads path no longer corrupts `config/config.local.php` when it contains `$0`.
   Removing html, svg, xml and similar types from the blocked extensions is no longer silently
   undone; they stay blocked and saving says so.

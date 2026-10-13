@@ -1896,6 +1896,7 @@ Stripe（Payment Links）、PayPal.me、Gumroad、Buy Me a Coffee 等服务商�
   'notif.msg.file.expiring' => '你的文件（包括 :subject）将于 :date 被删除',
   'notif.type.file.deleted' => '文件已删除',
   'notif.type.file.removed' => '文件已被审核删除',
+  'notif.desc.file.removed' => '审核人员删除了你的某个文件。',
   'notif.desc.file.deleted' => '保留策略删除了你的文件。',
   'notif.msg.file.deleted' => '你的文件（包括 :subject）在保留期结束后已被删除',
   'notif.msg.file.removed' => '你的文件 :subject 已被审核删除',

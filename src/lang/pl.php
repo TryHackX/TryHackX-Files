@@ -2031,6 +2031,7 @@ Dobre na start i przy niewielkiej liczbie zamówień — nic nie trzeba integrow
 	'notif.msg.file.expiring' => 'Twoje pliki (m.in. :subject) zostaną usunięte :date',
 	'notif.type.file.deleted' => 'Pliki usunięte',
 	'notif.type.file.removed' => 'Plik usunięty przez moderację',
+	'notif.desc.file.removed' => 'Moderator usunął jeden z Twoich plików.',
 	'notif.desc.file.deleted' => 'Retencja usunęła Twoje pliki.',
 	'notif.msg.file.deleted' => 'Usunięto Twoje pliki (m.in. :subject) po upływie okresu przechowywania',
 	'notif.msg.file.removed' => 'Twój plik :subject został usunięty przez moderację',

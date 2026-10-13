@@ -1896,6 +1896,7 @@ Sirve perfectamente para empezar y para pocos pedidos: no hay nada que integrar.
   'notif.msg.file.expiring' => 'Tus archivos (incluido :subject) se eliminarán el :date',
   'notif.type.file.deleted' => 'Archivos eliminados',
   'notif.type.file.removed' => 'Archivo eliminado por moderación',
+  'notif.desc.file.removed' => 'Un moderador eliminó uno de tus archivos.',
   'notif.desc.file.deleted' => 'La retención eliminó tus archivos.',
   'notif.msg.file.deleted' => 'Se eliminaron tus archivos (incluido :subject) tras su periodo de retención',
   'notif.msg.file.removed' => 'Tu archivo :subject fue eliminado por moderación',

@@ -1396,4 +1396,38 @@ final class HttpApiTest extends TestCase
 		$this->assertTrue(self::getJson('/api.php?action=notification_count')['success'] ?? false);
 	}
 
+	/**
+	 * Every view of an embedded image counts as a download, so embed codes for a one-time or
+	 * download-capped image would burn the link before anyone pressed Download.
+	 */
+	public function testEmbedCodesAreNotOfferedForOneTimeOrCappedImages(): void
+	{
+		$png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=');
+		$cases = ['plain' => [0, null], 'once' => [1, null], 'capped' => [0, 5]];
+		$pages = [];
+		foreach ($cases as $label => [$oneTime, $maxDownloads]) {
+			$id = 'httpembed' . $label . bin2hex(random_bytes(4));
+			$dir = PROJECT_ROOT . '/tests/php/.tmp-uploads-http/' . $id;
+			mkdir($dir, 0777, true);
+			file_put_contents($dir . '/pixel.png', $png);
+			Database::getInstance()->prepare(
+				'INSERT INTO `' . Database::table('files') . '`
+				 (`id`, `original_name`, `mime_type`, `size`, `delete_token`, `uploaded_at`, `uploaded_ip`,
+				  `downloads`, `user_id`, `one_time`, `max_downloads`)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)'
+			)->execute([
+				$id, 'pixel.png', 'image/png', strlen($png), password_hash('x', PASSWORD_DEFAULT),
+				time(), '203.0.113.10', $oneTime, $maxDownloads,
+			]);
+			$pages[$label] = self::rawRequest('GET', '/download.php?id=' . $id);
+		}
+
+		$this->assertSame(200, $pages['plain']['status']);
+		$this->assertStringContainsString('id="embedToggleBtn"', $pages['plain']['body']);
+		foreach (['once', 'capped'] as $label) {
+			$this->assertSame(200, $pages[$label]['status'], $label);
+			$this->assertStringNotContainsString('id="embedToggleBtn"', $pages[$label]['body'], $label);
+			$this->assertStringNotContainsString('action=embed', $pages[$label]['body'], $label);
+		}
+	}
 }
