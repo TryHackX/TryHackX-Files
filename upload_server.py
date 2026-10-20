@@ -783,13 +783,13 @@ async def get_db_pool():
         return await _get_db_pool_unlocked()
 
 def generate_file_id() -> str:
-    """Generuj unikalne ID pliku"""
+    """A new file id: the upload time in hex plus 32 random bits."""
     timestamp = hex(int(time.time()))[2:]
     random_part = secrets.token_hex(4)
     return f"{timestamp}{random_part}"
 
 def generate_delete_token() -> str:
-    """Generuj token usuwania"""
+    """A new delete token (only its bcrypt hash is stored)."""
     return secrets.token_hex(16)
 
 def safe_int(v, default: int = 0) -> int:
@@ -3489,7 +3489,7 @@ async def _create_download_reservation_with_cursor(
 
 
 async def register_download_end(active_id: int):
-    """Wyrejestruj pobieranie"""
+    """Drop a finished download's live row (no-op if the finalization already did)."""
     if not active_id:
         return
         
@@ -3985,9 +3985,8 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
         token_table = f"{prefix}download_tokens"
         files_table = f"{prefix}files"
 
-        conn = await pool.acquire()
-        if conn:
-            async with conn.cursor() as cur:
+        conn = await pool.acquire()  # a connection, or HTTPException 503 after the deadline
+        async with conn.cursor() as cur:
                 await cur.execute("START TRANSACTION")
                 # Single source of truth for the download-token lifetime, shared
                 # with PHP (Database::createDownloadToken / verifyUseDownloadToken).
@@ -5147,7 +5146,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
     files_table = f"{prefix}files"
     token_table = f"{prefix}download_tokens"
     dl_user_id = None
-    coll_name = "kolekcja"
+    coll_name = "collection"
     max_downloads = None
     cur_downloads = 0
     coll_on_limit = 'keep'
@@ -5216,7 +5215,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
                 ) = row
                 coll_on_limit = coll_on_limit or 'keep'
 
-                coll_name = coll_name or "kolekcja"
+                coll_name = coll_name or "collection"
 
                 # Expiry / download cap.
                 if expires_at and int(expires_at) < now:
@@ -5385,7 +5384,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
     # deletion, remove the collection once the archive has finished streaming. Only the
     # collection (and its links) go — the member files belong to the user independently.
     # Filename: "<name>.zip" with an ASCII fallback + RFC 5987 UTF-8 form.
-    safe_name = "".join(ch for ch in coll_name if ch not in '\\/:*?"<>|').strip() or "kolekcja"
+    safe_name = "".join(ch for ch in coll_name if ch not in '\\/:*?"<>|').strip() or "collection"
     ascii_name = safe_name.encode('ascii', 'ignore').decode('ascii').strip().replace('"', "'") or "collection"
     utf8_name = quote(f"{safe_name}.zip", safe='')
     headers = {
@@ -5617,7 +5616,12 @@ async def thumbnail(id: str):
         raise HTTPException(status_code=400, detail="Invalid id")
 
     # The configured size can change, so keep the cache honest about what it holds.
-    await update_settings()
+    try:
+        await update_settings()
+    except Exception as exc:
+        # Like every other route: no database is a 503, not a 500 with a traceback.
+        print(f"Thumbnail settings error: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=503, detail="Settings unavailable")
     max_edge = settings_cache.get('thumb_max', THUMB_MAX_DEFAULT)
 
     pool = await get_db_pool()

@@ -1,10 +1,11 @@
 """
-Unit tests for the pure helper functions in upload_server.py (Faza 5 · #4).
+Tests for upload_server.py.
 
-These exercise the deterministic, side-effect-free helpers only — importing the module is
-safe (the server starts under `if __name__ == "__main__"`, and the DB pool is lazy), so no
-FastAPI TestClient or MySQL is required here. Endpoint/integration tests can be layered on
-later with httpx + a test DB.
+Importing the module is safe (the server starts under `if __name__ == "__main__"` and the DB
+pool is lazy), so no MySQL is needed: database work is answered by scripted cursors, and the
+transfer paths that depend on real socket behaviour (a proxy hanging up, a visitor leaving
+mid-archive) run against a real uvicorn server on a loopback port. tests/fixtures holds the
+cases this suite shares with the PHP suite, so both sides answer them alike.
 """
 import asyncio
 import hashlib
@@ -1412,6 +1413,19 @@ class TestWebhookSsrf:
         assert calls["closed"] is True
 
 
+class TestThumbnailWithoutADatabase:
+    def test_answers_503_like_every_other_route(self, monkeypatch):
+        async def no_database():
+            raise RuntimeError("Database unavailable while loading settings")
+
+        monkeypatch.setattr(us, "update_settings", no_database)
+
+        with pytest.raises(us.HTTPException) as refused:
+            asyncio.run(us.thumbnail("abc123"))
+
+        assert refused.value.status_code == 503
+
+
 class TestThumbnailAuthorization:
     def test_cached_thumbnail_is_not_served_before_database_policy(self, monkeypatch, tmp_path):
         class Cursor:
@@ -2455,6 +2469,21 @@ class TestCollectionTagsFromTheQueryString:
         context = request.scope["filehost.traffic"]
         assert re.fullmatch(r"[a-f0-9]{32}", context["reservation_id"])
         assert context["completion"]["viewer_id"] is None
+
+    def test_an_unnamed_collection_downloads_as_collection_zip(self, monkeypatch, tmp_path):
+        cursor = self._guest_one_time_collection(monkeypatch, tmp_path)
+        cursor.answers.insert(0, (
+            "FROM `fh_collections` WHERE `id`",
+            (None, None, None, None, 0, 0, None, None, "hash", "keep", 9),
+        ))
+
+        response = asyncio.run(us.download_collection(
+            "c1", _http_request("/collection", b"id=c1&dt=x"), us.BackgroundTasks(), dt="x"
+        ))
+
+        disposition = response.headers["content-disposition"]
+        assert 'filename="collection.zip"' in disposition
+        assert "filename*=UTF-8''collection.zip" in disposition
 
     def test_a_failure_after_the_commit_still_hands_the_reservation_over(self, monkeypatch, tmp_path):
         self._guest_one_time_collection(monkeypatch, tmp_path)
