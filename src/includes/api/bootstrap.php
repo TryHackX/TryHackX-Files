@@ -104,10 +104,6 @@ if (!empty($route['recent_auth']) && !hasRecentAuthentication()) {
 	$gateError(403, __('api.recent_auth_required'), [], ['code' => 'recent_auth_required']);
 }
 
-if (!ApiRoutePolicy::reserveIdempotencyKey($route)) {
-	$gateError(409, 'Missing or reused idempotency key');
-}
-
 // Maintenance mode admits only an already validated administrator, plus everything signing in
 // takes (password and 2FA steps, the sign-in form's configuration, signing out) and the machine
 // callers that must not wait: the health probe and the payment notifications. See
@@ -140,4 +136,10 @@ if ($route['rate_limit'] !== null) {
 		RateLimiter::bucketFor(getClientIP(), $route['rate_limit'], $action),
 		$route['rate_limit']
 	);
+}
+
+// Last gate before dispatch: a checkout refused by maintenance, a ban or the rate limiter has
+// not used its idempotency key, so the buyer's retry from the same page is not answered 409.
+if (!ApiRoutePolicy::reserveIdempotencyKey($route)) {
+	$gateError(409, 'Missing or reused idempotency key');
 }

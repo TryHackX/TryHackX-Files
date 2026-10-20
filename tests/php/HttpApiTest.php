@@ -1321,6 +1321,36 @@ final class HttpApiTest extends TestCase
 		$this->assertStringNotContainsString($noindex, $live['body']);
 	}
 
+	/**
+	 * A checkout refused by an earlier gate (maintenance here) has not used its idempotency key:
+	 * the buyer's retry from the same page goes through instead of a raw 409. A key that did
+	 * reach the checkout still cannot be replayed.
+	 */
+	public function testARefusedCheckoutDoesNotUseItsIdempotencyKey(): void
+	{
+		self::freshUser('httpcheckoutretry', 'Checkout1Pass!');
+		$this->assertTrue(self::signIn('httpcheckoutretry', 'Checkout1Pass!')['success'] ?? false);
+		$key = 'retry-' . bin2hex(random_bytes(12));
+		$checkout = static fn(): array => self::rawRequest(
+			'POST',
+			'/api.php?action=checkout&plan=1',
+			http_build_query(['_csrf' => self::$csrf, '_idempotency_key' => $key]),
+			['Content-Type: application/x-www-form-urlencoded']
+		);
+
+		Database::setSetting('maintenance_mode', '1');
+		self::serverSettingsChanged();
+		try {
+			$this->assertSame(503, $checkout()['status']);
+		} finally {
+			Database::setSetting('maintenance_mode', '0');
+			self::serverSettingsChanged();
+		}
+		$retry = $checkout();
+		$this->assertNotSame(409, $retry['status'], 'the retry reaches the checkout');
+		$this->assertSame(409, $checkout()['status'], 'a key that reached the checkout is used up');
+	}
+
 	/** A notice page is not a dead end: the switched-off plans page links back home. */
 	public function testTheSwitchedOffPlansPageLinksBackHome(): void
 	{
