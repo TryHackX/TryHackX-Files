@@ -1724,7 +1724,7 @@ final class HttpApiTest extends TestCase
 		self::freshUser('httpguessed', 'Guessed1Pass!');
 		try {
 			$this->assertTrue(self::signIn('httpguessed', 'Guessed1Pass!')['success'] ?? false);
-			$actions = ['user_2fa_setup', 'user_remember_revoke', 'user_2fa_disable', 'user_delete_account'];
+			$actions = ['user_2fa_setup', 'user_remember_revoke', 'user_2fa_disable', 'user_delete_account', 'user_delete_files'];
 			$refusedAfter = null;
 			for ($attempt = 1; $attempt <= 25 && $refusedAfter === null; $attempt++) {
 				// Only the account budget is measured, not the per-address one of each action.
@@ -1745,6 +1745,7 @@ final class HttpApiTest extends TestCase
 			$pdo->exec("DELETE FROM `{$limits}` WHERE `bucket` LIKE 'ip:%' OR `bucket` LIKE 'reauth:%'");
 			$this->assertSame(429, self::postJson('/api.php?action=user_reauth', ['password' => 'Guessed1Pass!'])['status']);
 			$this->assertSame(429, self::postJson('/api.php?action=user_2fa_setup', ['password' => 'Guessed1Pass!'])['status']);
+			$this->assertSame(429, self::postJson('/api.php?action=user_delete_files', ['password' => 'Guessed1Pass!'])['status']);
 
 			// Signing in has its own budget: the owner can still get in from a fresh browser.
 			$this->assertTrue(self::signIn('httpguessed', 'Guessed1Pass!')['success'] ?? false);

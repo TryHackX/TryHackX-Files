@@ -2503,12 +2503,19 @@ final class FileController
 			return;
 		}
 
-		if (!Database::verifyUserPassword($_SESSION['user_id'], $password)) {
+		// The same per-account guessing budget as every other action that checks the
+		// password: a stolen session must not turn this into a fast password oracle.
+		$userId = (int) $_SESSION['user_id'];
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
+		if (!Database::verifyUserPassword($userId, $password)) {
+			recordWrongAccountPassword($userId);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password2')]);
 			return;
 		}
 
-		$deleted = FileManager::deleteAllUserFiles($_SESSION['user_id']);
+		$deleted = FileManager::deleteAllUserFiles($userId);
 		echo json_encode(['success' => true, 'deleted' => $deleted]);
 	}
 }

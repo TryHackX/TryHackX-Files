@@ -66,7 +66,7 @@ $routes = [
 	// ---- A user's own files, options, collections, keys and webhooks ----
 	'user_files' => $read([FileController::class, 'handleUserFiles'], true),
 	'my_file_facets' => $read([FileController::class, 'handleMyFileFacets'], true),
-	'user_delete_files' => $write([FileController::class, 'handleUserDeleteFiles'], true),
+	'user_delete_files' => $write([FileController::class, 'handleUserDeleteFiles'], true, null, 'auth'),
 	'user_set_file_options' => $write([FileController::class, 'handleUserSetFileOptions'], true),
 	'set_file_password' => $write([FileController::class, 'handleSetFilePassword']),
 	'user_create_collection' => $write([FileController::class, 'handleUserCreateCollection'], true, 'myfiles.coll_create'),
