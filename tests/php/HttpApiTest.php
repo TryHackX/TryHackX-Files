@@ -1423,7 +1423,8 @@ final class HttpApiTest extends TestCase
 		// ...and so can every other reader, whoever wrote it: a file id, the panel's sub-tab and
 		// the account tab's outcome code.
 		$this->assertLessThan(500, self::rawRequest('GET', '/api.php?action=preview&id%5B%5D=x')['status']);
-		$this->assertTrue(self::signIn('httpuser', 'HttpUser1!')['success'] ?? false);
+		self::freshUser('httparrayshape', 'ArrayShape1!');
+		$this->assertTrue(self::signIn('httparrayshape', 'ArrayShape1!')['success'] ?? false);
 		foreach (['/panel.php?tab=moderate&mstab%5B%5D=x', '/panel.php?tab=user&msg%5B%5D=x&err%5B%5D=y'] as $path) {
 			$panel = self::rawRequest('GET', $path);
 			$this->assertSame(200, $panel['status'], $path);
