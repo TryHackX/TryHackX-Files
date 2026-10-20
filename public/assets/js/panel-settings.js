@@ -250,7 +250,7 @@
 				document.getElementById('uStatStorage').textContent = formatSize(data.stats.total_size);
 				document.getElementById('uStatDownloads').textContent = data.stats.total_downloads;
 			}
-		});
+		}).catch(() => { /* offline: the counters keep their placeholders */ });
 	}
 
 	function promptForPassword(title, message, callback) {
@@ -316,7 +316,9 @@
 					} else {
 						showNotification(data.error || t('panel.acct.del_files_failed'), 'error', btn);
 					}
-				});
+				})
+				// A dropped connection used to end here without a word.
+				.catch(() => showNotification(t('common.connection_error'), 'error', btn));
 		});
 	}
 
@@ -330,7 +332,8 @@
 					} else {
 						showNotification(data.error || t('panel.acct.del_account_failed'), 'error', btn);
 					}
-				});
+				})
+				.catch(() => showNotification(t('common.connection_error'), 'error', btn));
 		});
 	}
 

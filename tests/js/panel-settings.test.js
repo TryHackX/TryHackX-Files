@@ -126,3 +126,51 @@ test('account password meter reads the actual password input bounds', () => {
 	assert.match(source, /Number\(passInput\.minLength\)/);
 	assert.doesNotMatch(source, /Number\(pass\.minLength\)/);
 });
+
+test('deleting all files or the account says so when the connection drops', async () => {
+	const notes = [];
+	const input = { value: '', focus() {} };
+	const elements = {
+		pwdConfirmTitle: { textContent: '' },
+		pwdConfirmMessage: { textContent: '' },
+		confirmPasswordInput: input
+	};
+	const bootstrap = { dataset: { config: '{}' } };
+	const document = {
+		getElementById: id => (id === 'panelBootstrap' ? bootstrap : elements[id] || null),
+		querySelectorAll: () => []
+	};
+	const offline = () => Promise.reject(new TypeError('Failed to fetch'));
+	const window = {
+		FHUtil: { formatSize: String },
+		t: key => key,
+		showModal() {},
+		closeModal() {},
+		showNotification: (text, type) => notes.push([text, type]),
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, {
+		console,
+		document,
+		FormData: class {},
+		location: { reload() {} },
+		setTimeout() { return 1; },
+		FHApi: { get: offline, post: offline },
+		window
+	}, { filename: 'panel-settings.js' });
+
+	for (const action of ['confirmDeleteAllFiles', 'confirmDeleteAccount']) {
+		notes.length = 0;
+		window.FHPanelSettings[action]({});
+		input.value = 'correct horse';
+		window.FHPanelSettings.submitPasswordConfirm();
+		await new Promise(resolve => setImmediate(resolve));
+		assert.deepEqual(notes, [['common.connection_error', 'error']], action);
+	}
+	// The account counters stay as they are, without an unhandled rejection.
+	elements.uStatFiles = { textContent: '-' };
+	window.FHPanelSettings.loadUserStats();
+	await new Promise(resolve => setImmediate(resolve));
+	assert.equal(elements.uStatFiles.textContent, '-');
+});
