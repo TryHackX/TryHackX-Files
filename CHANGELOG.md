@@ -7,6 +7,193 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.0] - 2026-10-21
+
+A second full review of the application — upload server, request pipeline, domain logic, front
+end, repository and a live pass on phones and desktop — and the fixes it led to. The database
+schema stays at 64.
+
+### Security
+
+- Upload names can no longer smuggle a blocked extension (`.exe`, `.php`, `.html`, …) past the
+  check. A last extension longer than 100 bytes made the name be cut after the check, which could
+  expose an inner `.exe`; trailing dots and spaces did the same. Such files are stored as
+  `….blocked`.
+- Strangers can no longer lock an account out of signing in. Wrong passwords are counted per
+  account and per network, so only the network that used up its guesses waits out the window
+  while the owner signs in from anywhere else; with a captcha configured, every sign-in limit asks
+  for the captcha instead of refusing.
+- The panel's settings forms (General, Storage, Security, E-mail, System/cron) need a password
+  typed in the last 10 minutes, like the API's sensitive actions — including switching the panel's
+  own password gate off. Rerouting outgoing mail used to be enough to take over the owner account
+  from a panel tab left open.
+- Wrong passwords typed inside a signed-in session — panel gate, re-confirmation prompt, 2FA
+  setup/disable/recovery codes, signing out other devices, e-mail, password and account deletion,
+  "delete all my files" — share one budget per account: 10 per 15 minutes, then 429 until the
+  window ends. A stolen session can no longer test about 40 passwords per 5 minutes.
+- The site name is plain text everywhere: Settings → General and the installer store it without
+  markup, control or bidirectional characters (at most 50), and every page head and header escape
+  it, so it can no longer inject a meta refresh into every page.
+- IPv6 clients are counted, capped and banned per /64 network on both sides — PHP and the upload
+  server (IPv4 per address): concurrent downloads, connections per file, the guest transfer
+  allowance, the accounts-per-address sign-up cap, report and delete-token budgets. IP bans are
+  stored as the /64 and still match bans stored for an exact address.
+- Every upload needs the upload token the site hands out; the upload server no longer opens an
+  implicit per-address guest session, which rotating addresses turned into an unlimited one.
+- File and collection passwords: a correct password (for example for one's own upload) no longer
+  resets the guessing budget. Each network has 20 wrong guesses per security window over all
+  targets, and one file accepts at most 100 wrong guesses from all networks together.
+- Anonymous abuse reports are limited to 20 per network per security window even without a
+  captcha, a repeated report of the same file is not stored again, and the text is capped at 5000
+  characters.
+- Every answer PHP serves itself (previews, embeds, ad banners) takes a stream slot — small
+  answers in a pool of their own (`php_small_stream_max_global` 8, `php_small_stream_max_per_ip`
+  6) — so slow readers can no longer hold every PHP worker. Previews and embeds use up the
+  downloader's transfer allowance like downloads, and one-time or capped links can no longer be
+  embedded.
+- Creating an API key or a webhook needs a recent password and sends the owner a notice; a
+  password change (own, by reset link or by an administrator) also removes the account's webhooks.
+- QR codes are drawn off the upload server's event loop and capped at 512 bytes, so anonymous
+  requests can no longer stall every upload and download.
+- A crafted collection link can no longer keep one-time or capped collections unavailable for
+  everyone, and one account's unresponsive webhook receiver can no longer delay everybody's
+  deliveries for hours.
+- The language links and the live language switch no longer put a password-reset token back into
+  the address bar and the browser history.
+- Accounts created by an administrator are recorded in the audit log (`user_created`, with the
+  role).
+
+### Fixed
+
+- Buying a plan or an ad works in Chrome and Edge: checkout hands the buyer to PayU or
+  Przelewy24 through a short "Continue to payment" page instead of a redirect the browser's
+  form-action policy blocked (the button did nothing while an order was created).
+- Ads: an edit sends back to review only what was bought, a rejection with a refund is final, and
+  approval checks that a completed order paid for each placement — unpaid or refunded placements
+  could go live. A renewal charges for and renews only the placements renewed with the ad.
+- A paid order that cannot be delivered (a second order for a paid draft, an ad or account deleted
+  meanwhile, a short payment) is parked once with one "Paid order not delivered" notice to the
+  administrators instead of being retried every 15 minutes; its failure details now stay in the
+  audit log. A second checkout for an ad with an open order is refused.
+- Granting days to a lifetime member keeps the membership lifetime, the bulk "+N days" extends
+  only the chosen plan's subscribers, and "active subscribers" counts paid plans only.
+- Accounts created from the panel's "Add user" form no longer get a hidden 500 MiB storage cap
+  that overrode their group and paid plan.
+- Maintenance mode: the notice links to an administrator sign-in whose dialog offers only signing
+  in (sign-up, recovery and statistics answered 503 there), the file, collection and plan pages and
+  the panel show it to everyone else (the panel used to stay on "Loading…"), `/api/v1` answers only
+  an administrator's key, and payment notifications keep being processed.
+- Array-shaped fields (`name[]=x`) are treated as missing instead of causing a 500 and a PHP fatal
+  error in the log.
+- Dead file and collection links answer 404 (missing or malformed id) or 410 (expired, used
+  one-time, at the download cap) with the reason, `noindex` and no download button, instead of a
+  200 page whose button could only fail; the message says whether a file or a collection expired,
+  was used or reached its limit.
+- A failed migration step is no longer re-run by every request: for 5 minutes requests get a short
+  503, then it is tried again; `php scripts/migrate.php` retries at once.
+- The integrity report and the mail worker honour `DATA_PATH` (the worker sees mail settings
+  changed in the panel without a restart); while the database is down a page dials it once instead
+  of 10–20 times; a refused checkout no longer burns its idempotency key.
+- Behind a front proxy listed in `TRUSTED_PROXIES` (or with `TRUSTED_PROXY_HEADER`) downloads,
+  collection ZIPs and uploads no longer fail with 403: the upload server resolves the client
+  address exactly as PHP does.
+- Files deleted after their last allowed download, and the files of an account an administrator
+  deletes, stay in the quarantine when it is on (deleting one's own account stays an erasure);
+  with the quarantine on, bulk deletes no longer copy and hash every file inside the request.
+- Every removal path — retention, storage policy, moderation, administrator delete or clean-up,
+  "delete all my files", delete after the last download — sends the owner's `delete` webhook.
+- A download whose file was deleted or whose cap changed meanwhile is still finalized and charged;
+  one bad reservation no longer stops the cleanup of the others; an abandoned collection ZIP
+  closes its member files at once.
+- Text and JSON downloads keep their size and progress (Apache no longer gzips proxied
+  downloads), and scripts and fonts get their long cache lifetime when mod_expires is enabled.
+- Files per session: the plans page, "My plan", the upload card and the session line show the cap
+  the upload server applies — the group's own cap, or the flat setting where the group leaves 0.
+- "Not downloaded for N days" goes back at most `traffic_detail_days` (the detailed log) and says
+  so, instead of listing files that are still downloaded.
+- Ad reviewers with only "approve ads" see the creatives; a guest's page with several pictures
+  from this site keeps them all; a used promo code can only be disabled and the panel says so; an
+  administrator's grant or revocation prints no receipt; a broadcast resent within seconds is not
+  sent twice; a banner PHP refuses for its size is reported as too large.
+- Upload page: refusals are explained in the page's language (size with the real limit, empty
+  file, quota, inactive account, ban) instead of the upload server's English JSON; Retry is
+  offered only where it can help; a refused token is renewed once instead of an empty
+  "Verification" dialog that locked the page; a failed delete keeps the row; right after signing in
+  the session line shows the account's cap instead of the guest's.
+- Signing out on a public page reloads it, so signing in again from the same dialog works (it
+  failed on a stale security token) and the bell disappears.
+- The live language switch translates the whole page — dialog titles, text-area hints and the
+  upload page's rows, cards and session line included — also after a toast or dialog was added.
+- Panel: a wrong password at the settings check keeps the administrator on it with the error (it
+  showed the settings as if the password had been accepted and dropped the change); the password
+  re-check prompt settles however it is closed and no longer closes the form underneath; dashboard upload rows keep their running time and a single kill button; messages in
+  the ads, moderation, groups, languages and account-tools dialogs are visible; lists the server
+  refuses show the reason instead of "Loading…"; "My files" keeps its page on refresh; the Users
+  search works; bans accept IPv6 and the `<network>::/64` form; writes are sent once per click; ad
+  and promo dates no longer move a day on servers outside UTC.
+- Hidden elements stay hidden (a locked collection showed "Download all", which led to a raw 403
+  page), errors are no longer drawn behind the collection password dialog, "Link copied" appears
+  only when copying worked, and the report form marks all the fields the server requires.
+- Phones: ticking rows no longer pushes the table down, the Tracking filter, notification
+  preferences, banner cropper and a long uploads path no longer widen the page, the download
+  button is on the first screen, the signed-in header fits one row, small controls are
+  finger-sized, an upload row's remove button stays beside a long status, and selects and text
+  areas no longer make iOS zoom in.
+- Debian: running `scripts/install-debian.sh` again keeps the installation's service account, its
+  PHP-FPM setup and the absence of a local MariaDB, and leaves existing runtime directories alone;
+  the documented dedicated-account / PHP-FPM procedure works as written; after the uploads
+  directory is changed the panel tells you how to open it to the upload service.
+- Docker: `FILEHOST_DB_POOL_MAX`, `FILEHOST_DB_ACQUIRE_TIMEOUT`, `FILEHOST_IO_THREADS` and
+  `APP_ENV` from `.env` reach the container, and PHP accepts banners up to the 5 MiB allowance.
+
+### Changed
+
+- The maintenance scripts (`cleanup.php`, `file-quarantine.php`, `mail-worker.php`, `migrate.php`,
+  `check-storage-integrity.php --repair-missing`) refuse to run as root (exit 77) and print the
+  `sudo -u <service account>` command; `--allow-root` lets a deliberate root run through.
+- `scripts/install-debian.sh` has a `FILEHOST_UNITS_ONLY=1` mode that only re-renders the units
+  and the storage drop-in and restarts the services.
+- `public/.htaccess` sets `LimitRequestBody 0` for `/api/upload` and `/api/sharex`: file size
+  limits belong to the upload server alone.
+- `/ready` names the failing path, the error and the usual fix when upload storage is not
+  writable; webhooks that failed every delivery for 24 hours are switched off with a status saying
+  so; the upload server reads `TRUSTED_PROXIES` / `TRUSTED_PROXY_HEADER` from `config.local.php`;
+  the administrator-kill check is a read instead of a write per second and transfer.
+- The `delete` webhook payload carries `reason` (retention, storage_policy, admin_delete,
+  admin_cleanup, owner_delete_all) when one of those paths removed the file.
+- Old security-event rows are pruned by the scheduled cleanup; an unmountable storage directory
+  no longer prints its path on the public error page; `check-storage-integrity.php` prints a short
+  summary and the full report with `--json`.
+- FastAPI 0.143.2 for the upload server; test tools Ruff 0.17.1, uv 0.13.1.
+- Polish wording reviewed (about a hundred strings), counts read correctly for 1, 2–4 and 5+,
+  Spanish uses "tú" and Chinese 您 and 套餐 consistently; messages are announced to screen
+  readers, every field has a name, the light theme's error colour meets 4.5:1, and every keyboard
+  stop shows the focus ring.
+- PHP test runs fail on any deprecation or notice; the repository policy check also verifies that
+  the locks satisfy every version range; a shell test covers the Debian installer's re-run rules.
+- SECURITY.md names contact@tryhackx.org for reports when GitHub's private form is not available;
+  the docs describe Docker as tested end to end in CI and the release procedure as practised.
+
+### Removed
+
+- The implicit per-address guest upload session (see Security), the robots.txt/security.txt
+  allow-list in `public/.htaccess` (those files never shipped), unused token and recovery helpers,
+  duplicate captcha script tags and dead CSS/JS.
+
+### Upgrade notes
+
+- No schema change. Install the new hash-locked requirements into the virtual environment
+  (FastAPI 0.143.2) and restart `filehost-upload` and `filehost-mail-worker`.
+- Uploads without the site's upload token are refused (403); integrations should use API keys
+  with `/api/sharex`.
+- Run maintenance scripts as the service account; a root cron line for `cleanup.php` now exits 77.
+- The cache rules need `a2enmod expires`. For a dedicated PHP-FPM pool set
+  `request_terminate_timeout = 360s` and keep `php_stream_max_global` +
+  `php_small_stream_max_global` below `pm.max_children` (see docs/DEBIAN.md).
+- Accounts created by an administrator before this release keep their 500 MiB override;
+  `SELECT id, username FROM <prefix>users WHERE storage_limit = 524288000` lists them.
+- A password change now removes the account's webhooks; add them again afterwards.
+
 ## [2.80.1] - 2026-10-14
 
 ### Fixed

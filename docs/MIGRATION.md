@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.80.1**, database schema **64**. A code-only
+This guide upgrades a running installation to **2.81.0**, database schema **64**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce
@@ -142,6 +142,13 @@ After a failed step, web requests wait five minutes before running it again and 
 meanwhile, so a broken upgrade is not re-run by every visitor. Once the cause is fixed, retry at
 once as the service account — `sudo -u "$SERVICE_USER" php scripts/migrate.php` — instead of
 waiting (exit 0: schema current and ready; 2: the migration failed again, see the journal).
+
+2.81.0 is a **code-only upgrade — the schema stays at 64.** Install the release's hash-locked
+requirements into the virtual environment (FastAPI 0.143.2); the systemd unit templates are
+unchanged. Uploads now always need the upload token the site hands out, and the maintenance
+scripts refuse to run as root, so run them — and any cron line for `cleanup.php` — as the
+service account. Later unit changes and moved storage paths are applied with
+`sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`.
 
 2.79.0 is a **code-only upgrade — the schema stays at 64.** It adds the selectable captcha
 provider (Cloudflare Turnstile, reCAPTCHA v3, reCAPTCHA v2, hCaptcha) and stores a key pair
