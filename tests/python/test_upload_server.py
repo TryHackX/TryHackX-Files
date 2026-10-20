@@ -2169,6 +2169,90 @@ class TestDownloadUsesOneConnection:
         assert re.fullmatch(r"[a-f0-9]{32}", request.scope["filehost.traffic"]["reservation_id"])
 
 
+class TestCollectionTagsFromTheQueryString:
+    """`v`, `t` and `m` come straight from the URL; none of them may turn into a 500."""
+
+    FUTURE = int(time.time()) + 3600
+
+    @pytest.mark.parametrize("mac", ["é", "é" * 64, "A" * 64, "g" * 64, "a" * 63, ""])
+    def test_a_malformed_mac_is_simply_not_valid(self, mac):
+        assert us._collection_viewer_id("abc", f"1.{self.FUTURE}.{mac}", "h") is None
+        assert us._collection_token_ok("abc", f"{self.FUTURE}.{mac}", "h") is False
+        assert us._collection_member_token_ids("abc", f"e30.{mac}", "h") is None
+
+    def test_a_correct_tag_still_identifies_the_viewer(self):
+        mac = us.hmac.new(b"h", f"7|abc|{self.FUTURE}".encode(), hashlib.sha256).hexdigest()
+        assert us._collection_viewer_id("abc", f"7.{self.FUTURE}.{mac}", "h") == 7
+
+    @staticmethod
+    def _guest_one_time_collection(monkeypatch, tmp_path):
+        payload = tmp_path / "member.txt"
+        payload.write_bytes(b"hello")
+        cursor = _ScriptedCursor(
+            answers=[
+                ("GET_LOCK", (1,)),
+                ("COUNT(", (0,)),
+                ("FROM `fh_download_tokens` WHERE `token`", (None,)),  # a guest's `dt`
+                ("FROM `fh_collections` WHERE `id`",
+                 ("Holiday", None, None, None, 0, 1, None, None, "hash", "keep", 9)),
+            ],
+            all_answers=[
+                ("FROM `fh_collection_files`",
+                 [("file1", "member.txt", 5, None, None, None, 0, 0, None, None)]),
+            ],
+        )
+        pool = _OneConnectionPool(cursor)
+
+        async def none(*_args, **_kwargs):
+            return None
+
+        async def same_pool(*_args, **_kwargs):
+            return pool
+
+        async def resolved(*_args, **_kwargs):
+            return payload
+
+        monkeypatch.setattr(us, "update_settings", none)
+        monkeypatch.setattr(us, "require_storage_ready", same_pool)
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "resolve_storage_file", resolved)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_", "database": "files"})
+        monkeypatch.setitem(us.settings_cache, "groups", USER_GROUPS)
+        monkeypatch.setitem(us.settings_cache, "default_group_id", 1)
+        monkeypatch.setitem(us.settings_cache, "collection_counts_files", False)
+        return cursor
+
+    def test_a_crafted_viewer_tag_cannot_strand_a_committed_reservation(self, monkeypatch, tmp_path):
+        # The audit's probe: guest token, one-time collection, non-ASCII MAC in `v`.
+        cursor = self._guest_one_time_collection(monkeypatch, tmp_path)
+        request = _http_request("/collection", b"id=c1&dt=x")
+
+        response = asyncio.run(us.download_collection(
+            "c1", request, us.BackgroundTasks(), dt="x", v=f"1.{self.FUTURE}.é"
+        ))
+
+        assert response.status_code == 200
+        assert any(query.strip() == "COMMIT" for query, _ in cursor.queries)
+        context = request.scope["filehost.traffic"]
+        assert re.fullmatch(r"[a-f0-9]{32}", context["reservation_id"])
+        assert context["completion"]["viewer_id"] is None
+
+    def test_a_failure_after_the_commit_still_hands_the_reservation_over(self, monkeypatch, tmp_path):
+        self._guest_one_time_collection(monkeypatch, tmp_path)
+
+        def broken_log(_message):
+            raise RuntimeError("stdout is gone")
+
+        monkeypatch.setattr(us, "info_log", broken_log)
+        request = _http_request("/collection", b"id=c1&dt=x")
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(us.download_collection("c1", request, us.BackgroundTasks(), dt="x"))
+
+        # The accounting middleware finds it and releases it instead of the reaper, minutes later.
+        assert re.fullmatch(r"[a-f0-9]{32}", request.scope["filehost.traffic"]["reservation_id"])
+
+
 class TestQrBodyIsBounded:
     def test_oversized_body_is_refused_while_streaming(self):
         receive, state = _receive_chunks([b"x" * 4096] * 10)

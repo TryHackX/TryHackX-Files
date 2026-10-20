@@ -3623,12 +3623,13 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
     limit_Bps = 0
     range_spec = None
     reservation_id = ""
+    transfer_state = {"interrupted": False}
 
     try:
         prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
         token_table = f"{prefix}download_tokens"
         files_table = f"{prefix}files"
-        
+
         conn = await pool.acquire()
         if conn:
             async with conn.cursor() as cur:
@@ -3767,6 +3768,25 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                 )
                 await cur.execute("COMMIT")
                 committed = True
+                # Registered the moment the reservation is durable, so the accounting
+                # middleware settles it whatever happens after this point.
+                request.scope["filehost.traffic"] = {
+                    "ip": client_ip,
+                    "file_id": file_id,
+                    "user_id": user_id,
+                    "active_id": active_id,
+                    "reservation_id": reservation_id,
+                    "transfer_state": transfer_state,
+                    "completion": {
+                        "kind": "file",
+                        "resource_id": file_id,
+                        "viewer_id": user_id,
+                        "owner_id": owner_id,
+                        "name": original_name,
+                        "mime": mime_type,
+                        "size": file_size,
+                    },
+                }
 
     except HTTPException:
         raise
@@ -3790,24 +3810,6 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
             finally:
                 pool.release(conn)
 
-    transfer_state = {"interrupted": False}
-    request.scope["filehost.traffic"] = {
-        "ip": client_ip,
-        "file_id": file_id,
-        "user_id": user_id,
-        "active_id": active_id,
-        "reservation_id": reservation_id,
-        "transfer_state": transfer_state,
-        "completion": {
-            "kind": "file",
-            "resource_id": file_id,
-            "viewer_id": user_id,
-            "owner_id": owner_id,
-            "name": original_name,
-            "mime": mime_type,
-            "size": file_size,
-        },
-    }
     # CI-only synchronization window for a real socket-close-before-body test. The branch is
     # impossible to activate unless the isolated container explicitly opts into CI smoke mode.
     if (
@@ -4488,6 +4490,16 @@ async def delete_collection_after_limit(collection_id: str):
         print(f"⚠️  Post-limit collection delete failed for {collection_id}: {e}")
 
 
+def _is_hex_mac(mac: str) -> bool:
+    """PHP's hash_hmac('sha256', …) output: 64 lowercase hex digits.
+
+    Checked before hmac.compare_digest(), which raises TypeError for a str holding anything
+    but ASCII. A crafted `v`, `t` or `m` from the query string used to turn into a 500 that,
+    for `v`, fired after the ZIP's reservation had been committed.
+    """
+    return isinstance(mac, str) and re.fullmatch(r"[0-9a-f]{64}", mac) is not None
+
+
 def _collection_token_ok(coll_id: str, token: str, delete_token_hash: str) -> bool:
     """
     Validate the stateless download token issued by PHP for a password-protected
@@ -4498,6 +4510,8 @@ def _collection_token_ok(coll_id: str, token: str, delete_token_hash: str) -> bo
     if not token or '.' not in token:
         return False
     raw_expiry, _, mac = token.partition('.')
+    if not _is_hex_mac(mac):
+        return False
     try:
         expiry = int(raw_expiry)
     except ValueError:
@@ -4528,6 +4542,8 @@ def _collection_viewer_id(coll_id: str, tag: str, delete_token_hash: str):
     if not tag or tag.count('.') != 2:
         return None
     raw_user, raw_expiry, mac = tag.split('.')
+    if not _is_hex_mac(mac):
+        return None
     try:
         user_id, expiry = int(raw_user), int(raw_expiry)
     except ValueError:
@@ -4547,6 +4563,8 @@ def _collection_member_token_ids(coll_id: str, token: str, delete_token_hash: st
     if not token or token.count('.') != 1:
         return None
     encoded, mac = token.split('.', 1)
+    if not _is_hex_mac(mac):
+        return None
     expected = hmac.new(
         (delete_token_hash or '').encode(),
         f"{coll_id}|{encoded}".encode(),
@@ -4684,6 +4702,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
     download_lock_name = None
     now = int(time.time())
     reservation_id = ""
+    transfer_state = {"interrupted": False}
 
     try:
         conn = await pool.acquire()
@@ -4850,8 +4869,33 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
                     effects_to_reserve,
                     quota_reservation,
                 )
+                # Viewer identity: prefer the `dt` token's user — PHP stamps the session's user
+                # id into `download_tokens` when issuing it, exactly like single files. The
+                # signed `v` tag stays as a fallback for links built ahead of time (e.g. a
+                # copied zipUrl from "My Files"), where the token might be fetched without a
+                # session. Worked out before the commit: nothing may raise between committing
+                # the reservation and handing it to the accounting middleware below.
+                viewer_id = dl_user_id or _collection_viewer_id(id, v, delete_token_hash)
                 await cur.execute("COMMIT")
                 committed = True
+                # From here on the middleware settles the reservation whatever happens next;
+                # a reservation committed but never registered stayed "reserved" until the
+                # reaper, and kept a one-time or capped collection unavailable meanwhile.
+                request.scope["filehost.traffic"] = {
+                    "ip": client_ip,
+                    "file_id": None,
+                    "user_id": dl_user_id,
+                    "active_id": active_id,
+                    "reservation_id": reservation_id,
+                    "transfer_state": transfer_state,
+                    "completion": {
+                        "kind": "collection",
+                        "resource_id": id,
+                        "viewer_id": viewer_id,
+                        "owner_id": coll_owner_id,
+                        "name": coll_name,
+                    },
+                }
     except HTTPException:
         raise
     except Exception as e:
@@ -4875,32 +4919,6 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
     background_tasks.add_task(register_download_end, active_id)
 
     info_log(f"Collection ZIP {id[:8]}: {len(entries)} file(s)")
-
-    # Viewer identity: prefer the `dt` token's user — PHP stamps the session's user id into
-    # `download_tokens` when issuing it, exactly like single files (notify_file_download gets
-    # the token's user there). The signed `v` tag stays as a fallback for links built ahead
-    # of time (e.g. copied zipUrl from "My Files"), where the token might be fetched without
-    # a session. Without this, an owner fetching their own ZIP from collection.php — whose
-    # URL carries no `v` — rang their own bell.
-    transfer_state = {"interrupted": False}
-    request.scope["filehost.traffic"] = {
-        "ip": client_ip,
-        "file_id": None,
-        "user_id": dl_user_id,
-        "active_id": active_id,
-        "reservation_id": reservation_id,
-        "transfer_state": transfer_state,
-        "completion": {
-            "kind": "collection",
-            "resource_id": id,
-            "viewer_id": (
-                dl_user_id
-                or _collection_viewer_id(id, v, delete_token_hash)
-            ),
-            "owner_id": coll_owner_id,
-            "name": coll_name,
-        },
-    }
 
     # Same rule as single files: if this ZIP spent the last allowance and the owner asked for
     # deletion, remove the collection once the archive has finished streaming. Only the
