@@ -73,6 +73,14 @@ test('a red button keeps a red edge on hover', () => {
 	assert.match(base, /\.btn\.btn-danger:hover\s*\{\s*border-color:\s*var\(--danger\);/);
 });
 
+test('every keyboard stop gets the accent focus ring, not the browser default', () => {
+	const ring = base.match(/\.logo:focus-visible,\s*\.premium-teaser:focus-visible,\s*input\[type="checkbox"\]:focus-visible,\s*input\[type="radio"\]:focus-visible\s*\{([^}]*)\}/);
+	assert.ok(ring, 'logo, premium teaser, checkboxes and radios share the ring');
+	assert.match(ring[1], /outline:\s*2px solid var\(--accent\)/);
+	// A sortable header's ring is drawn inside the cell: a scrolling table wrapper clips outside it.
+	assert.match(base, /th\[tabindex\]:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\);[^}]*outline-offset:\s*-2px;/);
+});
+
 test('the header wraps on phones instead of widening the page', () => {
 	const phone = base.match(/@media \(max-width: 600px\) \{\s*header\s*\{([^}]*)\}\s*\.header-actions\s*\{([^}]*)\}/);
 	assert.ok(phone, 'base.css keeps the phone header block');
