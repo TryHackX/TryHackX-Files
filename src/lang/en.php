@@ -1010,6 +1010,7 @@ return [
 	'panel.ctl.system_lt_limits' => 'System Max File Size (:system MB) cannot be smaller than User/Guest limits (:user/:guest MB). Update limits first.',
 	'panel.ctl.saved' => 'Settings saved successfully',
 	'panel.ctl.blocked_ext_kept' => 'Always blocked, so kept on the list: :list.',
+	'panel.ctl.app_name_cleaned' => 'The site name was saved as plain text: < >, control characters and anything past :max characters were left out.',
 	'panel.ctl.file_deleted' => 'File deleted',
 	'panel.ctl.file_delete_failed' => 'Failed to delete file',
 	'panel.ctl.cleanup_old_done' => 'Deleted :n old files',

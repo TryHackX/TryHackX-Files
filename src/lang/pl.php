@@ -1012,6 +1012,7 @@ return [
 	'panel.ctl.system_lt_limits' => 'Systemowy max rozmiar pliku (:system MB) nie może być mniejszy niż limity użytkownika/gościa (:user/:guest MB). Najpierw zmień limity.',
 	'panel.ctl.saved' => 'Ustawienia zapisane',
 	'panel.ctl.blocked_ext_kept' => 'Te rozszerzenia są zawsze blokowane, więc zostały na liście: :list.',
+	'panel.ctl.app_name_cleaned' => 'Nazwę serwisu zapisano jako zwykły tekst: pominięto znaki < >, znaki sterujące i wszystko powyżej :max znaków.',
 	'panel.ctl.file_deleted' => 'Plik usunięty',
 	'panel.ctl.file_delete_failed' => 'Nie udało się usunąć pliku',
 	'panel.ctl.cleanup_old_done' => 'Usunięto starych plików: :n',

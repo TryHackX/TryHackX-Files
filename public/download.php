@@ -64,7 +64,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/captcha.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
-	<title><?= $file ? htmlspecialchars($file['name']) : _h('common.error') ?> - <?= APP_NAME ?></title>
+	<title><?= $file ? htmlspecialchars($file['name']) : _h('common.error') ?> - <?= htmlspecialchars(APP_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/download.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">

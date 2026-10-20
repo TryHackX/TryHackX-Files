@@ -25,6 +25,8 @@ final class InputLimits
 	public const LONG_TEXT_MAX = 10_000;
 	public const HTML_MAX = 100_000;
 	public const API_BODY_MAX = 16 * 1024 * 1024;
+	/** The site name (installer, Settings -> General). */
+	public const APP_NAME_MAX = 50;
 
 	private static function configuredInt(string $key, int $default, int $minimum, int $maximum): int
 	{
@@ -114,5 +116,21 @@ final class InputLimits
 		$value = str_replace(['"', '<', '>', '\\'], '_', $value);
 		$value = trim($value);
 		return mb_strlen($value, 'UTF-8') > $max ? rtrim(mb_substr($value, 0, $max, 'UTF-8')) : $value;
+	}
+
+	/**
+	 * The site name as it may be stored and shown: one line of plain text. It goes into every
+	 * page's <title> and header and into mail subjects and bodies, so `<` and `>`, control
+	 * characters and the bidirectional overrides that can disguise a name are dropped, runs of
+	 * whitespace become one space, and the result is cut to APP_NAME_MAX characters. Quotes and
+	 * ampersands stay: they are ordinary in a name, and every page escapes it on output.
+	 * Returns '' when nothing usable is left; the caller decides the fallback.
+	 */
+	public static function appName(string $value): string
+	{
+		$value = mb_scrub($value, 'UTF-8');
+		$value = preg_replace('/[\p{Cc}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}<>]+/u', ' ', $value) ?? '';
+		$value = trim(preg_replace('/\s+/u', ' ', $value) ?? '');
+		return rtrim(mb_substr($value, 0, self::APP_NAME_MAX, 'UTF-8'));
 	}
 }

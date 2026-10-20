@@ -75,6 +75,34 @@ final class FrontendTemplatesTest extends TestCase
 		}
 	}
 
+	/**
+	 * The site name is administrator-chosen text that goes into every page head and header. A
+	 * template that echoes it raw turned `</title><meta http-equiv="refresh" …>` into a redirect
+	 * on every page, which the CSP does not stop.
+	 */
+	public function testEveryTemplateEscapesTheSiteName(): void
+	{
+		$files = array_merge(
+			glob(PROJECT_ROOT . '/public/*.php') ?: [],
+			glob(PROJECT_ROOT . '/src/includes/*.php') ?: [],
+			glob(PROJECT_ROOT . '/src/includes/panel/*.php') ?: []
+		);
+		$echoes = 0;
+		foreach ($files as $file) {
+			$source = (string) file_get_contents($file);
+			preg_match_all('/<\?=((?:(?!\?>).)*APP_NAME(?:(?!\?>).)*)\?>/s', $source, $matches);
+			foreach ($matches[1] as $echo) {
+				$echoes++;
+				$this->assertStringContainsString(
+					'htmlspecialchars(',
+					$echo,
+					basename($file) . ' prints the site name unescaped: <?=' . $echo . '?>'
+				);
+			}
+		}
+		$this->assertGreaterThanOrEqual(9, $echoes, 'the scan should find the titles and the header');
+	}
+
 	public function testDeleteLinkPageAlsoFollowsTheTheme(): void
 	{
 		$source = $this->source('src/includes/delete_link_page.php');

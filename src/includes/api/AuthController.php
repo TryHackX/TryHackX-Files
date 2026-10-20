@@ -1090,10 +1090,7 @@ final class AuthController
 		// Send email
 		$appUrl = APP_URL;
 		$resetLink = "$appUrl/?action=reset&token=$token";
-		$appName = Database::getSetting(
-			'app_name',
-			defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files'
-		);
+		$appName = defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files');
 		$language = trim((string) ($user['language'] ?? ''));
 		if ($language === '') {
 			$language = (string) Database::getSetting('default_language', 'pl');

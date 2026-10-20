@@ -91,7 +91,7 @@ $homeNotice = [
 	<?php require_once __DIR__ . '/../src/includes/head_meta.php'; ?>
 	<?php require_once __DIR__ . '/../src/includes/csrf_head.php'; ?>
 	<?php require_once __DIR__ . '/../src/includes/i18n_head.php'; ?>
-	<title><?= APP_NAME ?> - <?= _h('home.tagline') ?></title>
+	<title><?= htmlspecialchars(APP_NAME, ENT_QUOTES, 'UTF-8') ?> - <?= _h('home.tagline') ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/index.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/background.css?v=<?= APP_VERSION ?>">

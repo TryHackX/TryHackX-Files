@@ -1366,6 +1366,54 @@ final class HttpApiTest extends TestCase
 		$this->assertStringContainsString('id="usersBody"', $stillIn['body']);
 	}
 
+	/**
+	 * The site name is plain text in every page head and header — whether it was stored before
+	 * this check existed or is saved from Settings -> General now.
+	 */
+	public function testTheSiteNameIsAlwaysPlainText(): void
+	{
+		$original = [];
+		foreach (['app_name', 'default_language', 'maintenance_mode', 'maintenance_message', 'audit_retention_days'] as $key) {
+			$original[$key] = (string) Database::getSetting($key, '');
+		}
+		$hostile = '</title><meta http-equiv="refresh" content="0"> & Co';
+		Database::setSetting('app_name', $hostile);
+		self::serverSettingsChanged();
+		try {
+			self::$cookies = [];
+			foreach (['/index.php', '/download.php?id=doesnotexist1', '/collection.php?id=doesnotexist1'] as $page) {
+				$body = self::rawRequest('GET', $page)['body'];
+				$this->assertStringNotContainsString('<meta http-equiv="refresh"', $body, $page);
+				$this->assertStringContainsString(
+					'/title meta http-equiv=&quot;refresh&quot; content=&quot;0&quot; &amp; Co',
+					$body,
+					$page
+				);
+			}
+
+			$this->assertTrue(self::signIn('httpadmin', 'HttpAdmin1!')['success'] ?? false);
+			$saved = self::postPanelForm('/panel.php?tab=settings&stab=general', [
+				'action' => 'save_settings',
+				'setting_group' => 'general',
+				'app_name' => "<b>Files</b>\r\n" . str_repeat('x', 60),
+				'default_language' => 'en',
+				'audit_retention_days' => '30',
+			]);
+			$this->assertSame(200, $saved['status']);
+			$this->assertStringContainsString('alert alert-success', $saved['body']);
+			Database::invalidateSettingsCache();
+			$stored = (string) Database::getSetting('app_name');
+			$this->assertSame(InputLimits::appName("<b>Files</b>\r\n" . str_repeat('x', 60)), $stored);
+			$this->assertStringNotContainsString('<', $stored);
+			$this->assertSame(InputLimits::APP_NAME_MAX, mb_strlen($stored));
+		} finally {
+			foreach ($original as $key => $value) {
+				Database::setSetting($key, $value);
+			}
+			self::serverSettingsChanged();
+		}
+	}
+
 	/** Make this browser's last password check look $seconds older (edits its session file). */
 	private static function ageRecentAuthentication(int $seconds): void
 	{

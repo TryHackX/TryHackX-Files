@@ -74,4 +74,29 @@ final class InputLimitsTest extends RepoTestCase
 		$this->assertSame(5, mb_strlen(InputLimits::cleanLabel('ąęśćż-more', 5)));
 		$this->assertSame('ab', InputLimits::cleanLabel('ab  cd', 3));
 	}
+
+	/**
+	 * The site name goes into every page head: it is stored as one line of plain text, so a
+	 * name like `</title><meta http-equiv="refresh" …>` cannot become markup anywhere.
+	 */
+	public function testSiteNameIsOneLineOfPlainText(): void
+	{
+		$this->assertSame('TryHackX Files', InputLimits::appName('  TryHackX Files  '));
+		$this->assertSame(
+			'/title meta http-equiv="refresh" content="0"',
+			InputLimits::appName('</title><meta http-equiv="refresh" content="0">')
+		);
+		$this->assertSame('Tom & "Jerry" Files', InputLimits::appName("Tom & \"Jerry\"\r\n\tFiles"));
+		$this->assertSame('evil', InputLimits::appName("\u{202E}evil\u{202C}"), 'no bidirectional overrides');
+		$this->assertSame('', InputLimits::appName(" <> \x07 "));
+		$this->assertSame("Ola's zdjęcia 日本", InputLimits::appName("Ola's zdjęcia 日本"));
+		$this->assertTrue(mb_check_encoding(InputLimits::appName("bad \xC3\x28 bytes"), 'UTF-8'));
+		$long = InputLimits::appName(str_repeat('ż', 80));
+		$this->assertSame(InputLimits::APP_NAME_MAX, mb_strlen($long));
+		$this->assertSame(
+			str_repeat('a', 49),
+			InputLimits::appName(str_repeat('a', 49) . ' bcd'),
+			'no trailing space after the cut'
+		);
+	}
 }

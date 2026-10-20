@@ -936,6 +936,7 @@ return array (
   'panel.ctl.system_lt_limits' => 'El tamaño máximo del sistema (:system MB) no puede ser menor que los límites de usuario/invitado (:user/:guest MB). Ajusta primero los límites.',
   'panel.ctl.saved' => 'Ajustes guardados correctamente',
   'panel.ctl.blocked_ext_kept' => 'Siempre bloqueadas, así que se mantienen en la lista: :list.',
+  'panel.ctl.app_name_cleaned' => 'El nombre del sitio se guardó como texto plano: se omitieron < >, los caracteres de control y todo lo que pasaba de :max caracteres.',
   'panel.ctl.file_deleted' => 'Archivo eliminado',
   'panel.ctl.file_delete_failed' => 'No se pudo eliminar el archivo',
   'panel.ctl.cleanup_old_done' => 'Se han eliminado :n archivos antiguos',

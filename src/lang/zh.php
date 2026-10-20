@@ -936,6 +936,7 @@ return array (
   'panel.ctl.system_lt_limits' => '系统单文件上限（:system MB）不能小于用户／访客限制（:user/:guest MB）。请先调整这些限制。',
   'panel.ctl.saved' => '设置已保存',
   'panel.ctl.blocked_ext_kept' => '以下扩展名始终被阻止，因此保留在列表中：:list。',
+  'panel.ctl.app_name_cleaned' => '站点名称已按纯文本保存：已去掉 < >、控制字符以及超过 :max 个字符的部分。',
   'panel.ctl.file_deleted' => '文件已删除',
   'panel.ctl.file_delete_failed' => '删除文件失败',
   'panel.ctl.cleanup_old_done' => '已删除 :n 个旧文件',

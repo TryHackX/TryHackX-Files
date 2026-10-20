@@ -54,8 +54,13 @@ if ($action === 'save_settings') {
 
 	if ($group === 'general') {
 		$lang = $_POST['default_language'] ?? 'pl';
+		// The name goes into every page head and header and into mail: plain text, one line, at
+		// most 50 characters, like the installer allows. An empty field means the product name.
+		$appNameSubmitted = trim(is_string($_POST['app_name'] ?? null) ? $_POST['app_name'] : '');
+		$appName = InputLimits::appName($appNameSubmitted);
+		$appNameCleaned = $appNameSubmitted !== '' && $appName !== $appNameSubmitted;
 		$settingsToUpdate = [
-			'app_name' => trim($_POST['app_name'] ?? (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files')),
+			'app_name' => $appName !== '' ? $appName : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files'),
 			'default_language' => Lang::supported($lang) ? $lang : 'pl',
 			'maintenance_mode' => isset($_POST['maintenance_mode']) ? '1' : '0',
 			// Empty = fall back to the per-language default on the maintenance page (B8).
@@ -291,6 +296,9 @@ if ($action === 'save_settings') {
 		$success = $success !== '' ? $success : __('panel.ctl.saved');
 		if (!empty($blockedKept)) {
 			$success .= ' ' . __('panel.ctl.blocked_ext_kept', ['list' => implode(', ', $blockedKept)]);
+		}
+		if (!empty($appNameCleaned)) {
+			$success .= ' ' . __('panel.ctl.app_name_cleaned', ['max' => InputLimits::APP_NAME_MAX]);
 		}
 		$tab = 'settings';
 	}

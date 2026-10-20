@@ -158,7 +158,9 @@ if ($db) {
 	// public/.htaccess is scoped to static file extensions for exactly that reason.
 	emitContentSecurityPolicy($settings);
 
-	define('APP_NAME', $settings['app_name'] ?? PRODUCT_NAME);
+	// Cleaned again on the way out, not only when saved: a name stored by an older version (or
+	// by hand) goes into every page head and mail, so it is plain text here whatever it holds.
+	define('APP_NAME', InputLimits::appName((string) ($settings['app_name'] ?? '')) ?: PRODUCT_NAME);
 
 	// Load limits
 	define('GUEST_MAX_FILE_SIZE_MB', (int) ($settings['guest_max_file_size_mb'] ?? 250));

@@ -246,7 +246,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title><?= _h('panel.title') ?> - <?= APP_NAME ?></title>
+	<title><?= _h('panel.title') ?> - <?= htmlspecialchars(APP_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/fontawesome/css/all.min.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/panel.css?v=<?= APP_VERSION ?>">

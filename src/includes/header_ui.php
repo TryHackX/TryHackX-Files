@@ -9,7 +9,7 @@
             </svg>
         </div>
         <span class="logo-text">
-            <?= defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files') ?>
+            <?= htmlspecialchars(defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files'), ENT_QUOTES, 'UTF-8') ?>
         </span>
     </a>
     <div class="header-actions">

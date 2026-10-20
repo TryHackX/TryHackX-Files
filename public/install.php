@@ -632,10 +632,11 @@ function handleDefaultSettings(): never
 		apiOut(false, ['error' => 'Cannot connect to the database.'], 500);
 	}
 
-	$appName = trim((string) ($in['app_name'] ?? PRODUCT_NAME)) ?: PRODUCT_NAME;
+	// The same plain-text rule Settings -> General applies (InputLimits::appName).
+	$appName = InputLimits::appName(is_string($in['app_name'] ?? null) ? $in['app_name'] : '') ?: PRODUCT_NAME;
 
 	$defaults = [
-		'app_name' => mb_substr($appName, 0, 50),
+		'app_name' => $appName,
 		'maintenance_mode' => '0',
 		'maintenance_message' => '', // empty = per-language default on the maintenance page (B8)
 		'registration_enabled' => '1',

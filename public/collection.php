@@ -77,7 +77,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<?php /* ui.js also carries the live language switch used by the header (pkt 1). */ ?>
 	<script src="<?= APP_URL ?>/assets/js/ui.js?v=<?= APP_VERSION ?>" defer></script>
 	<script src="<?= APP_URL ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
-	<title><?= $collection ? htmlspecialchars($collection['name']) : _h('common.error') ?> - <?= APP_NAME ?></title>
+	<title><?= $collection ? htmlspecialchars($collection['name']) : _h('common.error') ?> - <?= htmlspecialchars(APP_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
 	<?php /* download.css also carries this page's own rules (the collection section). */ ?>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/download.css?v=<?= APP_VERSION ?>">
