@@ -1494,6 +1494,31 @@ class Database
 		];
 	}
 
+	/**
+	 * What the schema and its seeded data are missing for the contracts of every migration step
+	 * (empty: nothing). For bootstrap scripts that write settings after migrating: drift they
+	 * leave behind is found by the periodic re-check, which then takes the whole migration path
+	 * (schema_ready=0) minutes into the run.
+	 *
+	 * @return string[]
+	 */
+	public static function schemaContractProblems(): array
+	{
+		$pdo = self::getInstance();
+		if (!$pdo) {
+			return ['The database is unavailable.'];
+		}
+		self::forgetLocalSettingsCache();
+		$prefix = defined('DB_PREFIX') ? DB_PREFIX : '';
+		$problems = [];
+		for ($version = 2; $version <= self::CURRENT_SCHEMA_VERSION; $version++) {
+			foreach (self::migrationStepProblems($pdo, $prefix, $version) as $problem) {
+				$problems[] = "v{$version}: {$problem}";
+			}
+		}
+		return $problems;
+	}
+
 	/** @return string[] */
 	private static function migrationStepProblems(PDO $pdo, string $prefix, int $version): array
 	{

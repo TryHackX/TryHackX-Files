@@ -55,6 +55,7 @@ define('APP_CANONICAL_URL', $environment['FILEHOST_CANONICAL_URL']);
 define('APP_SECRET_KEY', bin2hex(random_bytes(32)));
 
 require_once $projectRoot . '/src/includes/CanonicalUrl.php';
+require_once $projectRoot . '/src/includes/InstallerSecurity.php';
 try {
 	filehostNormalizeCanonicalUrl(APP_CANONICAL_URL);
 } catch (InvalidArgumentException) {
@@ -85,7 +86,10 @@ $defaults = [
 	'user_activation_mode' => 'auto',
 	'system_max_file_size_mb' => '32',
 	'max_upload_folder_mb' => '0',
-	'blocked_extensions' => 'php,phtml,phar,exe,bat,cmd,sh,py,html,svg,xml,htaccess',
+	// The installer's own list. A shorter one written after migrate() broke the migration-39
+	// contract (htm, xhtml and shtml missing), and the five-minute schema re-check then took
+	// the whole migration path, answering 503 while it repaired the list mid-run.
+	'blocked_extensions' => implode(',', filehostInstallerDefaultBlockedExtensions()),
 	'concurrent_downloads_guest' => '2',
 	'concurrent_downloads_user' => '2',
 	'recaptcha_enabled' => '0',
@@ -105,6 +109,14 @@ $defaults = [
 ];
 if (!Database::insertDefaultSettings($defaults, DB_PREFIX)) {
 	fwrite(STDERR, "Could not seed CI settings.\n");
+	exit(70);
+}
+// The seed is written after migrate(), so it must not leave drift behind: the instance has to
+// look exactly like a real installation to the periodic schema re-check.
+$contractProblems = Database::schemaContractProblems();
+if ($contractProblems !== []) {
+	fwrite(STDERR, "The seeded CI settings break the schema contract:\n- "
+		. implode("\n- ", $contractProblems) . "\n");
 	exit(70);
 }
 

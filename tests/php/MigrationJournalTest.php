@@ -88,6 +88,23 @@ final class MigrationJournalTest extends RepoTestCase
 		}
 	}
 
+	/** Seeded data that breaks a step's contract is reported, step by step, without migrating. */
+	public function testSchemaContractProblemsNamesSeededDrift(): void
+	{
+		$this->assertSame([], Database::schemaContractProblems());
+		$original = (string) Database::getSetting('blocked_extensions', '');
+		try {
+			Database::setSetting('blocked_extensions', 'php,exe,html,svg,xml');
+			$this->assertSame(
+				['v39: active-document extension blocklist is incomplete'],
+				Database::schemaContractProblems()
+			);
+		} finally {
+			Database::setSetting('blocked_extensions', $original);
+		}
+		$this->assertSame([], Database::schemaContractProblems());
+	}
+
 	public function testRepresentativeHistoricalContractSnapshotsStayStable(): void
 	{
 		$fixture = json_decode(

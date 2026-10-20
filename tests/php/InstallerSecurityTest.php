@@ -57,6 +57,26 @@ final class InstallerSecurityTest extends TestCase
 		}
 	}
 
+	/**
+	 * The Docker smoke install writes its settings after migrating. It seeds the installer's own
+	 * blocklist and refuses to finish with schema drift, so the five-minute re-check never has
+	 * to repair it (schema_ready=0, 503s) in the middle of a CI run.
+	 */
+	public function testCiBootstrapSeedsLikeARealInstallAndChecksTheContract(): void
+	{
+		$script = file_get_contents(dirname(__DIR__, 2) . '/scripts/ci-bootstrap-install.php');
+		$this->assertIsString($script);
+		$this->assertStringContainsString(
+			"'blocked_extensions' => implode(',', filehostInstallerDefaultBlockedExtensions())",
+			$script
+		);
+		$this->assertLessThan(
+			strpos($script, 'Database::schemaContractProblems()'),
+			strpos($script, 'Database::insertDefaultSettings($defaults'),
+			'the contract is checked after the seed is written'
+		);
+	}
+
 	public function testFreshInstallRunsAndVerifiesTheCurrentMigrationChain(): void
 	{
 		$page = file_get_contents(dirname(__DIR__, 2) . '/public/install.php');
