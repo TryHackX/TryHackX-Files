@@ -217,6 +217,25 @@ expect "a consumed download token is refused" "403" "${reuse_status}"
 # A finished download must still count; 2.80.0 and earlier recorded it as released.
 wait_for_value "SELECT downloads FROM fh_files WHERE id='${basic_id}'" "1"
 
+# A browser offering gzip still gets a text download as stored: public/.htaccess keeps
+# mod_deflate off the proxied downloads, so Content-Length (size, time left) survives.
+gzip_payload="${work_dir}/gzip.txt"
+gzip_download="${work_dir}/gzip.download"
+gzip_headers="${work_dir}/gzip.headers"
+python3 -c 'import sys; open(sys.argv[1], "w").write("compressible line\n" * 4096)' "${gzip_payload}"
+upload_file "${gzip_payload}" 'ci-gzip.txt'
+get_download_token "${UPLOADED_ID}"
+gzip_status="$(curl --silent --show-error --header 'Accept-Encoding: gzip' \
+  --dump-header "${gzip_headers}" --output "${gzip_download}" --write-out '%{http_code}' \
+  "${FILEHOST_CANONICAL_URL}/api/download?token=${DOWNLOAD_TOKEN}")"
+expect "a text download offered gzip" "200" "${gzip_status}"
+if grep -qi '^content-encoding:' "${gzip_headers}" || ! grep -qi '^content-length:' "${gzip_headers}"; then
+  fail "a text download offered gzip" \
+    "expected Content-Length and no Content-Encoding, got: $(tr -d '\r' < "${gzip_headers}" | tr '\n' ' ')"
+fi
+cmp "${gzip_payload}" "${gzip_download}" \
+  || fail "a text download offered gzip" "the downloaded bytes differ from the upload"
+
 # Slow downloads make concurrency and disconnect states observable without a race against
 # the unthrottled streaming path. Five seconds is used only by this isolated stack, never as a
 # production default.

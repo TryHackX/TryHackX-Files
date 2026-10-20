@@ -4,33 +4,36 @@ Options -Indexes -MultiViews
 	RewriteEngine On
 
 	# Proxy uploads and downloads to the Python server (streaming, zero-copy sendfile).
+	# Downloads and ZIPs pass through unchanged (no-gzip): mod_deflate would otherwise compress
+	# text and JSON files on the fly, which drops Content-Length (no size or time left in the
+	# browser) and costs a CPU core per stream.
 	RewriteRule ^api/upload(/.*)?$ http://127.0.0.1:8001/upload$1 [P,L]
-	RewriteRule ^api/download(/.*)?$ http://127.0.0.1:8001/download$1 [P,L]
-	RewriteRule ^api/collection(/.*)?$ http://127.0.0.1:8001/collection$1 [P,L]
+	RewriteRule ^api/download(/.*)?$ http://127.0.0.1:8001/download$1 [P,L,E=no-gzip:1]
+	RewriteRule ^api/collection(/.*)?$ http://127.0.0.1:8001/collection$1 [P,L,E=no-gzip:1]
 	RewriteRule ^api/sharex(/.*)?$ http://127.0.0.1:8001/sharex$1 [P,L]
 	RewriteRule ^api/thumb(/.*)?$ http://127.0.0.1:8001/thumb$1 [P,L]
 
 	# NOTE: /metrics is deliberately NOT proxied. The upload server binds to loopback, so
-	# Prometheus scrapes it directly at 127.0.0.1:8001/metrics on this host. Proxying it
-	# here would make it public: every proxied request reaches Python from 127.0.0.1, so
-	# the endpoint's loopback check could not tell a local scrape from a remote visitor.
-	# To scrape from another host, set the `metrics_token` setting first, then add a rule.
+	# Prometheus scrapes it directly at 127.0.0.1:8001/metrics on this host. Without a token
+	# it answers only callers that reach it directly; everything proxied from here carries the
+	# X-Forwarded-For header Apache adds and would be refused. To scrape from another host,
+	# set the `metrics_token` setting first, then add a rule.
 
 	# REST API v1 — served by PHP (not proxied). Pass the Authorization header through to
 	# PHP (mod_php often drops it) so Bearer-key auth works.
 	RewriteRule ^api/v1/?(.*)$ apiv1.php?path=$1 [QSA,L,E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 	RewriteRule ^api/qr(/.*)?$ http://127.0.0.1:8001/qr$1 [P,L]
 
-	# Same treatment for api.php: the premium activation endpoint (pt 9) is called by a
-	# payment provider's webhook with `Authorization: Bearer <token>`, and mod_php drops that
-	# header unless it is put back here. Without this only the X-Premium-Token fallback works.
+	# Same treatment for api.php: the premium activation endpoint is called by a payment
+	# provider's webhook with `Authorization: Bearer <token>`, and mod_php drops that header
+	# unless it is put back here. Without this only the X-Premium-Token fallback works.
 	RewriteCond %{HTTP:Authorization} .
 	RewriteRule ^api\.php$ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
-	# pt 1: clean addresses for the pages a visitor is handed a link to. `/premium` reads as
-	# part of the site; `/premium.php` reads as a file someone left lying around. The `.php`
-	# forms keep working — bookmarks, old links and the checkout's own `continueUrl` must not
-	# break — they simply stop being what gets handed out.
+	# Clean addresses for the pages a visitor is handed a link to. `/premium` reads as part of
+	# the site; `/premium.php` reads as a file someone left lying around. The `.php` forms keep
+	# working — bookmarks, old links and the checkout's own `continueUrl` must not break —
+	# they simply stop being what gets handed out.
 	#
 	# Guarded by !-f / !-d so a real file or directory is never rewritten: assets, the API and
 	# the installer are untouched.
@@ -44,7 +47,7 @@ Options -Indexes -MultiViews
 
 	# Ad networks fetch /ads.txt at the domain root, but .txt is denied wholesale by the
 	# FilesMatch block below — so the file is emitted by PHP from the `ads_txt_content`
-	# setting instead of existing on disk (Faza 8).
+	# setting instead of existing on disk.
 	RewriteRule ^ads\.txt$ adstxt.php [L]
 </IfModule>
 
@@ -95,8 +98,8 @@ Options -Indexes -MultiViews
 
 # /ads.txt must get past the .txt deny above: the access check runs against the requested
 # filename BEFORE the rewrite to adstxt.php happens, so without this the request dies as
-# 403 and the emitter is never reached (Faza 8). No physical ads.txt exists — the rewrite
-# is unconditional, so this grants access to the PHP emitter only.
+# 403 and the emitter is never reached. No physical ads.txt exists — the rewrite is
+# unconditional, so this grants access to the PHP emitter only.
 <Files "ads.txt">
 	<IfModule mod_authz_core.c>
 		Require all granted
@@ -107,27 +110,26 @@ Options -Indexes -MultiViews
 	</IfModule>
 </Files>
 
-<FilesMatch "^(robots|security)\.txt$">
-	<IfModule mod_authz_core.c>
-		Require all granted
-	</IfModule>
-	<IfModule !mod_authz_core.c>
-		Order Deny,Allow
-		Allow from all
-	</IfModule>
-</FilesMatch>
-
 <IfModule mod_deflate.c>
 	AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
 </IfModule>
 
 <IfModule mod_expires.c>
-	ExpiresActive On
-	ExpiresByType image/jpg "access plus 1 month"
-	ExpiresByType image/jpeg "access plus 1 month"
-	ExpiresByType image/gif "access plus 1 month"
-	ExpiresByType image/png "access plus 1 month"
-	ExpiresByType image/webp "access plus 1 month"
-	ExpiresByType text/css "access plus 1 week"
-	ExpiresByType application/javascript "access plus 1 week"
+	# Long lifetimes, but only for what Apache serves from disk: every page links its scripts
+	# and styles with a ?v= version, so a release is fetched afresh anyway. Proxied transfers
+	# and PHP answers set their own caching and must not get an Expires header from here.
+	<FilesMatch "\.(?:js|mjs|css|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf)$">
+		ExpiresActive On
+		ExpiresByType image/jpeg "access plus 1 month"
+		ExpiresByType image/gif "access plus 1 month"
+		ExpiresByType image/png "access plus 1 month"
+		ExpiresByType image/webp "access plus 1 month"
+		ExpiresByType image/svg+xml "access plus 1 month"
+		ExpiresByType font/woff2 "access plus 1 month"
+		ExpiresByType text/css "access plus 1 week"
+		# Apache's mime.types and Debian's media-types serve .js as text/javascript; older
+		# tables still say application/javascript.
+		ExpiresByType text/javascript "access plus 1 week"
+		ExpiresByType application/javascript "access plus 1 week"
+	</FilesMatch>
 </IfModule>
