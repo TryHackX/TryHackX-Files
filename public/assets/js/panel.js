@@ -479,7 +479,8 @@
 				document.getElementById('statFiles').textContent = data.stats.files_count;
 				document.getElementById('statSize').textContent = formatSize(data.stats.total_size);
 				document.getElementById('statDownloads').textContent = data.stats.total_downloads;
-				statsRow.style.display = 'grid';
+				// Back to the stylesheet's row of three, as on the other pages ('grid' stacked them).
+				statsRow.style.display = '';
 			}
 		} catch (e) { /* ignore */ }
 	}
