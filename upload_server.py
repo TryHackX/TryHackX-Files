@@ -340,11 +340,25 @@ async def _finalize_download_context(
     terminal_state: str,
     sent_bytes: int,
 ) -> None:
-    transitioned = await finish_download_reservation(
-        str(context.get("reservation_id") or ""),
-        terminal_state,
-        sent_bytes,
-    )
+    reservation_id = str(context.get("reservation_id") or "")
+    try:
+        transitioned = await finish_download_reservation(
+            reservation_id,
+            terminal_state,
+            sent_bytes,
+        )
+    except Exception as exc:
+        if terminal_state != "completed":
+            raise
+        # The download could not be counted. Settle it as released with the bytes that did
+        # leave, now: the allowance is charged and the live row freed, instead of the reaper
+        # releasing it minutes later with the last heartbeat's count (0 for a short transfer).
+        print(
+            f"⚠️  Download {reservation_id[:12]} could not be completed "
+            f"({type(exc).__name__}: {exc}); settling it as released"
+        )
+        await finish_download_reservation(reservation_id, "released", sent_bytes)
+        return
     if terminal_state == "completed" and transitioned:
         await _emit_completed_download_side_effects(context)
 
@@ -1282,8 +1296,20 @@ async def heartbeat_download(
         return False
 
 
-async def _apply_download_start_effects(cur, prefix: str, reservation_id: str, now: int):
-    """Consume token/one-time claims exactly once when the first body byte is accepted."""
+async def _apply_download_start_effects(
+    cur,
+    prefix: str,
+    reservation_id: str,
+    now: int,
+    strict: bool = True,
+):
+    """Consume token/one-time claims exactly once when the first body byte is accepted.
+
+    `strict` is for the first byte: a lost claim stops the transfer before it is served. At
+    finalization the bytes have already left, so a claim or token that disappeared meanwhile
+    (the file was deleted, a cleanup ran) is logged and settled instead: raising there rolled
+    the whole finalization back and left the reservation to the reaper.
+    """
     effects = f"{prefix}download_reservation_effects"
     tokens = f"{prefix}download_tokens"
     await cur.execute(
@@ -1294,7 +1320,10 @@ async def _apply_download_start_effects(cur, prefix: str, reservation_id: str, n
     )
     for resource_type, resource_id in await cur.fetchall():
         if resource_type not in {"file", "collection"}:
-            raise RuntimeError("Invalid one-time download effect")
+            if strict:
+                raise RuntimeError("Invalid one-time download effect")
+            print(f"⚠️  Ignoring an invalid one-time effect of download {reservation_id[:12]}")
+            continue
         table = f"{prefix}{'files' if resource_type == 'file' else 'collections'}"
         await cur.execute(
             f"UPDATE `{table}` SET `consumed_at` = %s, "
@@ -1304,9 +1333,11 @@ async def _apply_download_start_effects(cur, prefix: str, reservation_id: str, n
             (now, resource_id, reservation_id),
         )
         if cur.rowcount != 1:
-            raise RuntimeError(
-                f"Lost one-time claim for {resource_type}:{resource_id}"
-            )
+            if strict:
+                raise RuntimeError(
+                    f"Lost one-time claim for {resource_type}:{resource_id}"
+                )
+            print(f"⚠️  One-time claim for {resource_type}:{resource_id} was gone when its download ended")
 
     await cur.execute(
         f"UPDATE `{effects}` SET `applied_at` = %s "
@@ -1321,7 +1352,9 @@ async def _apply_download_start_effects(cur, prefix: str, reservation_id: str, n
         (now, reservation_id),
     )
     if cur.rowcount != 1:
-        raise RuntimeError("Lost reserved download token")
+        if strict:
+            raise RuntimeError("Lost reserved download token")
+        print(f"⚠️  Download token of {reservation_id[:12]} was gone when its download ended")
 
 
 async def _release_unstarted_download_effects(
@@ -1362,7 +1395,14 @@ async def _apply_download_counter_effects(
     reservation_id: str,
     now: int,
 ):
-    """Commit durable counters after the complete requested representation was sent."""
+    """Commit durable counters after the complete requested representation was sent.
+
+    The bytes are gone either way, so nothing here may undo the finalization: a file or
+    collection deleted during its download is skipped, and a cap that was already spent (an
+    embed or an administrator moved the counter meanwhile) is logged, not raised. Raising used
+    to roll the whole completion back; the reaper then released it with the last heartbeat's
+    byte count, so the transfer allowance was never charged.
+    """
     effects = f"{prefix}download_reservation_effects"
     await cur.execute(
         f"SELECT `resource_type`, `resource_id` FROM `{effects}` "
@@ -1373,7 +1413,8 @@ async def _apply_download_counter_effects(
     delete_after_limit = []
     for resource_type, resource_id in await cur.fetchall():
         if resource_type not in {"file", "collection"}:
-            raise RuntimeError("Invalid counter download effect")
+            print(f"⚠️  Ignoring an invalid counter effect of download {reservation_id[:12]}")
+            continue
         table = f"{prefix}{'files' if resource_type == 'file' else 'collections'}"
         await cur.execute(
             f"UPDATE `{table}` SET `downloads` = `downloads` + 1 "
@@ -1381,16 +1422,18 @@ async def _apply_download_counter_effects(
             f"AND (`max_downloads` IS NULL OR `downloads` < `max_downloads`)",
             (resource_id,),
         )
-        if cur.rowcount != 1:
-            raise RuntimeError(
-                f"Download counter cap changed for {resource_type}:{resource_id}"
-            )
+        counted = cur.rowcount == 1
         await cur.execute(
             f"SELECT `downloads`, `max_downloads`, `on_limit_action` "
             f"FROM `{table}` WHERE `id` = %s",
             (resource_id,),
         )
         row = await cur.fetchone()
+        if row is None:
+            info_log(f"{resource_type} {resource_id} was deleted during its download; nothing to count")
+            continue
+        if not counted:
+            print(f"⚠️  Download cap of {resource_type}:{resource_id} was already spent; not counted again")
         if (
             row
             and row[1] is not None
@@ -1406,6 +1449,30 @@ async def _apply_download_counter_effects(
         (now, reservation_id),
     )
     return delete_after_limit
+
+
+async def _settle_reserved_quota(cur, prefix: str, quota: tuple, actual_bytes: int, now: int):
+    """Turn the allowance a reservation held into the bytes it really sent."""
+    subject_type, subject_key, period, period_start, reserved = quota
+    if not (subject_type and subject_key and period):
+        return
+    reserved_bytes = max(0, safe_int(reserved, 0))
+    await cur.execute(
+        f"UPDATE `{prefix}transfer_quota_usage` SET "
+        f"`reserved_bytes` = GREATEST(0, `reserved_bytes` - %s), "
+        f"`used_bytes` = `used_bytes` + %s, `updated_at` = %s "
+        f"WHERE `subject_type` = %s AND `subject_key` = %s "
+        f"AND `period` = %s AND `period_start` = %s",
+        (
+            reserved_bytes,
+            min(max(0, actual_bytes), reserved_bytes),
+            now,
+            subject_type,
+            subject_key,
+            period,
+            period_start,
+        ),
+    )
 
 
 async def mark_download_reservation_started(reservation_id: str) -> None:
@@ -1510,7 +1577,7 @@ async def finish_download_reservation(
                     actual_bytes > 0 or state == "completed"
                 ):
                     await _apply_download_start_effects(
-                        cur, prefix, reservation_id, now
+                        cur, prefix, reservation_id, now, strict=False
                     )
                     previous_state = "started"
 
@@ -1523,26 +1590,19 @@ async def finish_download_reservation(
                         cur, prefix, reservation_id
                     )
 
-                if quota_subject_type and quota_subject_key and quota_period:
-                    quota_table = f"{prefix}transfer_quota_usage"
-                    reserved_bytes = max(0, safe_int(quota_reserved_bytes, 0))
-                    charged_bytes = min(actual_bytes, reserved_bytes)
-                    await cur.execute(
-                        f"UPDATE `{quota_table}` SET "
-                        f"`reserved_bytes` = GREATEST(0, `reserved_bytes` - %s), "
-                        f"`used_bytes` = `used_bytes` + %s, `updated_at` = %s "
-                        f"WHERE `subject_type` = %s AND `subject_key` = %s "
-                        f"AND `period` = %s AND `period_start` = %s",
-                        (
-                            reserved_bytes,
-                            charged_bytes,
-                            now,
-                            quota_subject_type,
-                            quota_subject_key,
-                            quota_period,
-                            quota_period_start,
-                        ),
-                    )
+                await _settle_reserved_quota(
+                    cur,
+                    prefix,
+                    (
+                        quota_subject_type,
+                        quota_subject_key,
+                        quota_period,
+                        quota_period_start,
+                        quota_reserved_bytes,
+                    ),
+                    actual_bytes,
+                    now,
+                )
 
                 await cur.execute(
                     f"UPDATE `{table}` SET `state` = %s, "
@@ -1572,8 +1632,105 @@ async def finish_download_reservation(
     return True
 
 
+async def _force_release_download_reservation(reservation_id: str, bytes_sent: int) -> bool:
+    """Last resort for an expired reservation whose finalization keeps failing.
+
+    Released without counting, without effect bookkeeping beyond what keeps nobody else
+    locked out: its one-time claims and token are settled the way a release settles them
+    (consumed once bytes left, handed back otherwise), its allowance is charged with the
+    bytes the heartbeats recorded and its live row goes. Every statement is conditional, so
+    a partly applied earlier attempt is harmless.
+    """
+    pool = await get_db_pool()
+    if not pool:
+        raise RuntimeError("Database unavailable while releasing download")
+    prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
+    table = f"{prefix}download_reservations"
+    effects = f"{prefix}download_reservation_effects"
+    tokens = f"{prefix}download_tokens"
+    now = int(time.time())
+    async with pool.acquire() as conn:
+        await conn.begin()
+        try:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT `state`, `active_download_id`, `quota_subject_type`, "
+                    f"`quota_subject_key`, `quota_period`, `quota_period_start`, "
+                    f"`quota_reserved_bytes`, `bytes_sent` FROM `{table}` "
+                    f"WHERE `id` = %s AND `lease_until` < %s FOR UPDATE",
+                    (reservation_id, now),
+                )
+                row = await cur.fetchone()
+                if not row or row[0] not in {"reserved", "started"}:
+                    await conn.commit()
+                    return False
+                sent = max(0, int(bytes_sent), safe_int(row[7], 0))
+                await cur.execute(
+                    f"SELECT `resource_type`, `resource_id` FROM `{effects}` "
+                    f"WHERE `reservation_id` = %s AND `effect_type` = 'one_time' "
+                    f"AND `applied_at` IS NULL",
+                    (reservation_id,),
+                )
+                for resource_type, resource_id in await cur.fetchall():
+                    if resource_type not in {"file", "collection"}:
+                        continue
+                    resource_table = f"{prefix}{'files' if resource_type == 'file' else 'collections'}"
+                    consumed = ", `consumed_at` = %s" if sent > 0 else ""
+                    await cur.execute(
+                        f"UPDATE `{resource_table}` SET `consume_reservation_id` = NULL{consumed} "
+                        f"WHERE `id` = %s AND `consume_reservation_id` = %s "
+                        f"AND `consumed_at` IS NULL",
+                        ((now,) if sent > 0 else ()) + (resource_id, reservation_id),
+                    )
+                if sent > 0:
+                    await cur.execute(
+                        f"UPDATE `{tokens}` SET `used` = 1, `used_at` = COALESCE(`used_at`, %s), "
+                        f"`reserved_until` = NULL WHERE `reservation_id` = %s",
+                        (now, reservation_id),
+                    )
+                else:
+                    await cur.execute(
+                        f"UPDATE `{tokens}` SET `used` = 0, `reservation_id` = NULL, "
+                        f"`reserved_until` = NULL WHERE `reservation_id` = %s AND `used_at` IS NULL",
+                        (reservation_id,),
+                    )
+                await cur.execute(
+                    f"UPDATE `{effects}` SET `applied_at` = %s "
+                    f"WHERE `reservation_id` = %s AND `applied_at` IS NULL",
+                    (now, reservation_id),
+                )
+                await _settle_reserved_quota(cur, prefix, tuple(row[2:7]), sent, now)
+                await cur.execute(
+                    f"UPDATE `{table}` SET `state` = 'released', "
+                    f"`bytes_sent` = GREATEST(`bytes_sent`, %s), "
+                    f"`finished_at` = %s, `lease_until` = %s, `updated_at` = %s "
+                    f"WHERE `id` = %s AND `state` IN ('reserved', 'started')",
+                    (sent, now, now, now, reservation_id),
+                )
+                if row[1]:
+                    await cur.execute(
+                        f"DELETE FROM `{prefix}active_downloads` WHERE `id` = %s",
+                        (row[1],),
+                    )
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+    return True
+
+
+# Consecutive failed finalizations per expired reservation, before the reaper force-releases it.
+REAPER_FORCE_RELEASE_AFTER = 5
+_reaper_failures: dict = {}
+
+
 async def reap_expired_download_reservations(limit: int = 100) -> int:
-    """Idempotently release expired leases without racing a late heartbeat."""
+    """Idempotently release expired leases without racing a late heartbeat.
+
+    Each reservation is handled on its own: one that cannot be finalized is logged and
+    skipped, and after REAPER_FORCE_RELEASE_AFTER failed ticks it is force-released. Before,
+    the first such row aborted every tick, and the scheduled maintenance after it.
+    """
     pool = await get_db_pool()
     if not pool:
         return 0
@@ -1592,13 +1749,35 @@ async def reap_expired_download_reservations(limit: int = 100) -> int:
 
     released = 0
     for reservation_id, bytes_sent in expired:
-        await finish_download_reservation(
-            str(reservation_id),
-            "released",
-            safe_int(bytes_sent),
-            require_expired=True,
-        )
-        released += 1
+        key = str(reservation_id)
+        try:
+            if await finish_download_reservation(
+                key, "released", safe_int(bytes_sent), require_expired=True
+            ):
+                released += 1
+            _reaper_failures.pop(key, None)
+            continue
+        except Exception as exc:
+            failures = _reaper_failures.get(key, 0) + 1
+            print(
+                f"⚠️  Expired download {key[:12]} could not be released "
+                f"(attempt {failures}): {type(exc).__name__}: {exc}"
+            )
+        if failures < REAPER_FORCE_RELEASE_AFTER:
+            _reaper_failures[key] = failures
+            continue
+        try:
+            if await _force_release_download_reservation(key, safe_int(bytes_sent)):
+                released += 1
+            _reaper_failures.pop(key, None)
+            print(f"⚠️  Expired download {key[:12]} force-released after {failures} failed attempts")
+        except Exception as exc:
+            _reaper_failures[key] = failures
+            print(f"⚠️  Force-release of download {key[:12]} failed: {type(exc).__name__}: {exc}")
+    # Reservations no longer in the expired set were settled elsewhere; forget their streaks.
+    current = {str(reservation_id) for reservation_id, _bytes in expired}
+    for key in [key for key in _reaper_failures if key not in current]:
+        _reaper_failures.pop(key, None)
     return released
 
 
@@ -4260,7 +4439,11 @@ async def cleanup_scheduler():
     while True:
         try:
             await update_settings()
-            await reap_expired_download_reservations()
+            try:
+                await reap_expired_download_reservations()
+            except Exception as e:
+                # Its own guard: a reaper failure must not cost the maintenance run below.
+                print(f"⚠️  download reservation reaper error: {e}", flush=True)
             if settings_cache.get('cron_enabled'):
                 minutes = max(1, int(settings_cache.get('cron_interval', 15) or 15))
                 last = settings_cache.get('_cron_last_run', 0)

@@ -2057,6 +2057,145 @@ USER_GROUPS = {
 }
 
 
+class _RowcountCursor(_ScriptedCursor):
+    """A scripted cursor whose rowcount also follows the most recent query (default 1)."""
+
+    def __init__(self, answers=(), all_answers=(), rowcounts=()):
+        super().__init__(answers, all_answers)
+        self.rowcounts = list(rowcounts)
+
+    async def execute(self, query, params=None):
+        await super().execute(query, params)
+        self.rowcount = next((value for needle, value in self.rowcounts if needle in query), 1)
+
+
+class TestFinalizationSurvivesChangedRows:
+    """The bytes have left by the time a download is finalized; nothing may undo that."""
+
+    RID = "a" * 32
+
+    @staticmethod
+    def _pool(monkeypatch, cursor):
+        pool = _OneConnectionPool(cursor)
+
+        async def same_pool(*_args, **_kwargs):
+            return pool
+
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_", "database": "files"})
+        return pool
+
+    def test_a_file_deleted_mid_download_still_completes_and_charges_the_allowance(self, monkeypatch):
+        cursor = _RowcountCursor(
+            answers=[
+                ("FROM `fh_download_reservations`",
+                 ("started", 5, "ip", "203.0.113.9", "week", 1760000000, 100)),
+                ("SELECT `downloads`, `max_downloads`", None),  # the file row is gone
+            ],
+            all_answers=[("`effect_type` = 'counter'", [("file", "gone1")])],
+            rowcounts=[("`downloads` = `downloads` + 1", 0)],
+        )
+        self._pool(monkeypatch, cursor)
+
+        assert asyncio.run(us.finish_download_reservation(self.RID, "completed", 70)) is True
+
+        quota = next(p for q, p in cursor.queries if "UPDATE `fh_transfer_quota_usage`" in q)
+        assert quota[:2] == (100, 70), "the reserved allowance is released and the sent bytes charged"
+        final = next(p for q, p in cursor.queries if "UPDATE `fh_download_reservations` SET `state`" in q)
+        assert final[:2] == ("completed", 70)
+
+    def test_a_cap_spent_meanwhile_is_not_an_error_and_still_deletes_after_the_limit(self):
+        cursor = _RowcountCursor(
+            answers=[("SELECT `downloads`, `max_downloads`", (3, 3, "delete"))],
+            all_answers=[("`effect_type` = 'counter'", [("file", "f1")])],
+            rowcounts=[("`downloads` = `downloads` + 1", 0)],
+        )
+
+        deletions = asyncio.run(us._apply_download_counter_effects(cursor, "fh_", self.RID, 1))
+
+        assert deletions == [("file", "f1")]
+        assert any("SET `applied_at`" in query for query, _ in cursor.queries)
+
+    def test_a_lost_claim_stops_the_first_byte_but_not_the_finalization(self):
+        def cursor():
+            return _RowcountCursor(
+                all_answers=[("`effect_type` = 'one_time'", [("file", "f1")])],
+                rowcounts=[("SET `consumed_at`", 0)],
+            )
+
+        with pytest.raises(RuntimeError, match="Lost one-time claim"):
+            asyncio.run(us._apply_download_start_effects(cursor(), "fh_", self.RID, 1))
+        asyncio.run(us._apply_download_start_effects(cursor(), "fh_", self.RID, 1, strict=False))
+
+    def test_a_completion_that_cannot_be_counted_is_settled_as_released(self, monkeypatch):
+        calls = []
+
+        async def finish(reservation_id, state, sent):
+            calls.append((reservation_id, state, sent))
+            if state == "completed":
+                raise RuntimeError("Download counter cap changed")
+            return True
+
+        async def must_not_run(_context):
+            raise AssertionError("an uncounted download has no completion side effects")
+
+        monkeypatch.setattr(us, "finish_download_reservation", finish)
+        monkeypatch.setattr(us, "_emit_completed_download_side_effects", must_not_run)
+
+        asyncio.run(us._finalize_download_context({"reservation_id": self.RID}, "completed", 1234))
+
+        assert calls == [(self.RID, "completed", 1234), (self.RID, "released", 1234)]
+
+    def test_one_poisoned_reservation_does_not_stop_the_reaper(self, monkeypatch):
+        poisoned, healthy = "p" * 32, "q" * 32
+        cursor = _ScriptedCursor(all_answers=[("ORDER BY `lease_until`", [(poisoned, 10), (healthy, 0)])])
+        self._pool(monkeypatch, cursor)
+        finished, forced = [], []
+
+        async def finish(reservation_id, state, sent, require_expired=False):
+            if reservation_id == poisoned:
+                raise RuntimeError("Lost reserved download token")
+            finished.append(reservation_id)
+            return True
+
+        async def force(reservation_id, sent):
+            forced.append((reservation_id, sent))
+            return True
+
+        monkeypatch.setattr(us, "finish_download_reservation", finish)
+        monkeypatch.setattr(us, "_force_release_download_reservation", force)
+        monkeypatch.setattr(us, "_reaper_failures", {})
+
+        for tick in range(1, us.REAPER_FORCE_RELEASE_AFTER):
+            assert asyncio.run(us.reap_expired_download_reservations()) == 1
+            assert us._reaper_failures == {poisoned: tick} and forced == []
+        assert asyncio.run(us.reap_expired_download_reservations()) == 2
+
+        assert finished == [healthy] * us.REAPER_FORCE_RELEASE_AFTER
+        assert forced == [(poisoned, 10)]
+        assert us._reaper_failures == {}
+
+    def test_a_force_release_settles_claims_allowance_and_the_live_row(self, monkeypatch):
+        cursor = _RowcountCursor(
+            answers=[("FROM `fh_download_reservations`",
+                      ("reserved", 9, "ip", "203.0.113.9", "week", 1760000000, 5000, 4096))],
+            all_answers=[("`effect_type` = 'one_time'", [("file", "f1")])],
+        )
+        self._pool(monkeypatch, cursor)
+
+        assert asyncio.run(us._force_release_download_reservation(self.RID, 0)) is True
+
+        claim = next((q, p) for q, p in cursor.queries if q.startswith("UPDATE `fh_files`"))
+        assert "`consumed_at` = %s" in claim[0], "bytes had left, so the one-time claim is consumed"
+        assert claim[1][1:] == ("f1", self.RID)
+        assert any(q.startswith("UPDATE `fh_download_tokens` SET `used` = 1") for q, _ in cursor.queries)
+        quota = next(p for q, p in cursor.queries if "UPDATE `fh_transfer_quota_usage`" in q)
+        assert quota[:2] == (5000, 4096)
+        final = next(p for q, p in cursor.queries if "UPDATE `fh_download_reservations` SET `state`" in q)
+        assert final[0] == 4096
+        assert ("DELETE FROM `fh_active_downloads` WHERE `id` = %s", (9,)) in cursor.queries
+
+
 class TestBoundedPoolAcquire:
     """A saturated pool answers 503 instead of parking every request behind it."""
 
