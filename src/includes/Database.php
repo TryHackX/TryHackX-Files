@@ -5055,11 +5055,6 @@ class Database
 		return TokenRepository::verifyUpload($token, $ip);
 	}
 
-	public static function incrementTokenFileCount(string $token): bool
-	{
-		return TokenRepository::incrementFileCount($token);
-	}
-
 	public static function deleteUploadToken(string $token): bool
 	{
 		return TokenRepository::deleteUpload($token);
@@ -5068,16 +5063,6 @@ class Database
 	public static function createDownloadToken(string $fileId, string $ip, ?int $userId = null): ?string
 	{
 		return TokenRepository::createDownload($fileId, $ip, $userId);
-	}
-
-	public static function verifyUseDownloadToken(string $token, string $ip): ?string
-	{
-		return TokenRepository::verifyUseDownload($token, $ip);
-	}
-
-	public static function claimUploadToken(string $token, int $userId): bool
-	{
-		return TokenRepository::claimUpload($token, $userId);
 	}
 
 	public static function getTokenInfo(string $token, string $ip): ?array
@@ -5574,16 +5559,6 @@ class Database
 	public static function createRecoveryToken(int $userId): ?string
 	{
 		return RecoveryRepository::createToken($userId);
-	}
-
-	public static function verifyRecoveryToken(string $token): ?int
-	{
-		return RecoveryRepository::verifyToken($token);
-	}
-
-	public static function deleteRecoveryToken(string $token): void
-	{
-		RecoveryRepository::deleteToken($token);
 	}
 
 	public static function consumeRecoveryTokenAndResetPassword(

@@ -41,36 +41,14 @@ final class TokenRepository
 		$table = Database::table('upload_tokens');
 		$tokenLifetime = (int) Database::getSetting('recaptcha_token_lifetime', 120);
 		$validTime = time() - ($tokenLifetime * 60);
-		$maxFiles = (int) Database::getSetting('recaptcha_max_files_per_session', 0);
 
+		// Whether the token is a live one of this address — the proof of a solved CAPTCHA. How
+		// many files its session may still upload is the upload server's question (and
+		// uploadInfo()'s for the page), not this one's.
 		try {
-			$stmt = $pdo->prepare("SELECT * FROM `{$table}` WHERE `token` = ? AND `ip_address` = ? AND `created_at` > ?");
+			$stmt = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `token` = ? AND `ip_address` = ? AND `created_at` > ?");
 			$stmt->execute([$token, $ip, $validTime]);
-			$row = $stmt->fetch();
-
-			if (!$row) {
-				return false;
-			}
-			if ($maxFiles > 0 && isset($row['files_count']) && $row['files_count'] >= $maxFiles) {
-				return false;
-			}
-			return true;
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
-	public static function incrementFileCount(string $token): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-
-		$table = Database::table('upload_tokens');
-		try {
-			$stmt = $pdo->prepare("UPDATE `{$table}` SET `files_count` = `files_count` + 1 WHERE `token` = ?");
-			return $stmt->execute([$token]);
+			return (bool) $stmt->fetchColumn();
 		} catch (PDOException $e) {
 			return false;
 		}
@@ -87,25 +65,6 @@ final class TokenRepository
 		try {
 			$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `token` = ?");
 			return $stmt->execute([$token]);
-		} catch (PDOException $e) {
-			return false;
-		}
-	}
-
-	public static function claimUpload(string $token, int $userId): bool
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return false;
-		}
-
-		$table = Database::table('upload_tokens');
-		$ip = getClientIP();
-		try {
-			// Only claim if it belongs to the same IP and currently has no user (is anonymous)
-			$stmt = $pdo->prepare("UPDATE `{$table}` SET `user_id` = ? WHERE `token` = ? AND `ip_address` = ? AND `user_id` IS NULL");
-			$stmt->execute([$userId, $token, $ip]);
-			return $stmt->rowCount() > 0;
 		} catch (PDOException $e) {
 			return false;
 		}
@@ -242,38 +201,12 @@ final class TokenRepository
 		$table = Database::table('download_tokens');
 		$token = bin2hex(random_bytes(32));
 
-		// Lifetime lives in the `download_token_ttl` setting (default 900s), shared with
-		// verifyUseDownload() and the Python /download endpoint. Single-use + IP-bound.
+		// Single-use and bound to this address. The upload server's /download endpoint is what
+		// consumes it, within the `download_token_ttl` setting (default 900 s).
 		try {
 			$stmt = $pdo->prepare("INSERT INTO `{$table}` (`token`, `file_id`, `ip_address`, `user_id`, `created_at`, `used`) VALUES (?, ?, ?, ?, ?, 0)");
 			$stmt->execute([$token, $fileId, $ip, $userId, time()]);
 			return $token;
-		} catch (PDOException $e) {
-			return null;
-		}
-	}
-
-	public static function verifyUseDownload(string $token, string $ip): ?string
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return null;
-		}
-
-		$table = Database::table('download_tokens');
-		$validTime = time() - (int) Database::getSetting('download_token_ttl', 900);
-
-		try {
-			$stmt = $pdo->prepare("SELECT `file_id` FROM `{$table}` WHERE `token` = ? AND `ip_address` = ? AND `used` = 0 AND `created_at` > ?");
-			$stmt->execute([$token, $ip, $validTime]);
-			$row = $stmt->fetch();
-
-			if ($row) {
-				// Mark as used immediately (single-use).
-				$pdo->prepare("UPDATE `{$table}` SET `used` = 1 WHERE `token` = ?")->execute([$token]);
-				return $row['file_id'];
-			}
-			return null;
 		} catch (PDOException $e) {
 			return null;
 		}

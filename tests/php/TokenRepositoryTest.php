@@ -79,17 +79,24 @@ final class TokenRepositoryTest extends RepoTestCase
 		$this->assertArrayHasKey('files_remaining', $info);
 	}
 
-	public function testDownloadTokenIsSingleUseAndIpBound(): void
+	/**
+	 * A download token is issued here and consumed by the upload server's /download endpoint
+	 * (single use, same address — covered by the Python tests), so what matters on this side is
+	 * the row it finds: unused, for this file and this exact address, fresh on every request.
+	 */
+	public function testDownloadTokenIsIssuedUnusedForOneFileAndAddress(): void
 	{
 		$this->insertFile('tok_file_1');
-		$token = Database::createDownloadToken('tok_file_1', '198.51.100.7', null);
-		$this->assertNotEmpty($token);
-
-		// Wrong IP is refused and does NOT consume the token.
-		$this->assertNull(Database::verifyUseDownloadToken($token, '198.51.100.8'));
-
-		// Correct IP resolves to the file id, then the token is burned.
-		$this->assertSame('tok_file_1', Database::verifyUseDownloadToken($token, '198.51.100.7'));
-		$this->assertNull(Database::verifyUseDownloadToken($token, '198.51.100.7')); // reuse refused
+		$token = (string) Database::createDownloadToken('tok_file_1', '198.51.100.7', null);
+		$this->assertMatchesRegularExpression('/\A[a-f0-9]{64}\z/', $token);
+		$stmt = Database::getInstance()->prepare(
+			"SELECT `file_id`, `ip_address`, `used` FROM `" . Database::table('download_tokens') . "` WHERE `token` = ?"
+		);
+		$stmt->execute([$token]);
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		$this->assertSame('tok_file_1', $row['file_id']);
+		$this->assertSame('198.51.100.7', $row['ip_address']);
+		$this->assertSame(0, (int) $row['used']);
+		$this->assertNotSame($token, Database::createDownloadToken('tok_file_1', '198.51.100.7', null));
 	}
 }

@@ -92,38 +92,6 @@ final class RecoveryRepository
 		}
 	}
 
-	/** Resolve a still-valid reset token to its user id, or null. */
-	public static function verifyToken(string $token): ?int
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return null;
-		}
-		$table = Database::table('recovery_tokens');
-		try {
-			$stmt = $pdo->prepare("SELECT `user_id` FROM `{$table}` WHERE `token` = ? AND `expires_at` > ?");
-			$stmt->execute([hash('sha256', $token), time()]);
-			$row = $stmt->fetch();
-			return $row ? (int) $row['user_id'] : null;
-		} catch (PDOException $e) {
-			return null;
-		}
-	}
-
-	public static function deleteToken(string $token): void
-	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return;
-		}
-		$table = Database::table('recovery_tokens');
-		try {
-			$stmt = $pdo->prepare("DELETE FROM `{$table}` WHERE `token` = ?");
-			$stmt->execute([hash('sha256', $token)]);
-		} catch (PDOException $e) {
-		}
-	}
-
 	/**
 	 * Atomically claim a reset capability, change the password and revoke all credentials.
 	 */

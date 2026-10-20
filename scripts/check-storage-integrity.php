@@ -6,6 +6,7 @@
  * Usage:
  *   php scripts/check-storage-integrity.php
  *   php scripts/check-storage-integrity.php --repair-missing
+ *   php scripts/check-storage-integrity.php --json   (the full report as JSON, for scripts)
  *
  * The default is read-only. --repair-missing hashes a legacy object only when its exact
  * database filename and size match, then writes the versioned manifest atomically.
@@ -108,5 +109,22 @@ $result = [
 	'invalid_count' => $invalidCount,
 	'invalid_file_ids' => $invalid,
 ];
-fwrite(STDOUT, json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+if (in_array('--json', $argv, true)) {
+	fwrite(STDOUT, json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL);
+} else {
+	// For a person at the terminal; the exit code is the same either way.
+	fwrite(STDOUT, sprintf(
+		"Checked %d file(s) in %s: %d invalid, %d manifest(s) written.\n",
+		$checked,
+		UPLOADS_DIR,
+		$invalidCount,
+		$repaired
+	));
+	foreach ($invalid as $id) {
+		fwrite(STDOUT, "  invalid: {$id}\n");
+	}
+	if ($invalidCount > count($invalid)) {
+		fwrite(STDOUT, sprintf("  ... and %d more.\n", $invalidCount - count($invalid)));
+	}
+}
 exit($invalidCount === 0 ? 0 : 2);

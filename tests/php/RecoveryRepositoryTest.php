@@ -26,33 +26,33 @@ final class RecoveryRepositoryTest extends RepoTestCase
 		$this->assertSame(0, Database::getRecoveryAttemptsCount('203.0.113.10', 48)); // different IP
 	}
 
-	public function testTokenRoundTrip(): void
+	/** Only the token's hash is stored, and the link it is mailed in works once. */
+	public function testTokenIsStoredHashedAndResetsThePasswordOnce(): void
 	{
-		$token = Database::createRecoveryToken(77);
-		$this->assertNotEmpty($token);
-		$this->assertSame(77, Database::verifyRecoveryToken($token));
+		$token = (string) Database::createRecoveryToken(77);
+		$this->assertNotSame('', $token);
 		$stored = Database::getInstance()
 			->query('SELECT `token` FROM `' . Database::table('recovery_tokens') . '`')
 			->fetchColumn();
 		$this->assertSame(hash('sha256', $token), $stored);
 		$this->assertNotSame($token, $stored);
 
-		Database::deleteRecoveryToken($token);
-		$this->assertNull(Database::verifyRecoveryToken($token));
+		$this->assertTrue(Database::consumeRecoveryTokenAndResetPassword($token, 'NewPass2!'));
+		$this->assertFalse(Database::consumeRecoveryTokenAndResetPassword($token, 'OtherPass3!'));
 	}
 
 	public function testOnlyOneLiveTokenPerUser(): void
 	{
-		$first = Database::createRecoveryToken(88);
-		$second = Database::createRecoveryToken(88); // replaces the first
+		$first = (string) Database::createRecoveryToken(88);
+		$second = (string) Database::createRecoveryToken(88); // replaces the first
 
-		$this->assertNull(Database::verifyRecoveryToken($first));
-		$this->assertSame(88, Database::verifyRecoveryToken($second));
+		$this->assertFalse(Database::consumeRecoveryTokenAndResetPassword($first, 'NewPass2!'));
+		$this->assertTrue(Database::consumeRecoveryTokenAndResetPassword($second, 'NewPass2!'));
 	}
 
-	public function testUnknownTokenIsNull(): void
+	public function testUnknownTokenResetsNothing(): void
 	{
-		$this->assertNull(Database::verifyRecoveryToken('deadbeef'));
+		$this->assertFalse(Database::consumeRecoveryTokenAndResetPassword('deadbeef', 'NewPass2!'));
 	}
 
 	public function testResetClaimsTokenOnceAndRevokesEveryCredential(): void
