@@ -53,6 +53,13 @@ if (empty($fileId)) {
 		);
 	}
 }
+// A dead link answers like one, so link checkers, caches and search engines drop it instead of
+// keeping the error page as a live document. A deleted file cannot be told apart from one that
+// never existed (nothing is kept of it), so both are 404 rather than 410.
+$robotsNoindex = $error !== null;
+if ($error !== null) {
+	http_response_code(404);
+}
 ?>
 <?php
 $theme = $_COOKIE['theme'] ?? 'dark';

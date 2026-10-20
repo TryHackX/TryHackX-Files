@@ -1279,6 +1279,48 @@ final class HttpApiTest extends TestCase
 		}
 	}
 
+	/**
+	 * A dead file or collection link answers like one — 404 for a missing, malformed or unknown
+	 * id, 410 for a collection link that expired or was used up — and asks not to be indexed,
+	 * so link checkers, caches and search engines stop treating it as a live page.
+	 */
+	public function testDeadLinksAnswerNotFoundOrGone(): void
+	{
+		self::$cookies = [];
+		$noindex = '<meta name="robots" content="noindex">';
+		foreach ([
+			'/download.php',
+			'/download.php?id=not-an-id',
+			'/download.php?id=0000000000000000',
+			'/collection.php',
+			'/collection.php?id=not-an-id',
+			'/collection.php?id=0000000000000000',
+		] as $path) {
+			$page = self::rawRequest('GET', $path);
+			$this->assertSame(404, $page['status'], $path);
+			$this->assertStringContainsString($noindex, $page['body'], $path);
+		}
+
+		$insert = Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('collections') . "`
+			 (`id`, `name`, `user_id`, `delete_token`, `downloads`, `created_at`, `expires_at`, `one_time`, `consumed_at`)
+			 VALUES (?, ?, NULL, ?, 0, ?, ?, ?, ?)"
+		);
+		$token = password_hash('x', PASSWORD_DEFAULT);
+		$suffix = bin2hex(random_bytes(4));
+		$insert->execute(['httpexpired' . $suffix, 'Expired', $token, time() - 7200, time() - 60, 0, null]);
+		$insert->execute(['httpusedup' . $suffix, 'Used up', $token, time() - 7200, null, 1, time() - 60]);
+		$insert->execute(['httplive' . $suffix, 'Live', $token, time() - 7200, null, 0, null]);
+		foreach (['httpexpired', 'httpusedup'] as $prefix) {
+			$page = self::rawRequest('GET', '/collection.php?id=' . $prefix . $suffix);
+			$this->assertSame(410, $page['status'], $prefix);
+			$this->assertStringContainsString($noindex, $page['body'], $prefix);
+		}
+		$live = self::rawRequest('GET', '/collection.php?id=httplive' . $suffix);
+		$this->assertSame(200, $live['status']);
+		$this->assertStringNotContainsString($noindex, $live['body']);
+	}
+
 	/** A notice page is not a dead end: the switched-off plans page links back home. */
 	public function testTheSwitchedOffPlansPageLinksBackHome(): void
 	{

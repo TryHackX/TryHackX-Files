@@ -54,16 +54,25 @@ if (empty($collectionId)) {
 // C2: per-collection sharing controls — expiry, one-time, password. A protected collection
 // renders only its meta + a password prompt; file names stay hidden until it is unlocked.
 $needsPassword = false;
+$collectionGone = false;
 if ($collection) {
 	if (!empty($collection['expires_at']) && (int) $collection['expires_at'] < time()) {
 		$error = __('collection.err_expired');
 		$collection = null;
+		$collectionGone = true;
 	} elseif (!empty($collection['one_time']) && !empty($collection['consumed_at'])) {
 		$error = __('collection.err_used');
 		$collection = null;
+		$collectionGone = true;
 	} elseif (!empty($collection['password_hash'])) {
 		$needsPassword = true;
 	}
+}
+// A dead link answers like one: 410 for a link that expired or was used up (it will not come
+// back), 404 for an id that is missing, malformed or unknown. Neither is a page to index.
+$robotsNoindex = $error !== null;
+if ($error !== null) {
+	http_response_code($collectionGone ? 410 : 404);
 }
 
 $theme = $_COOKIE['theme'] ?? 'dark';

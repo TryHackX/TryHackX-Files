@@ -1,5 +1,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<?php if (!empty($robotsNoindex)): ?>
+<?php /* A page answering 404/410 (a dead file or collection link) is not a page to keep. */ ?>
+<meta name="robots" content="noindex">
+<?php endif; ?>
 <?php
 // Fonts are provided by the OS via a system font stack (see CSS `body { font-family }`) —
 // no external font requests, for privacy and performance. Page-specific CSS is linked
