@@ -65,8 +65,11 @@ Migration procedure:
 
 ```bash
 rsync -aHAX --info=progress2 /var/www/filehost/uploads/ /mnt/storage/uploads/
-php scripts/check-storage-integrity.php --json
+sudo -u www-data php scripts/check-storage-integrity.php --json
 ```
+
+Use the service account (`www-data` or your dedicated one) for the maintenance scripts on Linux;
+on Windows run them without `sudo -u`.
 
 Windows copy example:
 
@@ -79,12 +82,14 @@ Database rows store file IDs, not absolute paths, so no SQL migration is require
 ### Legacy objects without manifests
 
 ```bash
-php scripts/check-storage-integrity.php --repair-missing --json
-php scripts/check-storage-integrity.php --json
+sudo -u www-data php scripts/check-storage-integrity.php --repair-missing --json
+sudo -u www-data php scripts/check-storage-integrity.php --json
 ```
 
-Repair creates a manifest only when the database name/size exactly match a regular file and never
-follows a symlink. Exit code 0 means valid, 2 means missing/corrupt data, and 1 means the checker
+Repair as the service account: a manifest written as root is private to root, and the very files
+it repaired would stop downloading. `--repair-missing` therefore refuses root (the read-only check
+does not). Repair creates a manifest only when the database name/size exactly match a regular file
+and never follows a symlink. Exit code 0 means valid, 2 means missing/corrupt data, and 1 means the checker
 itself failed.
 
 ## Multiple disks

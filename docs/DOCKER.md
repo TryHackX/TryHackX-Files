@@ -108,9 +108,13 @@ For remote scraping, configure `metrics_token`, add an explicit private proxy ro
 ```bash
 docker compose ps
 docker compose exec app curl --fail http://127.0.0.1:8001/ready
-docker compose exec app php scripts/check-db-integrity.php
-docker compose exec app php scripts/check-storage-integrity.php --json
+docker compose exec --user www-data app php scripts/check-db-integrity.php
+docker compose exec --user www-data app php scripts/check-storage-integrity.php --json
 ```
+
+`docker compose exec` runs as root unless `--user` says otherwise. Run the PHP scripts as
+`www-data`, the account Apache and the workers use, so that nothing they write into the volumes
+belongs to root.
 
 Then upload and download a file through Apache, test a Range response and a collection ZIP.
 The CI `docker-smoke` job performs a stricter isolated test, including client-IP forwarding,

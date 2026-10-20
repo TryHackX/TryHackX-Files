@@ -249,14 +249,22 @@ only add avoidable polling.
 
 ### Cleanup
 
-Run the shared cleanup job every 15 minutes, or enable its internal scheduler in the panel:
+Run the shared cleanup job every 15 minutes, or enable its internal scheduler in the panel. On
+Debian, put it in `/etc/cron.d/filehost-cleanup` (system cron format, with the account field; use
+your dedicated account instead of `www-data` if you configured one):
 
 ```cron
-*/15 * * * * /usr/bin/php /var/www/filehost/scripts/cleanup.php >/dev/null 2>&1
+*/15 * * * * www-data /usr/bin/php /var/www/filehost/scripts/cleanup.php >/dev/null
 ```
 
 Cleanup expires tokens, recovers abandoned leases, enforces quotas/retention, reconciles payments,
 sends warnings and purges expired quarantine objects.
+
+Run every maintenance script as the service account (`sudo -u www-data php scripts/...`), never
+as root: what a script creates as root (quarantine copies, restored uploads, repaired manifests)
+can no longer be read by the upload service. `cleanup.php`, `file-quarantine.php`, `mail-worker.php`
+and `check-storage-integrity.php --repair-missing` refuse root and print the command to use
+instead; `--allow-root` overrides that for a deliberate run.
 
 ## Payments and sales documents
 

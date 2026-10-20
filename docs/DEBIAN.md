@@ -263,11 +263,20 @@ sudo systemctl disable --now filehost-mail-worker
 ## 6. Cleanup and health
 
 Either enable the internal cleanup scheduler in **Administration → Settings → System**, or run
-the same job from cron:
+the same job as the service account from `/etc/cron.d/filehost-cleanup` (system cron format, like
+the mail-worker entry above):
 
 ```cron
-*/15 * * * * /usr/bin/php /var/www/filehost/scripts/cleanup.php >/dev/null 2>&1
+*/15 * * * * www-data /usr/bin/php /var/www/filehost/scripts/cleanup.php >/dev/null
 ```
+
+Run maintenance scripts as that account (`sudo -u www-data php scripts/...`), not as root. A file
+a script creates as root, with the private modes the application uses, cannot be read by the
+upload service afterwards: a restored or repaired upload would stop downloading, and the cleanup
+could no longer purge a quarantine copy. `cleanup.php`, `file-quarantine.php`, `mail-worker.php` and
+`check-storage-integrity.php --repair-missing` therefore refuse root and print the command for the
+account that owns the storage; `--allow-root` lets a deliberate run through (chown what it
+creates afterwards).
 
 Useful checks:
 

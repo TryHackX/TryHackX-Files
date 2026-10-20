@@ -98,17 +98,24 @@ existing `venv/`, so use it on a stopped service or after the `venv.new` swap. C
 
 ## 5. Permissions and Apache
 
-PHP, Python and cleanup need a consistent service account. Runtime storage is writable; secrets
-are read-only:
+PHP, Python and cleanup need a consistent service account: `www-data`, or the dedicated account
+from [DEBIAN.md](DEBIAN.md#service-account). The installed upload unit names it. Runtime storage is
+writable; secrets are read-only:
 
 ```bash
-sudo install -d -o www-data -g www-data -m 0750 \
+SERVICE_USER="$(systemctl show --property=User --value filehost-upload)"
+SERVICE_GROUP="$(systemctl show --property=Group --value filehost-upload)"
+sudo install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0750 \
   /var/www/filehost/uploads /var/www/filehost/data
-sudo chown -R www-data:www-data \
+sudo chown -R "$SERVICE_USER:$SERVICE_GROUP" \
   /var/www/filehost/uploads /var/www/filehost/data
 sudo a2enmod proxy proxy_http rewrite headers
 sudo apachectl configtest
 ```
+
+Run every maintenance script below as that account, not as root: a file a script creates as root
+(a restored upload, a repaired manifest, a quarantine copy) cannot be read by the upload service
+afterwards. The scripts that write such files refuse root and print the right command.
 
 The virtual host serves `/var/www/filehost/public`, never the project root.
 
@@ -150,10 +157,12 @@ combination, but it cannot fix the setting for you.
 curl --fail --show-error https://files.example.com/
 curl --fail --show-error https://files.example.com/api.php?action=health
 curl --fail --show-error http://127.0.0.1:8001/ready
-php scripts/check-db-integrity.php
-php scripts/check-storage-integrity.php --json
-php scripts/mail-worker.php --limit=1
+sudo -u "$SERVICE_USER" php scripts/check-db-integrity.php
+sudo -u "$SERVICE_USER" php scripts/check-storage-integrity.php --json
+sudo -u "$SERVICE_USER" php scripts/mail-worker.php --limit=1
 ```
+
+(`SERVICE_USER` as set in step 5.)
 
 `/ready` must return HTTP 200 with `"schema_version":64`. `/live` checks process liveness only.
 The database-integrity response must contain `success: true` and zero orphan counts.
@@ -187,11 +196,13 @@ It must not overlap `uploads/` or `public/`, including after symlink resolution.
 capacity for an additional copy of deleted data and include it in consistent backups.
 
 ```bash
-php scripts/file-quarantine.php list
-php scripts/file-quarantine.php restore FILE_ID
-php scripts/file-quarantine.php purge FILE_ID --force
+sudo -u "$SERVICE_USER" php scripts/file-quarantine.php list
+sudo -u "$SERVICE_USER" php scripts/file-quarantine.php restore FILE_ID
+sudo -u "$SERVICE_USER" php scripts/file-quarantine.php purge FILE_ID --force
 ```
 
+As root, a restore would leave `uploads/FILE_ID` owned by root with private modes, so the upload
+service could not serve or delete the file; the script refuses root for that reason.
 Restore never overwrites a colliding ID or mismatched bytes. Full account deletion intentionally
 bypasses quarantine so a deletion request does not leave a recoverable copy.
 

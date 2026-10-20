@@ -16,6 +16,9 @@ if (PHP_SAPI !== 'cli') {
 	exit("This script is CLI-only.\n");
 }
 
+require_once dirname(__DIR__) . '/src/includes/CliGuard.php';
+CliGuard::refuseRoot('--repair-missing');
+
 // See scripts/mail-worker.php: `register_argc_argv` is Off in Debian's default php.ini, so
 // static analysis reports $argv as possibly undefined even though the CLI SAPI always sets it.
 $argv = $_SERVER['argv'] ?? [];

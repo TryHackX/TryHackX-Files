@@ -14,6 +14,9 @@ if (PHP_SAPI !== 'cli') {
 	exit("This script is CLI-only.\n");
 }
 
+require_once dirname(__DIR__) . '/src/includes/CliGuard.php';
+CliGuard::refuseRoot();
+
 // The CLI SAPI always fills argv in, but `register_argc_argv` is Off by default in Debian's
 // php.ini, and static analysis believes the ini rather than the SAPI: `composer analyse` then
 // fails with "Variable $argv might not be defined" on exactly the platform this ships on.
