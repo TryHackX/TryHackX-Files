@@ -2,6 +2,9 @@
 
 use PHPUnit\Framework\TestCase;
 
+require_once PROJECT_ROOT . '/src/includes/RateLimiter.php';
+require_once PROJECT_ROOT . '/src/includes/api/AuthController.php';
+
 /**
  * Request-level tests (runda 10): the API exercised over REAL HTTP.
  *
@@ -1230,6 +1233,70 @@ final class HttpApiTest extends TestCase
 			$this->assertSame(200, $check['status'], 'check ' . $i);
 		}
 		$this->assertNotSame(429, self::signIn('httpadmin', 'HttpAdmin1!')['status']);
+	}
+
+	/** A JSON POST that arrives through the trusted test proxy on behalf of $ip. */
+	private static function postJsonFrom(string $ip, string $path, array $payload): array
+	{
+		return self::postJson($path, $payload, true, ['X-Forwarded-For: ' . $ip]);
+	}
+
+	/**
+	 * Wrong passwords from a stranger cannot keep the owner out. Without a captcha the network
+	 * that ran out of guesses waits out the window for that account — the right password
+	 * included — while the owner, signing in from anywhere else, gets straight in.
+	 */
+	public function testAStrangerCannotLockAnAccountOutOfSigningIn(): void
+	{
+		$pdo = Database::getInstance();
+		$limits = Database::table('rate_limits');
+		$pdo->exec("TRUNCATE TABLE `{$limits}`");
+		Database::setSetting('recaptcha_enabled', '0');
+		self::serverSettingsChanged();
+		$victimId = self::freshUser('httplockvictim', 'Victim1Pass!');
+
+		try {
+			self::$cookies = [];
+			self::$csrf = '';
+			self::refreshCsrf();
+			// The per-address `auth` budget (10 per 5 minutes) would answer 429 on its own first,
+			// so its rows are cleared as the run goes: what is measured is the account limit.
+			// The 15-minute windows are aligned to the clock, so keep going until the network is
+			// shut out rather than assuming which attempt does it.
+			$refused = null;
+			for ($attempt = 1; $attempt <= 25 && $refused === null; $attempt++) {
+				$pdo->exec("DELETE FROM `{$limits}` WHERE `bucket` LIKE 'ip:%'");
+				$answer = self::postJsonFrom('203.0.113.7', '/api.php?action=user_login', [
+					'username' => 'httplockvictim',
+					'password' => 'Wrong' . $attempt . 'Pass!',
+				]);
+				if ($answer['status'] === 429) {
+					$refused = $attempt;
+				}
+			}
+			$this->assertNotNull($refused, 'the guessing network was never shut out');
+			$this->assertGreaterThan(10, $refused, 'ten wrong passwords are allowed first');
+			$pdo->exec("DELETE FROM `{$limits}` WHERE `bucket` LIKE 'ip:%'");
+			$sameNetwork = self::postJsonFrom('203.0.113.7', '/api.php?action=user_login', [
+				'username' => 'httplockvictim',
+				'password' => 'Victim1Pass!',
+			]);
+			$this->assertSame(429, $sameNetwork['status'], 'the guessing network waits, right password or not');
+			$this->assertTrue(RateLimiter::exceeded(AuthController::loginAccountBucket($victimId), 'login_account'));
+
+			// The owner, in a browser of their own, from their own network.
+			self::$cookies = [];
+			self::$csrf = '';
+			self::refreshCsrf();
+			$owner = self::postJsonFrom('198.51.100.9', '/api.php?action=user_login', [
+				'username' => 'httplockvictim',
+				'password' => 'Victim1Pass!',
+			]);
+			$this->assertSame(200, $owner['status'], json_encode($owner));
+			$this->assertTrue($owner['success'] ?? false, json_encode($owner));
+		} finally {
+			$pdo->exec("TRUNCATE TABLE `{$limits}`");
+		}
 	}
 
 	/**

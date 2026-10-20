@@ -19,6 +19,39 @@ final class AuthController
 		return is_array($input) && is_string($input[$key] ?? null) ? $input[$key] : '';
 	}
 
+	/**
+	 * Rate-limiter bucket for wrong sign-in passwords: the whole account, or the account as
+	 * seen from one network (filehostThrottleKey(): an IPv6 /64 counts as one).
+	 */
+	public static function loginAccountBucket(int $accountId, ?string $networkKey = null): string
+	{
+		return 'acct:' . $accountId . ($networkKey !== null ? '|net:' . $networkKey : '');
+	}
+
+	/**
+	 * What a sign-in attempt has to pass before its password is checked.
+	 *
+	 * The answer is never "refuse" for something a stranger elsewhere can cause: with a captcha
+	 * configured every limit asks for the captcha instead, and without one only the network
+	 * that ran out of guesses for this account is turned away.
+	 *
+	 * @param bool $accountLimitReached wrong passwords for the account, from anywhere
+	 * @param bool $networkLimitReached wrong passwords for the account from this network
+	 * @param bool $addressCaptchaDue   the operator's per-address captcha rule applies
+	 * @return 'open'|'captcha'|'refuse'
+	 */
+	public static function loginGate(
+		bool $captchaAvailable,
+		bool $accountLimitReached,
+		bool $networkLimitReached,
+		bool $addressCaptchaDue
+	): string {
+		if ($captchaAvailable) {
+			return $accountLimitReached || $networkLimitReached || $addressCaptchaDue ? 'captcha' : 'open';
+		}
+		return $networkLimitReached ? 'refuse' : 'open';
+	}
+
 	public static function handleUserLogin()
 	{
 		header('Content-Type: application/json');
@@ -41,20 +74,30 @@ final class AuthController
 			return;
 		}
 
-		// Two counters. The address one (per /64 for IPv6) decides when the operator's captcha
-		// is shown. The account one is what stops a spray from many addresses at one account:
-		// after 10 wrong passwords in 15 minutes the account needs a solved captcha for every
-		// further attempt, or — with no captcha configured — waits out the window.
+		// Three counters, and none of them lets a stranger shut an account out:
+		// - per network (an IPv6 /64 is one network): when the operator's captcha is shown;
+		// - per account and network: ten wrong passwords for one account from one network in
+		//   15 minutes, and that network waits out the window for that account (or solves the
+		//   captcha, when one is configured). Every other network, the owner's included, is
+		//   untouched;
+		// - per account, whatever the address: the brake on a spray from many networks. It only
+		//   ever asks for the captcha, so without one it does nothing. Refusing the right
+		//   password there would give anyone the power to lock any account.
 		$failCount = Database::getSecurityEvent($ipKey, 'login_fail');
 		$threshold = (int) Database::getSetting('recaptcha_login_attempt_threshold', 1);
 		$loginProtectionEnabled = (Database::getSetting('recaptcha_on_admin', '0') === '1');
 		$requireCaptcha = ($threshold >= 0 && $failCount >= $threshold);
 		$accountId = UserRepository::idForUsername($username);
-		$accountBucket = 'acct:' . $accountId;
-		$accountThrottled = $accountId > 0 && RateLimiter::exceeded($accountBucket, 'login_account');
-		$captchaAvailable = Database::isRecaptchaEnabled();
+		$accountBucket = self::loginAccountBucket($accountId);
+		$networkBucket = self::loginAccountBucket($accountId, $ipKey);
+		$gate = self::loginGate(
+			Database::isRecaptchaEnabled(),
+			$accountId > 0 && RateLimiter::exceeded($accountBucket, 'login_account'),
+			$accountId > 0 && RateLimiter::exceeded($networkBucket, 'login_account'),
+			$loginProtectionEnabled && $requireCaptcha
+		);
 
-		if ($accountThrottled && !$captchaAvailable) {
+		if ($gate === 'refuse') {
 			http_response_code(429);
 			echo json_encode([
 				'success' => false,
@@ -64,7 +107,7 @@ final class AuthController
 			]);
 			return;
 		}
-		if ($captchaAvailable && ($accountThrottled || ($loginProtectionEnabled && $requireCaptcha))) {
+		if ($gate === 'captcha') {
 			if ($captchaResponse === '') {
 				http_response_code(400);
 				echo json_encode(['success' => false, 'error' => __('api.captcha_required'), 'require_captcha' => true]);
@@ -121,6 +164,7 @@ final class AuthController
 			// one answering correctly.
 			if ($accountId > 0 && ($result['reason'] ?? '') === 'credentials') {
 				RateLimiter::hit($accountBucket, 'login_account');
+				RateLimiter::hit($networkBucket, 'login_account');
 			}
 			unset($result['reason']);
 			$failCount++; // Update local for response check

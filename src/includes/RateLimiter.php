@@ -22,8 +22,10 @@ class RateLimiter
 		'write' => [60, 60],   // state-changing calls
 		'read' => [300, 60],   // listings, polling, info
 		'api' => [120, 60],    // REST API v1, counted per API key
-		// Failures against one ACCOUNT, whatever address they come from. Only failures are
-		// counted (hit() after a wrong answer, exceeded() before checking the next one).
+		// Failures against one ACCOUNT. Only failures are counted (hit() after a wrong answer,
+		// exceeded() before checking the next one). Sign-in keeps two buckets in this category,
+		// the account from anywhere and the account from one network; see
+		// AuthController::loginGate() for why only the second may ever refuse.
 		'login_account' => [10, 900],
 		'totp_account' => [10, 900],
 	];
