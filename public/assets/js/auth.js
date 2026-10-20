@@ -617,27 +617,32 @@
             updateAuthUI();
 
             showAuthMessage(t('js.logged_out'), 'success');
-
-            // Redirect only if on panel.php (protected page)
-            if (window.location.pathname.includes('panel.php')) {
-                setTimeout(() => {
-                    const baseUrl = authApiUrl.replace('/api.php', '');
-                    window.location.href = baseUrl || './';
-                }, 1000);
-            }
-            // For other pages: Stay on page (modal switches to login form via updateAuthUI)
-
+            leaveSignedOut(1000);
         } catch (e) {
             console.error('Logout error', e);
             if (window.FHUploadSession) window.FHUploadSession.clear();
+            currentUser = null;
+            updateAuthUI();
+            leaveSignedOut(0);
+        }
+    }
+
+    /**
+     * After signing out: the panel is a protected page, so it goes home; any other page is
+     * loaded again. Signing out ends the server session, and with it the CSRF token this page
+     * was rendered with and everything it rendered for the account (the notification bell).
+     * Staying put, the next sign-in, sign-up or recovery from this same dialog was refused as
+     * a CSRF failure, and the bell kept polling an account that was gone.
+     */
+    function leaveSignedOut(delay) {
+        setTimeout(() => {
             if (window.location.pathname.includes('panel.php')) {
                 const baseUrl = authApiUrl.replace('/api.php', '');
                 window.location.href = baseUrl || './';
             } else {
-                currentUser = null;
-                updateAuthUI();
+                window.location.reload();
             }
-        }
+        }, delay);
     }
 
     function formatDuration(seconds) {
