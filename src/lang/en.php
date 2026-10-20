@@ -96,6 +96,7 @@ return [
 	'home.collection_default' => 'Collection',
 	'home.collection_created' => 'Collection created',
 	'home.collection_hint' => 'The collection link has been copied to your clipboard.',
+	'home.collection_hint_copy' => 'Copy the link to share it.',
 	'home.collection_failed' => 'Could not create the collection',
 	'home.toast_copied' => 'Copied!',
 

@@ -66,7 +66,8 @@ if (!defined('APP_ROOT')) {
 			     the home page. The skipped-files block is the one addition the panel needs. -->
 			<div id="ccResultView" class="qr-result" style="display:none;">
 				<h3><?= _h('home.collection_created') ?></h3>
-				<p><?= _h('home.collection_hint') ?></p>
+				<?php /* Says "copied" only once the clipboard took the link (panel-files.js). */ ?>
+				<p id="ccResultHint"><?= _h('home.collection_hint_copy') ?></p>
 				<div id="ccRejected" class="cc-rejected" style="display:none;">
 					<strong><i class="fa-solid fa-triangle-exclamation"></i> <?= _h('panel.cc.rejected_title') ?></strong>
 					<p id="ccRejectedNames"></p>

@@ -98,6 +98,7 @@ return [
 	'home.collection_default' => 'Kolekcja',
 	'home.collection_created' => 'Kolekcja utworzona',
 	'home.collection_hint' => 'Link do kolekcji został skopiowany do schowka.',
+	'home.collection_hint_copy' => 'Skopiuj link, aby go udostępnić.',
 	'home.collection_failed' => 'Nie udało się utworzyć kolekcji',
 	'home.toast_copied' => 'Skopiowano!',
 

@@ -23,18 +23,19 @@
     let previewPassword = '';
     let passwordPromptMode = 'download';
 
+    // The shared helper (util.js) falls back to execCommand where the Clipboard API is missing —
+    // on a plain-http install both copy buttons here used to fail every time.
     async function copyLink() {
-        try {
-            await navigator.clipboard.writeText(window.location.href);
-            const label = byId('copyText');
-            if (!label) return;
-            label.textContent = window.t('common.copied');
-            window.setTimeout(() => {
-                label.textContent = window.t('download.copy_link');
-            }, 1500);
-        } catch (_error) {
+        if (!(await window.FHUtil.copyText(window.location.href))) {
             showToast(window.t('download.copy_failed'));
+            return;
         }
+        const label = byId('copyText');
+        if (!label) return;
+        label.textContent = window.t('common.copied');
+        window.setTimeout(() => {
+            label.textContent = window.t('download.copy_link');
+        }, 1500);
     }
 
     function initializeEmbedCodes() {
@@ -61,21 +62,20 @@
     }
 
     async function copyEmbed(button, key) {
-        try {
-            await navigator.clipboard.writeText((config.embedCodes || {})[key] || '');
-            const previous = button.textContent;
-            button.replaceChildren();
-            const icon = document.createElement('i');
-            icon.className = 'fa-solid fa-check';
-            button.append(icon, document.createTextNode(` ${window.t('common.copied')}`));
-            button.classList.add('copied');
-            window.setTimeout(() => {
-                button.textContent = previous;
-                button.classList.remove('copied');
-            }, 1500);
-        } catch (_error) {
+        if (!(await window.FHUtil.copyText((config.embedCodes || {})[key] || ''))) {
             showToast(window.t('download.copy_failed'));
+            return;
         }
+        const previous = button.textContent;
+        button.replaceChildren();
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-check';
+        button.append(icon, document.createTextNode(` ${window.t('common.copied')}`));
+        button.classList.add('copied');
+        window.setTimeout(() => {
+            button.textContent = previous;
+            button.classList.remove('copied');
+        }, 1500);
     }
 
     function hideCaptchaModal() {

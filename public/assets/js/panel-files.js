@@ -1802,9 +1802,15 @@
 		// The result view carries its own centred title, so the modal's header bar would just
 		// repeat it — hiding it is what makes this read as the same dialog as the upload page's.
 		document.getElementById('ccModalHeader').style.display = 'none';
-		// The subtitle promises the link is on the clipboard, so put it there (as the home page
-		// does) rather than making that a lie.
-		window.FHUtil.copyText(createdCollectionUrl);
+		// The link goes onto the clipboard straight away (as on the home page), and the subtitle
+		// says so only when that really happened: after the awaited create call a browser may
+		// refuse, and the dialog used to claim success regardless.
+		const hint = document.getElementById('ccResultHint');
+		if (hint) hint.textContent = t('home.collection_hint_copy');
+		const copiedUrl = createdCollectionUrl;
+		window.FHUtil.copyText(copiedUrl).then(copied => {
+			if (copied && hint && createdCollectionUrl === copiedUrl) hint.textContent = t('home.collection_hint');
+		});
 		// Re-assert the modal: the create can be reached through the locked-files step, which
 		// closes one modal and opens another, and the result must be on screen either way.
 		showModal('createCollectionModal');

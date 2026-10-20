@@ -88,6 +88,7 @@ return array (
   'home.collection_default' => '合集',
   'home.collection_created' => '合集已创建',
   'home.collection_hint' => '合集链接已复制到剪贴板。',
+  'home.collection_hint_copy' => '复制链接即可分享。',
   'home.collection_failed' => '无法创建合集',
   'home.toast_copied' => '已复制！',
   'captcha.title' => '验证',

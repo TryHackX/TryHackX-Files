@@ -73,7 +73,6 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 	<?php require_once __DIR__ . '/../src/includes/i18n_head.php'; ?>
 	<script src="<?= $appUrl ?>/assets/js/api.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/captcha.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
 	<title><?= $file ? htmlspecialchars($file['name']) : _h('common.error') ?> - <?= htmlspecialchars(APP_NAME, ENT_QUOTES, 'UTF-8') ?></title>
 	<link rel="stylesheet" href="<?= $appUrl ?>/assets/css/base.css?v=<?= APP_VERSION ?>">
@@ -452,9 +451,11 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			ENT_QUOTES | ENT_SUBSTITUTE,
 			'UTF-8'
 		) ?>"></div>
-	<script src="<?= $appUrl ?>/assets/js/download.js?v=<?= APP_VERSION ?>"></script>
 	<?php require_once __DIR__ . '/../src/includes/auth_modal.php'; ?>
+	<?php /* auth_scripts.php brings captcha.js, which download.js needs at load. */ ?>
 	<?php require_once __DIR__ . '/../src/includes/auth_scripts.php'; ?>
+	<script src="<?= $appUrl ?>/assets/js/util.js?v=<?= APP_VERSION ?>"></script>
+	<script src="<?= $appUrl ?>/assets/js/download.js?v=<?= APP_VERSION ?>"></script>
 	<?= AdRenderer::scripts() ?>
 </body>
 

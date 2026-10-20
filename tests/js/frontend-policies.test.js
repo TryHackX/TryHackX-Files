@@ -43,13 +43,27 @@ test('create/submit handlers run through FHUi.singleFlight so a double click can
 });
 
 test('clipboard writes report their real outcome', () => {
-	for (const file of fs.readdirSync(path.join(root, 'public/assets/js')).filter(name => /^(panel|index)/.test(name))) {
+	for (const file of fs.readdirSync(path.join(root, 'public/assets/js')).filter(name => /^(panel|index|download)/.test(name))) {
 		assert.doesNotMatch(
 			js(file),
 			/navigator\.clipboard\.writeText\(/,
 			file + ' calls the clipboard directly; use FHUtil.copyText and look at its result'
 		);
 	}
+	// "Copied to your clipboard" is said only after the copy resolved true.
+	assert.match(functionBody(js('index.js'), 'showCollectionResult'), /copyText\(url\)\.then\(copied =>/);
+	assert.match(functionBody(js('panel-files.js'), 'showCreatedCollection'), /copyText\(copiedUrl\)\.then\(copied =>/);
+});
+
+test('the public pages load captcha.js once, before the scripts that use it', () => {
+	const download = read('public/download.php');
+	const own = download.indexOf('/assets/js/download.js');
+	assert.ok(download.indexOf('/assets/js/util.js') > 0 && download.indexOf('/assets/js/util.js') < own, 'util.js (the copy helper) comes first');
+	assert.ok(download.indexOf('auth_scripts.php') > 0 && download.indexOf('auth_scripts.php') < own, 'auth_scripts.php brings captcha.js before download.js');
+	for (const page of ['public/download.php', 'public/index.php']) {
+		assert.doesNotMatch(read(page), /assets\/js\/captcha\.js/, page + ' loads captcha.js a second time');
+	}
+	assert.match(read('src/includes/auth_scripts.php'), /assets\/js\/captcha\.js/);
 });
 
 test('the banner crop frees its object URLs and says so when an image cannot be read', () => {

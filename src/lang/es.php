@@ -88,6 +88,7 @@ return array (
   'home.collection_default' => 'Colección',
   'home.collection_created' => 'Colección creada',
   'home.collection_hint' => 'El enlace de la colección se ha copiado al portapapeles.',
+  'home.collection_hint_copy' => 'Copia el enlace para compartirlo.',
   'home.collection_failed' => 'No se pudo crear la colección',
   'home.toast_copied' => '¡Copiado!',
   'captcha.title' => 'Verificación',

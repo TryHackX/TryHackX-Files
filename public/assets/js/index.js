@@ -1144,7 +1144,7 @@
 		if (p) {
 			p.textContent = rejected.length
 				? t('panel.cc.rejected', { names: rejected.join(', ') })
-				: t('home.collection_hint');
+				: t('home.collection_hint_copy');
 			p.classList.toggle('qr-warn', rejected.length > 0);
 		}
 		renderQrImage(document.getElementById('qrHolder'), url);
@@ -1165,7 +1165,12 @@
 			edit.style.display = 'none';
 		}
 
-		window.FHUtil.copyText(url);
+		// The link goes onto the clipboard straight away, and the dialog says so only once that
+		// really happened: after the awaited create call the browser may refuse (Safari, a denied
+		// permission), and the hint used to claim success regardless.
+		window.FHUtil.copyText(url).then(copied => {
+			if (copied && p && !rejected.length && qrCurrentUrl === url) p.textContent = t('home.collection_hint');
+		});
 		overlay.classList.add('show');
 	}
 

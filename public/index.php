@@ -370,7 +370,7 @@ $homeNotice = [
 	<script src="<?= $appUrl ?>/assets/js/ui.js?v=<?= APP_VERSION ?>"></script>
 	<script src="<?= $appUrl ?>/assets/js/notifications.js?v=<?= APP_VERSION ?>" defer></script>
 	<script src="<?= $appUrl ?>/assets/js/file-icons.js?v=<?= APP_VERSION ?>"></script>
-	<script src="<?= $appUrl ?>/assets/js/captcha.js?v=<?= APP_VERSION ?>"></script>
+	<?php /* captcha.js came in with auth_scripts.php above. */ ?>
 	<script src="<?= $appUrl ?>/assets/js/index.js?v=<?= APP_VERSION ?>"></script>
 	<?= AdRenderer::scripts() ?>
 
