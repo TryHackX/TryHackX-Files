@@ -9,7 +9,8 @@
  *
  *   GET    /api/v1/                → API + auth info (whoami)
  *   GET    /api/v1/whoami         → same
- *   GET    /api/v1/files          → list the caller's files  (?page=&per_page=)
+ *   GET    /api/v1/files          → list the caller's files  (?per_page=&cursor=; the answer's
+ *                                    next_cursor fetches the next page)
  *   GET    /api/v1/files/{id}     → one file's metadata
  *   DELETE /api/v1/files/{id}     → delete one of the caller's files
  *   GET    /api/v1/stats          → the caller's aggregate stats

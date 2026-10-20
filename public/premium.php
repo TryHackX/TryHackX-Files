@@ -108,20 +108,6 @@ if ($errCode !== '' && Lang::has('premium.err_' . $errCode)) {
 		$paid = $status === PaymentRepository::COMPLETED;
 		$noticeText = $paid ? __('premium.order_done') : __('premium.order_pending');
 		$noticeKind = $paid ? 'success' : 'info';
-
-		// The grant just changed which plan this account holds; re-read so the cards below
-		// show "active until …" rather than still offering what was bought a second ago.
-		if ($paid) {
-			$me = Database::getUserById((int) $_SESSION['user_id']);
-			$currentGroupId = isset($me['group_id']) ? (int) $me['group_id'] : null;
-			$currentExpiry = isset($me['group_expires_at']) ? (int) $me['group_expires_at'] : null;
-			$ownedPlanIds = [];
-			foreach ($enabledPlans as $p) {
-				if ($currentGroupId && (int) $p['group_id'] === $currentGroupId) {
-					$ownedPlanIds[] = (int) $p['id'];
-				}
-			}
-		}
 	}
 }
 ?>

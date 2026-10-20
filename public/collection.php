@@ -15,7 +15,6 @@ $error = null;
 $collectionPage = max(1, (int) ($_GET['page'] ?? 1));
 $collectionPerPage = 25;
 $collectionPages = 1;
-$protectedCollectionFiles = [];
 
 // Needed by the shared account modal (header person icon) so it can render the
 // logged-in state on first paint, like index.php / download.php do.
@@ -37,10 +36,6 @@ if (empty($collectionId)) {
 	if (!$collection) {
 		$error = __('collection.err_gone');
 	} else {
-		$protectedCollectionFiles = array_values(array_filter(
-			$collection['files'],
-			static fn(array $file): bool => !empty($file['is_protected'])
-		));
 		$collectionPages = max(1, (int) ceil(((int) $collection['file_count']) / $collectionPerPage));
 		$collectionPage = min($collectionPage, $collectionPages);
 		$collection['files'] = array_slice(

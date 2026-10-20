@@ -876,13 +876,9 @@ final class AuthController
 		$currentPass = self::inputString('current_password');
 		$newPass = self::inputString('new_password');
 
-		if (!is_string($currentPass) || strlen($currentPass) > InputLimits::PASSWORD_MAX) {
+		if (strlen($currentPass) > InputLimits::PASSWORD_MAX) {
 			incrementRateLimit('change_password');
 			echo json_encode(['success' => false, 'error' => __('api.bad_current_password')]);
-			return;
-		}
-		if (!is_string($newPass)) {
-			echo json_encode(['success' => false, 'error' => __('api.pass_weak')]);
 			return;
 		}
 		if (!Database::verifyUserPassword($_SESSION['user_id'], $currentPass)) {
@@ -944,7 +940,7 @@ final class AuthController
 		$currentPass = self::inputString('password'); // Note: frontend sends 'password'
 		$newEmail = self::inputString('new_email');
 
-		if (!is_string($currentPass) || strlen($currentPass) > InputLimits::PASSWORD_MAX) {
+		if (strlen($currentPass) > InputLimits::PASSWORD_MAX) {
 			incrementRateLimit('change_email');
 			echo json_encode(['success' => false, 'error' => __('api.bad_password2')]);
 			return;
@@ -956,7 +952,7 @@ final class AuthController
 			return;
 		}
 
-		if (!InputLimits::validEmail((string) $newEmail)) {
+		if (!InputLimits::validEmail($newEmail)) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_email3')]);
 			return;
 		}

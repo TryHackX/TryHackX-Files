@@ -385,41 +385,6 @@ class Database
 				PRIMARY KEY (`day`, `transfer_type`)
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-			// Ensure columns exist for updates
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}blacklists` ADD COLUMN `expires_at` INT UNSIGNED DEFAULT NULL AFTER `created_at`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}blacklists` ADD COLUMN `reason` VARCHAR(255) DEFAULT '' AFTER `expires_at`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}download_tokens` ADD COLUMN `user_id` INT UNSIGNED DEFAULT NULL AFTER `ip_address`");
-				$pdo->exec("ALTER TABLE `{$prefix}download_tokens` ADD INDEX `idx_user_id` (`user_id`)");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}users` ADD COLUMN `activation_token` VARCHAR(64) DEFAULT NULL AFTER `is_active`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}users` ADD COLUMN `last_activation_email_at` INT UNSIGNED DEFAULT 0 AFTER `activation_token`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}users` ADD COLUMN `pending_email` VARCHAR(255) DEFAULT NULL AFTER `email`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}users` ADD COLUMN `email_change_token` VARCHAR(64) DEFAULT NULL AFTER `pending_email`");
-			} catch (Exception $e) {
-			}
-			try {
-				$pdo->exec("ALTER TABLE `{$prefix}users` ADD COLUMN `last_email_change_at` INT UNSIGNED DEFAULT 0 AFTER `email_change_token`");
-			} catch (Exception $e) {
-			}
-
 			self::createOrRepairTable($pdo, "CREATE TABLE IF NOT EXISTS `{$prefix}audit_log` (
 				`id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 				`user_id` INT UNSIGNED DEFAULT NULL,

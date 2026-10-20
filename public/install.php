@@ -1292,7 +1292,7 @@ $osFamily = PHP_OS_FAMILY;
 						<input type="hidden" name="installer_bootstrap_csrf" value="<?= $csrf ?>">
 						<div class="field">
 							<label for="bootstrap_token">Installer secret</label>
-							<input type="password" id="bootstrap_token" name="bootstrap_token" maxlength="255"
+							<input type="password" id="bootstrap_token" name="bootstrap_token"
 								required minlength="32" maxlength="1024" autocomplete="one-time-code">
 						</div>
 						<button type="submit" class="btn btn-primary" style="width:100%">
