@@ -211,13 +211,82 @@ test('a signed-in user whose session token cannot be obtained gets an error row,
 	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'LATE');
 });
 
-test('a guest still uploads when the tracking token is unavailable', async () => {
-	const page = loadIndex({ loggedIn: false, api: { verify_captcha: async () => ({ success: false }) } });
+// The upload server no longer opens an implicit guest session: an upload without a token is
+// refused with 403, so a guest's upload waits for a token like everyone else's.
+test('a guest whose upload token cannot be obtained gets an error row too, not a request bound to fail', async () => {
+	let attempts = 0;
+	const page = loadIndex({
+		loggedIn: false,
+		api: {
+			verify_captcha: async () => (++attempts <= 2 ? { success: false } : { success: true, token: 'LATE' }),
+			token_info: validSession()
+		}
+	});
 	await flush();
 	page.pickFiles('a.txt');
 	await flush();
+	assert.equal(FakeXhr.instances.length, 0, 'nothing is sent without a token');
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.session_failed', sub: 'up.click_retry', retry: true, error: true });
+
+	page.rows()[0].querySelector('.retry').click();
+	await flush();
 	assert.equal(FakeXhr.instances.length, 1);
-	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], undefined);
+	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'LATE');
+});
+
+test('without a captcha an upload refused for its token gets a fresh one from PHP and goes again once, with no dialog', async () => {
+	const tokens = ['FIRST', 'SECOND', 'THIRD'];
+	const page = loadIndex({
+		loggedIn: false,
+		api: { verify_captcha: async () => ({ success: true, token: tokens.shift() }), token_info: validSession() }
+	});
+	await flush();
+	page.pickFiles('a.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'FIRST');
+
+	const tokenRefused = '{"detail":"Invalid or missing upload token. Please verify reCAPTCHA."}';
+	await FakeXhr.instances[0].finish(403, tokenRefused);
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2, 'sent again');
+	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'SECOND', 'on a token fetched from PHP');
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false,
+		'no verification dialog without a captcha');
+
+	await FakeXhr.instances[1].finish(403, tokenRefused);
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2, 'but only once');
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.session_failed', sub: 'up.click_retry', retry: true, error: true });
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false);
+
+	// The other 403s are about the account or the address, and a new token changes nothing.
+	page.pickFiles('b.txt');
+	await flush();
+	const sent = FakeXhr.instances.length;
+	await FakeXhr.instances[sent - 1].finish(403, '{"detail":"User is inactive"}');
+	await flush();
+	assert.equal(FakeXhr.instances.length, sent, 'an inactive account is not retried');
+	assert.deepEqual(rowState(page.rows()[1]), { main: 'up.refused', sub: 'up.account_inactive', retry: false, error: true });
+});
+
+test('a token renewed by one refused upload is reused by the next, not thrown away', async () => {
+	const tokens = ['FIRST', 'SECOND', 'THIRD'];
+	const page = loadIndex({
+		api: { verify_captcha: async () => ({ success: true, token: tokens.shift() }), token_info: validSession() }
+	});
+	await flush();
+	page.pickFiles('a.txt', 'b.txt');
+	await flush();
+	const tokenRefused = '{"detail":"Invalid or missing upload token. Please verify reCAPTCHA."}';
+	await FakeXhr.instances[0].finish(403, tokenRefused);
+	await flush();
+	assert.equal(FakeXhr.instances[2].headers['X-Upload-Token'], 'SECOND');
+
+	await FakeXhr.instances[1].finish(403, tokenRefused);   // sent with FIRST before the renewal
+	await flush();
+	assert.equal(FakeXhr.instances[3].headers['X-Upload-Token'], 'SECOND', 'goes again on the renewed token');
+	assert.equal(page.calls.post.filter(call => call.action === 'verify_captcha').length, 2,
+		'one token at start-up and one renewal, not one per refused upload');
 });
 
 test('one shared status poll serves every running upload and backs off when rate limited', async () => {

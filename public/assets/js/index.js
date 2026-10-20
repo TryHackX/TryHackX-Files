@@ -656,9 +656,10 @@
 				showCaptchaRequired();
 				return;
 			}
-		} else if (!isTokenValid() && !(await ensureTrackingToken()) && APP.loggedIn) {
-			// Signed in but no session token: uploading now would silently make it an anonymous
-			// upload (no quota, not in "My files"). Say so and let the user retry.
+		} else if (!isTokenValid() && !(await ensureTrackingToken())) {
+			// No upload token: the upload server takes no upload without one (there is no implicit
+			// guest session any more), and a signed-in user's file would not be filed under the
+			// account either. Say so and let the user retry.
 			updateFileItem(id, 'error-network', t('up.session_failed'), t('up.click_retry'), 0);
 			const failed = uploadQueue.get(id);
 			if (failed) failed.status = 'error';
@@ -715,14 +716,19 @@
 	const renewedOnce = new Set();
 
 	/**
-	 * The upload session refused the file (token gone, or its file cap reached). With a captcha
-	 * the file waits for it and resumes once it is solved; without one a new tracking token is
-	 * fetched and the file goes again, once.
+	 * The upload session refused the file (token missing or no longer valid, or its file cap
+	 * reached). With a captcha the file waits for it and resumes once it is solved; without one a
+	 * new token is fetched from PHP and the file goes again, once — never the verification
+	 * dialog, which has nothing to solve in that mode.
+	 *
+	 * `sentToken` is the token the refused request carried. When another upload has renewed the
+	 * session in the meantime, this one goes again on that token instead of throwing it away.
 	 */
-	function retryWithNewSession(id, file, reason) {
+	function retryWithNewSession(id, file, reason, sentToken) {
 		const entry = uploadQueue.get(id);
-		clearToken();
-		if (captchaEnabled) {
+		const renewedMeanwhile = Boolean(sentToken) && uploadToken !== sentToken && isTokenValid();
+		if (!renewedMeanwhile) clearToken();
+		if (captchaEnabled && !renewedMeanwhile) {
 			if (entry) entry.status = 'waiting';
 			updateFileItem(id, 'error', t(reason === 403 ? 'up.verify_expired' : 'up.session_limit'), t('up.verify_resume'), 0);
 			if (!waitingForCaptcha.some(waiting => waiting.id === id)) waitingForCaptcha.push({ id, file });
@@ -745,6 +751,9 @@
 		const random = new Uint8Array(16);
 		window.crypto.getRandomValues(random);
 		const clientId = Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
+		// The session this request belongs to; a refusal is judged against it, not against
+		// whatever token the page holds by the time the answer arrives.
+		const sentToken = uploadToken;
 		const queueEntry = {
 			file,
 			xhr,
@@ -802,7 +811,7 @@
 			} else {
 				const failure = describeUploadFailure(xhr.status, xhr.responseText);
 				if (failure.session) {
-					retryWithNewSession(id, file, xhr.status);
+					retryWithNewSession(id, file, xhr.status, sentToken);
 					return;
 				}
 				queueEntry.status = 'error';
@@ -835,7 +844,7 @@
 		xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
 		xhr.setRequestHeader('Content-Type', 'application/octet-stream');
 		xhr.setRequestHeader('X-Upload-ID', clientId);
-		if (uploadToken) xhr.setRequestHeader('X-Upload-Token', uploadToken);
+		if (sentToken) xhr.setRequestHeader('X-Upload-Token', sentToken);
 		xhr.send(file);
 	}
 
