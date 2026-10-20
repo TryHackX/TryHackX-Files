@@ -10,6 +10,7 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import re
 import socket
 import sys
@@ -96,6 +97,18 @@ class TestPhpConfigParsing:
 
         assert us._php_constant("UPLOADS_PATH") == "/srv/tryhackx-files/uploads"
 
+    def test_plain_double_quoted_constants_are_read_but_interpolation_is_not(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.local.php"
+        config.write_text(
+            '<?php\ndefine("TRUSTED_PROXIES", "172.18.0.5");\n'
+            'define(\'TRUSTED_PROXY_HEADER\', "$header");\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+
+        assert us._php_constant("TRUSTED_PROXIES") == "172.18.0.5"
+        assert us._php_constant("TRUSTED_PROXY_HEADER") == ""
+
 
 class TestStorageManifest:
     def test_legacy_repair_resolves_database_name_not_first_entry(self, monkeypatch, tmp_path):
@@ -152,17 +165,22 @@ class TestStorageManifest:
         ) is None
 
 
+CLIENT_IP_VECTORS = json.loads(
+    (Path(__file__).resolve().parents[1] / "fixtures" / "client-ip.json").read_text(encoding="utf-8")
+)
+
+
 class TestClientIp:
     @staticmethod
-    def _request(peer, forwarded=""):
-        class Client:
-            host = peer
+    def _request(peer, forwarded="", **headers):
+        sent = {name.replace("_", "-"): value for name, value in headers.items()}
+        if forwarded:
+            sent["X-Forwarded-For"] = forwarded
+        return _http_request("/download", headers=sent, client=(peer, 50000))
 
-        class Request:
-            client = Client()
-            headers = {"x-forwarded-for": forwarded} if forwarded else {}
-
-        return Request()
+    @pytest.fixture(autouse=True)
+    def _no_trusted_proxies(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(us, "CONFIG_FILE", tmp_path / "absent.php")
 
     def test_loopback_proxy_uses_the_hop_apache_appended(self):
         # mod_proxy APPENDS the peer it accepted; everything left of it came from the client.
@@ -186,6 +204,78 @@ class TestClientIp:
     def test_invalid_forwarded_address_falls_back_to_proxy_peer(self):
         request = self._request("::1", "not-an-ip")
         assert us.request_client_ip(request) == "::1"
+
+    @pytest.mark.parametrize(
+        "case", CLIENT_IP_VECTORS["resolve"], ids=lambda case: case["case"]
+    )
+    def test_resolution_matches_php_on_the_shared_vectors(self, case):
+        assert us.resolve_client_ip(case["server"], case["trusted"], case["header"]) == case["expected"]
+
+    @pytest.mark.parametrize(
+        "case",
+        [case for case in CLIENT_IP_VECTORS["resolve"] if not case.get("php_only")],
+        ids=lambda case: case["case"],
+    )
+    def test_the_apache_hop_yields_what_php_sees(self, monkeypatch, case):
+        # What reaches the sidecar for the request PHP saw: Apache appended its peer (PHP's
+        # REMOTE_ADDR) to the X-Forwarded-For it received and passed every other header on.
+        server = case["server"]
+        forwarded = server["REMOTE_ADDR"]
+        if "HTTP_X_FORWARDED_FOR" in server:
+            forwarded = server["HTTP_X_FORWARDED_FOR"] + ", " + forwarded
+        headers = {
+            name: server[key]
+            for name, key in (("CF-Connecting-IP", "HTTP_CF_CONNECTING_IP"),
+                              ("X-Real-IP", "HTTP_X_REAL_IP"))
+            if key in server
+        }
+        monkeypatch.setattr(
+            us, "_trusted_proxy_settings", lambda: (tuple(case["trusted"]), case["header"])
+        )
+        request = _http_request(
+            "/download", headers={"X-Forwarded-For": forwarded, **headers}, client=("127.0.0.1", 1)
+        )
+        assert us.request_client_ip(request) == case["expected"]
+
+    def test_a_front_proxy_listed_in_the_config_is_skipped_like_php_does(self, monkeypatch, tmp_path):
+        # The audit's Docker case: client 198.51.100.7 -> Traefik 172.18.0.5 -> Apache -> sidecar.
+        config = tmp_path / "config.local.php"
+        config.write_text('<?php\ndefine("TRUSTED_PROXIES", "172.18.0.5, 10.0.0.9");\n', encoding="utf-8")
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+
+        request = self._request("127.0.0.1", "198.51.100.7, 172.18.0.5")
+        assert us.request_client_ip(request) == "198.51.100.7"
+
+        # A visitor talking to Apache directly still cannot pick an address.
+        direct = self._request("127.0.0.1", "6.6.6.6, 198.51.100.9")
+        assert us.request_client_ip(direct) == "198.51.100.9"
+
+    def test_a_named_header_is_believed_only_from_a_configured_proxy(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.local.php"
+        config.write_text(
+            "<?php\ndefine('TRUSTED_PROXIES', '172.18.0.5');\n"
+            "define('TRUSTED_PROXY_HEADER', 'CF-Connecting-IP');\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+
+        via_proxy = self._request("127.0.0.1", "172.18.0.5", CF_Connecting_IP="198.51.100.8")
+        assert us.request_client_ip(via_proxy) == "198.51.100.8"
+        direct = self._request("127.0.0.1", "203.0.113.9", CF_Connecting_IP="198.51.100.8")
+        assert us.request_client_ip(direct) == "203.0.113.9"
+
+    def test_trusted_proxies_follow_the_config_file(self, monkeypatch, tmp_path):
+        config = tmp_path / "config.local.php"
+        monkeypatch.setattr(us, "CONFIG_FILE", config)
+        assert us._trusted_proxy_settings() == ((), "")
+
+        config.write_text("<?php\ndefine('TRUSTED_PROXIES', '10.0.0.1,10.0.0.2');\n", encoding="utf-8")
+        assert us._trusted_proxy_settings() == (("10.0.0.1", "10.0.0.2"), "")
+
+        config.write_text("<?php\n// define('TRUSTED_PROXIES', '10.0.0.1');\n", encoding="utf-8")
+        later = time.time() + 5
+        os.utime(config, (later, later))
+        assert us._trusted_proxy_settings() == ((), "")
 
 
 class TestSafeInt:

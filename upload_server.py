@@ -82,16 +82,23 @@ def _decode_php_single_quoted(value: str) -> str:
 
 
 def _php_constant(name: str) -> str:
-    """Read one string constant out of config.local.php (no PHP execution)."""
+    """Read one string constant out of config.local.php (no PHP execution).
+
+    The installer writes single-quoted literals. A hand-added constant such as
+    TRUSTED_PROXIES is often written with double quotes, so a plain double-quoted literal
+    (no escapes, no `$` interpolation) is read too; anything fancier is ignored.
+    """
     try:
         if CONFIG_FILE.exists():
             match = re.search(
                 r"(?m)^[ \t]*define\s*\(\s*['\"]" + re.escape(name)
-                + r"['\"]\s*,\s*'((?:\\.|[^'\\])*)'\s*\)",
+                + r"['\"]\s*,\s*(?:'((?:\\.|[^'\\])*)'|\"([^\"\\$]*)\")\s*\)",
                 CONFIG_FILE.read_text(encoding="utf-8", errors="replace"),
             )
             if match:
-                return _decode_php_single_quoted(match.group(1)).strip()
+                if match.group(1) is not None:
+                    return _decode_php_single_quoted(match.group(1)).strip()
+                return match.group(2).strip()
     except Exception:
         pass
     return ""
@@ -736,34 +743,118 @@ def build_lock_name(suffix: str) -> str:
     return f"fh:{hashlib.sha1(identity.encode()).hexdigest()[:16]}:{suffix}"
 
 
+def _php_trim(value: str) -> str:
+    """PHP's trim(): exactly these six characters, not every Unicode space."""
+    return value.strip(" \t\n\r\x00\x0b")
+
+
+def _is_ip_literal(value: str) -> bool:
+    """PHP's FILTER_VALIDATE_IP without flags: an IPv4 or IPv6 literal, no zone index."""
+    if not value or "%" in value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_client_ip(server: dict, trusted_proxies, trusted_header: str = "") -> str:
+    """
+    Python mirror of filehostResolveClientIp() in src/includes/ClientIp.php, which stays the
+    source of truth (tests/fixtures/client-ip.json holds the cases both sides must pass).
+
+    `server` uses PHP's $_SERVER names. Without a configured proxy the peer (REMOTE_ADDR) is
+    the answer. Behind one, X-Forwarded-For is read from the right past our own proxies, or
+    the single header the operator named is believed. Proxies are compared, and the answer
+    returned, exactly as written: PHP binds tokens to this string, so it must be byte-equal.
+    """
+    remote = _php_trim(str(server.get("REMOTE_ADDR") or ""))
+    if remote == "":
+        return "unknown"
+    trusted = [entry for entry in (_php_trim(str(item)) for item in trusted_proxies) if entry]
+    if not trusted or remote not in trusted:
+        return remote
+
+    header = _php_trim(trusted_header).lower()
+    if header in ("", "x-forwarded-for"):
+        chain = [_php_trim(part) for part in str(server.get("HTTP_X_FORWARDED_FOR") or "").split(",")]
+        for candidate in reversed(chain):
+            if candidate == "":
+                continue
+            if not _is_ip_literal(candidate):
+                # Garbage where our proxy should have written an address: do not guess.
+                return remote
+            if candidate not in trusted:
+                return candidate
+        return remote
+
+    server_key = {
+        "cf-connecting-ip": "HTTP_CF_CONNECTING_IP",
+        "x-real-ip": "HTTP_X_REAL_IP",
+    }.get(header)
+    if server_key is None:
+        return remote
+    value = _php_trim(str(server.get(server_key) or ""))
+    return value if _is_ip_literal(value) else remote
+
+
+_trusted_proxy_cache: dict = {"source": None, "proxies": (), "header": ""}
+
+
+def _trusted_proxy_settings() -> tuple[tuple[str, ...], str]:
+    """TRUSTED_PROXIES and TRUSTED_PROXY_HEADER from config.local.php, as PHP reads them.
+
+    Re-read whenever the file changes (one stat() per request), so a proxy the operator adds
+    applies here at the same moment it applies to PHP.
+    """
+    try:
+        source = (str(CONFIG_FILE), CONFIG_FILE.stat().st_mtime_ns)
+    except OSError:
+        source = (str(CONFIG_FILE), None)
+    if _trusted_proxy_cache["source"] != source:
+        proxies = _php_constant("TRUSTED_PROXIES")
+        _trusted_proxy_cache.update(
+            source=source,
+            proxies=tuple(proxies.split(",")) if proxies else (),
+            header=_php_constant("TRUSTED_PROXY_HEADER"),
+        )
+    return _trusted_proxy_cache["proxies"], _trusted_proxy_cache["header"]
+
+
 def request_client_ip(request: Request) -> str:
     """
-    Resolve the real client address behind this application's loopback Apache proxy.
+    The client address exactly as PHP's getClientIP() names it for the same visitor.
 
-    Apache's mod_proxy APPENDS the address it accepted the connection from, so only the
-    rightmost X-Forwarded-For entry is trustworthy; anything to its left was written by the
-    client. uvicorn (run with proxy headers trusted from 127.0.0.1 only, see __main__) already
-    moves that rightmost entry into `request.client`, so for proxied traffic the peer is not
-    loopback here. The fallback below covers a server started without that rewrite.
+    Every request reaches this server through the loopback Apache hop, and mod_proxy APPENDS
+    the address it accepted the connection from to X-Forwarded-For. So the rightmost entry is
+    what PHP sees as REMOTE_ADDR and everything left of it is the X-Forwarded-For PHP
+    received; from there PHP's own rules apply (resolve_client_ip). uvicorn does not rewrite
+    the client first: its one-hop rule named the front proxy instead of the visitor whenever
+    TRUSTED_PROXIES was set, and every token PHP had bound to the visitor was refused here.
     """
     peer = request.client.host if request.client else ""
     try:
-        peer_ip = ipaddress.ip_address(peer)
+        peer_is_loopback = ipaddress.ip_address(peer).is_loopback
     except ValueError:
         return peer or "unknown"
+    forwarded = request.headers.getlist("x-forwarded-for")
+    if not peer_is_loopback or not forwarded:
+        # Not proxied: nothing the caller says about other addresses is believed.
+        return peer
 
-    if not peer_ip.is_loopback:
-        return peer_ip.compressed
-
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        candidate = forwarded.rsplit(",", 1)[-1].strip()
-        try:
-            return ipaddress.ip_address(candidate).compressed
-        except ValueError:
-            pass
-
-    return peer_ip.compressed
+    chain = ", ".join(forwarded).split(",")
+    remote = _php_trim(chain[-1])
+    if not _is_ip_literal(remote):
+        return peer
+    server = {
+        "REMOTE_ADDR": remote,
+        "HTTP_X_FORWARDED_FOR": ",".join(chain[:-1]),
+        "HTTP_CF_CONNECTING_IP": ", ".join(request.headers.getlist("cf-connecting-ip")),
+        "HTTP_X_REAL_IP": ", ".join(request.headers.getlist("x-real-ip")),
+    }
+    proxies, header = _trusted_proxy_settings()
+    return resolve_client_ip(server, proxies, header)
 
 
 def request_is_direct_loopback(request: Request) -> bool:
@@ -5236,8 +5327,7 @@ if __name__ == "__main__":
         # Apache already logs every request with the real client. uvicorn's own access log
         # only ever saw 127.0.0.1 and wrote full single-use tokens out of the query strings.
         access_log=False,
-        # Pinned rather than read from FORWARDED_ALLOW_IPS: only the local Apache hop is
-        # trusted, so uvicorn takes the rightmost, Apache-appended X-Forwarded-For entry.
-        proxy_headers=True,
-        forwarded_allow_ips="127.0.0.1",
+        # request_client_ip() resolves the visitor with PHP's rules (TRUSTED_PROXIES) from
+        # the entry Apache appends to X-Forwarded-For; uvicorn must not rewrite it first.
+        proxy_headers=False,
     )
