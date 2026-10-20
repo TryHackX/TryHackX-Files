@@ -49,6 +49,33 @@ final class CheckoutHtmlTest extends TestCase
 		$this->assertNull(CheckoutHtml::problem('<scripture>text</scripture><formal>x</formal><linkedin-card>y</linkedin-card>'));
 	}
 
+	/** The hand-off page passes on only a real payment URL, escaped, with no inline script. */
+	public function testTheHandOffPageCarriesOnlyAnEscapedHttpsLinkAndAScriptFile(): void
+	{
+		foreach ([
+			'',
+			'javascript:alert(1)',
+			'data:text/html,x',
+			'//secure.payu.com/pay',
+			'http://secure.payu.com/pay',
+			'https://user:pass@secure.payu.com/pay',
+			"https://secure.payu.com/pay\n",
+		] as $url) {
+			$this->assertFalse(CheckoutHtml::isHandOffUrl($url), $url);
+			$this->assertNull(CheckoutHtml::handOffPage($url), $url);
+		}
+		$this->assertTrue(CheckoutHtml::isHandOffUrl('http://127.0.0.1:8123/pay'), 'a local stand-in');
+
+		$page = (string) CheckoutHtml::handOffPage('https://secure.payu.com/pay/?orderId=1&token="x"');
+		$this->assertStringContainsString(
+			'id="checkoutContinue" href="https://secure.payu.com/pay/?orderId=1&amp;token=&quot;x&quot;"',
+			$page
+		);
+		$this->assertStringContainsString('/assets/js/checkout-continue.js', $page);
+		$this->assertDoesNotMatchRegularExpression('/<script(?![^>]*\bsrc=)[^>]*>/i', $page);
+		$this->assertDoesNotMatchRegularExpression('/\son[a-z]+\s*=/i', $page);
+	}
+
 	public function testTheBuiltInBankTransferPresetPassesItsOwnRule(): void
 	{
 		$catalog = PaymentPlugins::all();

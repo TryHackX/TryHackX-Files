@@ -59,6 +59,15 @@ final class PayU
 
 	private static function host(): string
 	{
+		// The request-level tests run the app (FH_TEST_MODE, which only the test runner sets and
+		// which also swaps in the throwaway database) against a stand-in for the PayU API on a
+		// loopback port. Nothing else can move the API host.
+		if (getenv('FH_TEST_MODE') === '1') {
+			$testHost = (string) getenv('TEST_PAYU_HOST');
+			if (preg_match('#\Ahttp://127\.0\.0\.1:\d{2,5}\z#', $testHost) === 1) {
+				return $testHost;
+			}
+		}
 		return self::config()['sandbox'] ? self::HOST_SANDBOX : self::HOST_LIVE;
 	}
 

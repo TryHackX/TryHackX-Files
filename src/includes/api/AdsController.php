@@ -1085,8 +1085,8 @@ final class AdsController
 	/**
 	 * Start a checkout: `?ad=<id>` pays for one's own draft placement; `?ad=<id>&pkg=<id>`
 	 * buys a boost for one's own already-running ad. A browser navigation, like the premium
-	 * `checkout` action — it redirects to the provider on success and back to the "My ads"
-	 * tab with an error code otherwise.
+	 * `checkout` action — it hands the buyer to the provider on success (CheckoutHtml::
+	 * handOffPage) and redirects back to the "My ads" tab with an error code otherwise.
 	 */
 	public static function handleAdCheckout()
 	{
@@ -1220,6 +1220,9 @@ final class AdsController
 		];
 		$res = $provider === 'przelewy24' ? P24::createOrder($order) : PayU::createOrder($order);
 
+		if (!empty($res['success']) && !CheckoutHtml::isHandOffUrl((string) ($res['redirectUri'] ?? ''))) {
+			$res = ['success' => false, 'error' => 'unusable_payment_url'];
+		}
 		if (empty($res['success'])) {
 			PaymentRepository::setStatus($extOrderId, PaymentRepository::CANCELED);
 			Database::logAudit('ad_payment_start_failed', $provider . ', ad #' . $ad['id'] . ', ' . ($res['error'] ?? '?'), (int) $user['id']);
@@ -1231,7 +1234,8 @@ final class AdsController
 		PaymentRepository::setStatus($extOrderId, PaymentRepository::PENDING);
 		Database::logAudit('ad_payment_started', $provider . ', ad #' . $ad['id'] . ', order ' . $extOrderId, (int) $user['id']);
 
-		header('Location: ' . $res['redirectUri']);
+		// A same-origin page rather than a redirect: see CheckoutHtml::handOffPage().
+		CheckoutHtml::sendHandOff((string) $res['redirectUri']);
 		exit;
 	}
 

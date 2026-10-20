@@ -12,6 +12,7 @@ require_once PROJECT_ROOT . '/src/includes/api/ReportController.php';
 final class DomainHttpTest extends TestCase
 {
 	private static $proc = null;
+	private static $payuProc = null;
 	private static string $base = '';
 	private static array $cookies = [];
 	private static string $csrf = '';
@@ -23,7 +24,7 @@ final class DomainHttpTest extends TestCase
 	{
 		$pdo = Database::getInstance();
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-		foreach (['users', 'files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
+		foreach (['users', 'files', 'collections', 'collection_files', 'ads', 'payments', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
 			$pdo->exec('TRUNCATE TABLE `' . Database::table($t) . '`');
 		}
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=1');
@@ -93,6 +94,62 @@ final class DomainHttpTest extends TestCase
 			'alt_text' => 'COLLECTION-BOTTOM-AD',
 		]);
 
+		// B-F1: the built-in checkout against a local stand-in for PayU (fixtures/fake_payu.php).
+		Database::setSetting('premium_enabled', '1');
+		Database::setSetting('ads_selling_enabled', '1');
+		Database::setSetting('payment_builtin_provider', 'payu');
+		PaymentPlugins::save('payu', [
+			'pos_id' => '300746',
+			'client_id' => '300746',
+			'client_secret' => 'fake-client-secret',
+			'md5' => 'fake-md5-key',
+			'currency' => 'PLN',
+			'environment' => 'sandbox',
+		]);
+		$group = GroupRepository::save(null, ['name' => 'HTTP premium ' . bin2hex(random_bytes(2))]);
+		$plan = PlanRepository::save(null, [
+			'name' => 'HTTP plan',
+			'kind' => 'paid',
+			'group_id' => (int) ($group['id'] ?? 0),
+			'amount_minor' => 1900,
+			'currency' => 'PLN',
+			'duration_days' => 30,
+			'checkout_type' => 'builtin',
+			'enabled' => 1,
+		]);
+		$package = AdRepository::packageSave(null, [
+			'name' => 'HTTP banner',
+			'zone' => 'home_top',
+			'amount_minor' => 1000,
+			'currency' => 'PLN',
+			'duration_days' => 30,
+			'enabled' => 1,
+		]);
+		$draft = AdRepository::createDraft((int) $owner['id'], AdRepository::packageGet((int) ($package['id'] ?? 0)) ?? [], [
+			'name' => 'HTTP campaign',
+			'target_url' => 'https://ads.example.test/campaign',
+			'alt_text' => 'HTTP campaign',
+		]);
+		if (empty($group['success']) || empty($plan['success']) || empty($package['success']) || empty($draft['success'])) {
+			self::fail('Could not prepare the checkout fixtures');
+		}
+		$pdo->prepare("UPDATE `" . Database::table('ads') . "` SET `image_path` = ?, `image_mime` = 'image/png' WHERE `id` = ?")
+			->execute([bin2hex(random_bytes(16)) . '.png', (int) $draft['id']]);
+		self::$ids['plan'] = (string) $plan['id'];
+		self::$ids['group'] = (string) $group['id'];
+		self::$ids['ad'] = (string) $draft['id'];
+		$payuPort = self::reserveFreePort();
+		self::$payuProc = proc_open([
+			PHP_BINARY, '-S', '127.0.0.1:' . $payuPort, PROJECT_ROOT . '/tests/php/fixtures/fake_payu.php',
+		], [
+			0 => ['pipe', 'r'],
+			1 => ['file', PROJECT_ROOT . '/tests/php/.tmp-data-http/payu.log', 'w'],
+			2 => ['file', PROJECT_ROOT . '/tests/php/.tmp-data-http/payu.err.log', 'w'],
+		], $payuPipes, PROJECT_ROOT . '/tests/php/fixtures', null, ['bypass_shell' => true]);
+		if (!is_resource(self::$payuProc)) {
+			self::fail('Could not start the stand-in payment provider');
+		}
+
 		$port = self::reserveFreePort();
 		self::$base = 'http://127.0.0.1:' . $port;
 		$env = array_merge(is_array(getenv()) ? getenv() : [], [
@@ -103,6 +160,7 @@ final class DomainHttpTest extends TestCase
 			'TEST_DB_NAME' => DB_NAME,
 			'FILEHOST_CANONICAL_URL' => self::$base,
 			'TEST_TRUSTED_PROXIES' => '127.0.0.1',
+			'TEST_PAYU_HOST' => 'http://127.0.0.1:' . $payuPort,
 		]);
 		self::$proc = proc_open([
 			PHP_BINARY, '-S', '127.0.0.1:' . $port, '-t', PROJECT_ROOT . '/public',
@@ -132,9 +190,18 @@ final class DomainHttpTest extends TestCase
 	{
 		self::stopServer();
 		Database::setSetting('ads_enabled', '0');
+		Database::setSetting('ads_selling_enabled', '0');
+		Database::setSetting('premium_enabled', '0');
+		Database::setSetting('payment_builtin_provider', '');
 		$pdo = Database::getInstance();
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-		foreach (['files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
+		if (!empty(self::$ids['plan'])) {
+			$pdo->prepare("DELETE FROM `" . Database::table('plans') . "` WHERE `id` = ?")->execute([(int) self::$ids['plan']]);
+		}
+		if (!empty(self::$ids['group'])) {
+			$pdo->prepare("DELETE FROM `" . Database::table('groups') . "` WHERE `id` = ?")->execute([(int) self::$ids['group']]);
+		}
+		foreach (['files', 'collections', 'collection_files', 'ads', 'ad_packages', 'payments', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
 			$pdo->exec('TRUNCATE TABLE `' . Database::table($t) . '`');
 		}
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=1');
@@ -151,10 +218,12 @@ final class DomainHttpTest extends TestCase
 
 	private static function stopServer(): void
 	{
-		if (is_resource(self::$proc)) {
-			proc_terminate(self::$proc);
-			proc_close(self::$proc);
-			self::$proc = null;
+		foreach (['proc', 'payuProc'] as $name) {
+			if (is_resource(self::$$name)) {
+				proc_terminate(self::$$name);
+				proc_close(self::$$name);
+				self::$$name = null;
+			}
 		}
 	}
 
@@ -213,8 +282,8 @@ final class DomainHttpTest extends TestCase
 		return $id;
 	}
 
-	/** @return array{status: int, body: string} */
-	private static function request(string $method, string $path, ?string $body = null, array $headers = []): array
+	/** @return array{status: int, body: string, headers: array<string, string>} header names lower-cased */
+	private static function request(string $method, string $path, ?string $body = null, array $headers = [], bool $follow = true): array
 	{
 		if (self::$cookies) {
 			$headers[] = 'Cookie: ' . implode('; ', array_map(
@@ -229,19 +298,25 @@ final class DomainHttpTest extends TestCase
 			'content' => $body ?? '',
 			'timeout' => 10,
 			'ignore_errors' => true,
+			'follow_location' => $follow ? 1 : 0,
 		]]);
 		$http_response_header = [];
 		$out = @file_get_contents(self::$base . $path, false, $ctx);
 		$status = 0;
+		$responseHeaders = [];
 		foreach ($http_response_header as $line) {
 			if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m)) {
 				$status = (int) $m[1];
+				$responseHeaders = [];
+			} elseif (str_contains($line, ':')) {
+				[$name, $value] = explode(':', $line, 2);
+				$responseHeaders[strtolower(trim($name))] = trim($value);
 			}
 			if (preg_match('/^Set-Cookie:\s*([^=]+)=([^;]*)/i', $line, $c)) {
 				self::$cookies[trim($c[1])] = trim($c[2]);
 			}
 		}
-		return ['status' => $status, 'body' => (string) $out];
+		return ['status' => $status, 'body' => (string) $out, 'headers' => $responseHeaders];
 	}
 
 	private static function json(string $method, string $path, ?array $payload = null, string $ip = '203.0.113.10'): array
@@ -551,5 +626,46 @@ final class DomainHttpTest extends TestCase
 		} finally {
 			$setQuota->execute([0, (int) $guest['id']]);
 		}
+	}
+
+	/**
+	 * B-F1: the page's CSP has `form-action 'self'`, which Chromium applies to every redirect
+	 * hop of a form submission — a 303 from the checkout POST to the provider's origin was
+	 * refused and the buyer was left on the page. Both checkouts now answer 200 with a
+	 * same-origin page that moves on by script (not governed by form-action), and a link.
+	 */
+	public function testCheckoutsHandTheBuyerOverWithoutACrossOriginRedirect(): void
+	{
+		self::freshSession();
+		$ip = '203.0.113.160';
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpowner', 'password' => 'HttpOwner1!'], $ip);
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+
+		foreach ([
+			'/api.php?action=checkout&plan=' . self::$ids['plan'],
+			'/api.php?action=ad_checkout&ad=' . self::$ids['ad'],
+		] as $path) {
+			$res = self::request('POST', $path, '', [
+				'X-Forwarded-For: ' . $ip,
+				'X-CSRF-Token: ' . self::$csrf,
+				'Idempotency-Key: ' . bin2hex(random_bytes(12)),
+				'Content-Type: application/x-www-form-urlencoded',
+			], false);
+			$this->assertSame(200, $res['status'], $path . ': ' . substr($res['body'], 0, 300));
+			$this->assertArrayNotHasKey('location', $res['headers'], $path);
+			$this->assertMatchesRegularExpression(
+				'#<a class="btn" id="checkoutContinue" href="http://127\.0\.0\.1:\d+/pay\?orderId=FAKE[0-9A-F]+&amp;extOrderId=fh-#',
+				$res['body'],
+				$path
+			);
+			$this->assertStringContainsString('/assets/js/checkout-continue.js', $res['body']);
+			$this->assertDoesNotMatchRegularExpression('/<script(?![^>]*\bsrc=)[^>]*>/i', $res['body'], 'no inline script');
+			$this->assertStringContainsString("form-action 'self'", $res['headers']['content-security-policy'] ?? '');
+		}
+		$pending = (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('payments') . "` WHERE `status` = 'PENDING'
+			 AND `provider_order_id` LIKE 'FAKE%'"
+		)->fetchColumn();
+		$this->assertSame(2, $pending, 'both orders reached the provider and wait for its verdict');
 	}
 }

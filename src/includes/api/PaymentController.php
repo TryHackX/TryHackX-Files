@@ -22,8 +22,9 @@ final class PaymentController
 	 * Start a checkout: `?plan=<id>`.
 	 *
 	 * Requires a session, because the entire product is "this account gets that group" — an
-	 * anonymous purchase would have nothing to grant. Redirects the buyer to the provider on
-	 * success and back to the plans page with an error code otherwise, since this is a browser
+	 * anonymous purchase would have nothing to grant. Hands the buyer to the provider on
+	 * success (a same-origin page that moves on by script, see CheckoutHtml::handOffPage) and
+	 * redirects back to the plans page with an error code otherwise, since this is a browser
 	 * navigation and not an API call.
 	 */
 	public static function handleCheckout()
@@ -109,6 +110,9 @@ final class PaymentController
 		];
 		$res = $provider === 'przelewy24' ? P24::createOrder($order) : PayU::createOrder($order);
 
+		if (!empty($res['success']) && !CheckoutHtml::isHandOffUrl((string) ($res['redirectUri'] ?? ''))) {
+			$res = ['success' => false, 'error' => 'unusable_payment_url'];
+		}
 		if (empty($res['success'])) {
 			PaymentRepository::setStatus($extOrderId, PaymentRepository::CANCELED);
 			Database::logAudit('payment_start_failed', $provider . ', plan #' . $plan['id'] . ', ' . ($res['error'] ?? '?'), (int) $user['id']);
@@ -121,7 +125,8 @@ final class PaymentController
 		PaymentRepository::setStatus($extOrderId, PaymentRepository::PENDING);
 		Database::logAudit('payment_started', $provider . ', plan #' . $plan['id'] . ', order ' . $extOrderId, (int) $user['id']);
 
-		header('Location: ' . $res['redirectUri']);
+		// A same-origin page rather than a redirect: see CheckoutHtml::handOffPage().
+		CheckoutHtml::sendHandOff((string) $res['redirectUri']);
 		exit;
 	}
 
