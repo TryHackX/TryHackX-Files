@@ -14,7 +14,7 @@ Before staging files:
    `docs/MIGRATION.md`, `docs/P24.md` and `docs/ROADMAP.md`; `scripts/check-repository-policy.php`
    fails when they disagree. Also state the schema version in `docs/MIGRATION.md` and describe any
    change to `scripts/*.service` or `requirements-lock.txt` there, because the operator applies
-   those with `scripts/install-debian.sh` and a rebuilt `venv/`;
+   those with `FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh` and a rebuilt `venv/`;
 2. make `LICENSE`, the README license section and package metadata agree;
 3. identify the copyright holder and an approved commercial-licensing contact channel;
 4. preserve the licenses and notices of bundled third-party components;
@@ -230,19 +230,32 @@ git commit -m "Prepare TryHackX Files X.Y.Z"
 git push origin main
 ```
 
-Wait for every required GitHub Actions job to pass (push runs happen for `main` and for tags;
-other branches are tested through their pull request). Then create an annotated tag from that
-exact green commit and publish it:
+Wait until the CI run of that push to `main` has passed completely, the Docker smoke included
+(the Actions tab, or `gh run watch`). Pushing the tag together with `main` only starts a second,
+identical run and gives no verdict before the tag exists, so tag afterwards, from that exact
+commit:
 
 ```text
 git tag -a vX.Y.Z -m "TryHackX Files X.Y.Z"
 git push origin vX.Y.Z
 ```
 
-Create the GitHub Release from `vX.Y.Z`, verify its generated source archive, and publish release
-notes describing security-relevant configuration or migration steps. Do not attach a copy made
-from the live working directory.
+Only the newest release is supported ([SECURITY.md](../SECURITY.md)), so only its tag is kept.
+Delete the previous tag locally and on GitHub once the new one is pushed:
 
-Keep branch protection (required status checks: the job names in `.github/workflows/ci.yml`,
-which change when the test matrix does), private vulnerability reporting, Dependabot alerts and
-GitHub secret scanning enabled.
+```text
+git tag -d vA.B.C
+git push origin --delete refs/tags/vA.B.C
+```
+
+The release notes are the version's section in `CHANGELOG.md`; no GitHub Release is published.
+Operators deploy the tagged source archive
+(`https://github.com/TryHackX/TryHackX-Files/archive/refs/tags/vX.Y.Z.tar.gz`) or a checkout of
+the tag, never a copy made from a live working directory. Security-relevant configuration and
+migration steps belong in the changelog section and in [MIGRATION.md](MIGRATION.md).
+
+Keep private vulnerability reporting (**Settings → Advanced Security**; [SECURITY.md](../SECURITY.md)
+sends reporters there), Dependabot alerts and GitHub secret scanning enabled. `main` is not
+branch-protected, so the green run before tagging is checked by hand. A ruleset that requires the
+CI checks would enforce it; it has to name the job names in `.github/workflows/ci.yml`, which
+change whenever the test matrix does.
