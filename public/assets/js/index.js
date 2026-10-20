@@ -62,6 +62,49 @@
 		return node;
 	}
 
+	/*
+	 * Texts this script writes itself (queue rows, result cards, the session line) are kept as
+	 * their dictionary entry, msg('up.done'), so the live language switch (ui.js, which only
+	 * rewrites what the server rendered) can have them written again: the element remembers the
+	 * key and its parameters. Plain strings (sizes, percentages) are written as they are.
+	 */
+	function msg(key, params) {
+		return { key, params: params || null };
+	}
+
+	function textOf(value) {
+		if (value && typeof value === 'object' && value.key) return t(value.key, value.params || undefined);
+		return value === undefined || value === null ? '' : String(value);
+	}
+
+	function remember(el, attr, value) {
+		if (value && typeof value === 'object' && value.key) {
+			el.setAttribute(attr, value.key);
+			if (value.params) el.setAttribute(attr + '-params', JSON.stringify(value.params));
+			else el.removeAttribute(attr + '-params');
+		} else {
+			el.removeAttribute(attr);
+			el.removeAttribute(attr + '-params');
+		}
+	}
+
+	function setText(el, value) {
+		const text = textOf(value);
+		if (el.textContent !== text) el.textContent = text;
+		remember(el, 'data-fh-i18n', value);
+	}
+
+	function setTitle(el, value) {
+		el.title = textOf(value);
+		remember(el, 'data-fh-i18n-title', value);
+	}
+
+	function rememberedText(el, attr) {
+		let params;
+		try { params = JSON.parse(el.getAttribute(attr + '-params') || 'null') || undefined; } catch (e) { params = undefined; }
+		return t(el.getAttribute(attr), params);
+	}
+
 	function makeIcon(iconClass) {
 		const icon = makeNode('i', 'fa-solid ' + iconClass);
 		icon.setAttribute('aria-hidden', 'true');
@@ -77,7 +120,7 @@
 	function makeActionButton(className, title, iconClass, handler) {
 		const button = makeNode('button', className);
 		button.type = 'button';
-		button.title = title;
+		setTitle(button, title);
 		button.appendChild(makeIcon(iconClass));
 		button.addEventListener('click', handler);
 		return button;
@@ -131,6 +174,20 @@
 			updateSessionInfo();
 		});
 	}
+
+	// The live language switch (ui.js) rewrites what the server rendered and then announces the
+	// new language. What this script wrote itself — the queue rows, the result cards, the session
+	// line — is not in the server's copy, so it is written again here from the entries it was
+	// made from; it used to stay in the old language until a reload.
+	document.addEventListener('fh:languagechange', () => {
+		document.querySelectorAll('[data-fh-i18n]').forEach(el => {
+			el.textContent = rememberedText(el, 'data-fh-i18n');
+		});
+		document.querySelectorAll('[data-fh-i18n-title]').forEach(el => {
+			el.title = rememberedText(el, 'data-fh-i18n-title');
+		});
+		renderSessionInfo();
+	});
 
 	/* ---------- captcha / upload session ---------- */
 
@@ -238,10 +295,34 @@
 		if (captchaWidgetId !== null) FHCaptcha.reset(captchaWidgetId, captchaHandlers);
 	}
 
-	async function updateSessionInfo() {
+	// What the session line shows (null: nothing), kept so a language switch can write it again.
+	let sessionView = null;
+
+	function renderSessionInfo() {
 		const sessionInfo = document.getElementById('sessionInfo');
-		if (!uploadToken) {
+		if (!sessionInfo) return;
+		if (!sessionView) {
 			sessionInfo.replaceChildren();
+			return;
+		}
+		const remaining = Math.max(0, Math.floor((sessionView.expiresAt * 1000 - Date.now()) / 60000));
+		const parts = [
+			document.createTextNode(t('up.session') + ' '),
+			makeNode('span', '', remaining + ' ' + t('up.minutes'))
+		];
+		if (sessionView.limit > 0) {
+			parts.push(
+				document.createTextNode(' | ' + t('up.files_left') + ' '),
+				makeNode('span', '', (sessionView.limit - sessionView.uploaded) + '/' + sessionView.limit)
+			);
+		}
+		sessionInfo.replaceChildren(...parts);
+	}
+
+	async function updateSessionInfo() {
+		if (!uploadToken) {
+			sessionView = null;
+			renderSessionInfo();
 			return;
 		}
 		try {
@@ -251,20 +332,9 @@
 				filesLimit = data.files_limit || 0;
 				// The cap the upload server applies to this session (0 = none) is the one to show.
 				if (typeof data.files_limit === 'number') showFilesCap(data.files_limit);
-				const remaining = Math.max(0, Math.floor((data.expires_at * 1000 - Date.now()) / 60000));
-				const parts = [
-					document.createTextNode(t('up.session') + ' '),
-					makeNode('span', '', remaining + ' ' + t('up.minutes'))
-				];
-				if (filesLimit > 0) {
-					const filesRemaining = filesLimit - filesUploaded;
-					parts.push(
-						document.createTextNode(' | ' + t('up.files_left') + ' '),
-						makeNode('span', '', filesRemaining + '/' + filesLimit)
-					);
-					if (filesRemaining <= 0) showCaptchaRequired();
-				}
-				sessionInfo.replaceChildren(...parts);
+				sessionView = { expiresAt: data.expires_at, uploaded: filesUploaded, limit: filesLimit };
+				renderSessionInfo();
+				if (filesLimit > 0 && filesLimit - filesUploaded <= 0) showCaptchaRequired();
 			} else if (data.valid === false) {
 				// Only the server's explicit "this token is not valid" ends the session. A
 				// rate-limit (429) or error body carries no `valid` flag: that is "unknown", and
@@ -391,16 +461,16 @@
 				return;
 			}
 			if (blockedExtensions.has(ext)) {
-				addFileItem(id, file.name, file.size, 'error', t('up.blocked'), t('up.blocked_sub'));
+				addFileItem(id, file.name, file.size, 'error', msg('up.blocked'), msg('up.blocked_sub'));
 				return;
 			}
 			// The upload server refuses an empty body; say so here instead of sending it.
 			if (file.size === 0) {
-				addFileItem(id, file.name, 0, 'error', t('up.empty_file'), t('up.empty_file_sub'));
+				addFileItem(id, file.name, 0, 'error', msg('up.empty_file'), msg('up.empty_file_sub'));
 				return;
 			}
 			if (file.size > maxFileSize) {
-				addFileItem(id, file.name, file.size, 'error', t('up.too_big'), t('up.max_size', { size: formatSize(maxFileSize) }));
+				addFileItem(id, file.name, file.size, 'error', msg('up.too_big'), msg('up.max_size', { size: formatSize(maxFileSize) }));
 				return;
 			}
 			// "At once": finished and failed rows stay on the page and must not use up the cap.
@@ -409,7 +479,7 @@
 				return;
 			}
 			uploadQueue.set(id, { file, status: 'pending' });
-			addFileItem(id, file.name, file.size, 'pending', t('up.pending'), '');
+			addFileItem(id, file.name, file.size, 'pending', msg('up.pending'), '');
 			uploadFile(id, file);
 		});
 	}
@@ -419,7 +489,7 @@
 		if (includeRetry) {
 			buttons.push(makeActionButton(
 				'file-btn retry',
-				t('up.retry'),
+				msg('up.retry'),
 				'fa-arrow-rotate-right',
 				() => retryUpload(id)
 			));
@@ -440,7 +510,7 @@
 	}
 
 	function removeTitle(id) {
-		return deletesServerFile(id) ? t('up.remove_delete') : t('up.remove');
+		return msg(deletesServerFile(id) ? 'up.remove_delete' : 'up.remove');
 	}
 
 	/**
@@ -458,14 +528,14 @@
 			return;
 		}
 		button.dataset.armed = '1';
-		button.title = t('up.remove_confirm');
+		setTitle(button, msg('up.remove_confirm'));
 		const glyph = button.querySelector('i');
 		if (glyph) glyph.className = 'fa-solid fa-trash';
 		showCopiedTip(button, t('up.remove_confirm'));
 		setTimeout(() => {
 			if (!button.isConnected) return;
 			delete button.dataset.armed;
-			button.title = removeTitle(id);
+			setTitle(button, removeTitle(id));
 			const icon = button.querySelector('i');
 			if (icon) icon.className = 'fa-solid fa-xmark';
 		}, 4000);
@@ -497,10 +567,11 @@
 		meta.appendChild(makeNode('span', '', formatSize(size)));
 		info.append(makeNode('div', 'file-name', name), meta);
 		const statusBox = makeNode('div', 'file-status');
-		statusBox.append(
-			makeNode('span', 'file-status-main', statusMain),
-			makeNode('span', 'file-status-sub', statusSub)
-		);
+		const mainText = makeNode('span', 'file-status-main');
+		setText(mainText, statusMain);
+		const subText = makeNode('span', 'file-status-sub');
+		setText(subText, statusSub);
+		statusBox.append(mainText, subText);
 		const actions = makeNode('div', 'file-actions');
 		renderFileActions(actions, id, status === 'error-network');
 		item.append(progress, icon, info, statusBox, actions);
@@ -512,10 +583,8 @@
 		if (!item) return;
 		item.className = `file-item ${status}`;
 
-		const statusEl = item.querySelector('.file-status-main');
-		if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
-		const subEl = item.querySelector('.file-status-sub');
-		if (subEl.textContent !== subText) subEl.textContent = subText;
+		setText(item.querySelector('.file-status-main'), statusText);
+		setText(item.querySelector('.file-status-sub'), subText);
 		const progressEl = item.querySelector('.file-progress');
 		if (progressEl) progressEl.style.width = `${progress}%`;
 
@@ -574,7 +643,7 @@
 		const queueItem = uploadQueue.get(id);
 		if (!queueItem || !queueItem.file) return;
 		queueItem.status = 'pending';
-		updateFileItem(id, 'pending', t('up.pending'), '', 0);
+		updateFileItem(id, 'pending', msg('up.pending'), '', 0);
 		uploadFile(id, queueItem.file);
 	}
 
@@ -660,7 +729,7 @@
 			// No upload token: the upload server takes no upload without one (there is no implicit
 			// guest session any more), and a signed-in user's file would not be filed under the
 			// account either. Say so and let the user retry.
-			updateFileItem(id, 'error-network', t('up.session_failed'), t('up.click_retry'), 0);
+			updateFileItem(id, 'error-network', msg('up.session_failed'), msg('up.click_retry'), 0);
 			const failed = uploadQueue.get(id);
 			if (failed) failed.status = 'error';
 			return;
@@ -690,26 +759,26 @@
 			// the page assumed); fall back to the page's own number.
 			const max = detail.match(/max\s+(\d+(?:\.\d+)?)\s*MiB/i);
 			const limit = max ? Number(max[1]) * 1024 * 1024 : maxFileSize;
-			return { main: t('up.too_big'), sub: t('up.max_size', { size: formatSize(limit) }), retry: false };
+			return { main: msg('up.too_big'), sub: msg('up.max_size', { size: formatSize(limit) }), retry: false };
 		}
 		if (status === 400 && /empty/i.test(detail)) {
-			return { main: t('up.empty_file'), sub: t('up.empty_file_sub'), retry: false };
+			return { main: msg('up.empty_file'), sub: msg('up.empty_file_sub'), retry: false };
 		}
 		if (status === 507) {
-			return { main: t('up.no_space'), sub: t(/quota/i.test(detail) ? 'up.quota_full' : 'up.storage_full'), retry: false };
+			return { main: msg('up.no_space'), sub: msg(/quota/i.test(detail) ? 'up.quota_full' : 'up.storage_full'), retry: false };
 		}
 		if (status === 429 && /session/i.test(detail)) return { session: true };
-		if (status === 429) return { main: t('up.error'), sub: t('up.too_many'), retry: true };
+		if (status === 429) return { main: msg('up.error'), sub: msg('up.too_many'), retry: true };
 		if (status === 403) {
-			if (/inactive/i.test(detail)) return { main: t('up.refused'), sub: t('up.account_inactive'), retry: false };
-			if (/banned/i.test(detail)) return { main: t('up.refused'), sub: t('up.banned'), retry: false };
+			if (/inactive/i.test(detail)) return { main: msg('up.refused'), sub: msg('up.account_inactive'), retry: false };
+			if (/banned/i.test(detail)) return { main: msg('up.refused'), sub: msg('up.banned'), retry: false };
 			// The token was missing or no longer valid; an empty body is what a proxy in front
 			// of the upload server says about it.
 			if (detail === '' || /token|captcha/i.test(detail)) return { session: true };
-			return { main: t('up.refused'), sub: '', retry: false };
+			return { main: msg('up.refused'), sub: '', retry: false };
 		}
-		if (status >= 500 || status === 0) return { main: t('up.error'), sub: t('up.try_again'), retry: true };
-		return { main: t('up.refused'), sub: '', retry: false };
+		if (status >= 500 || status === 0) return { main: msg('up.error'), sub: msg('up.try_again'), retry: true };
+		return { main: msg('up.refused'), sub: '', retry: false };
 	}
 
 	/** Uploads that already went round once with a fresh tracking token (no captcha mode). */
@@ -730,7 +799,7 @@
 		if (!renewedMeanwhile) clearToken();
 		if (captchaEnabled && !renewedMeanwhile) {
 			if (entry) entry.status = 'waiting';
-			updateFileItem(id, 'error', t(reason === 403 ? 'up.verify_expired' : 'up.session_limit'), t('up.verify_resume'), 0);
+			updateFileItem(id, 'error', msg(reason === 403 ? 'up.verify_expired' : 'up.session_limit'), msg('up.verify_resume'), 0);
 			if (!waitingForCaptcha.some(waiting => waiting.id === id)) waitingForCaptcha.push({ id, file });
 			showCaptchaRequired();
 			return;
@@ -738,12 +807,12 @@
 		if (!renewedOnce.has(id)) {
 			renewedOnce.add(id);
 			if (entry) entry.status = 'pending';
-			updateFileItem(id, 'pending', t('up.pending'), '', 0);
+			updateFileItem(id, 'pending', msg('up.pending'), '', 0);
 			uploadFile(id, file);
 			return;
 		}
 		if (entry) entry.status = 'error';
-		updateFileItem(id, 'error-network', t('up.session_failed'), t('up.click_retry'), 0);
+		updateFileItem(id, 'error-network', msg('up.session_failed'), msg('up.click_retry'), 0);
 	}
 
 	function sendUpload(id, file) {
@@ -762,7 +831,7 @@
 			cancelledByAdmin: false
 		};
 		uploadQueue.set(id, queueEntry);
-		updateFileItem(id, 'uploading', t('up.uploading'), '0%', 0);
+		updateFileItem(id, 'uploading', msg('up.uploading'), '0%', 0);
 		const stopPolling = () => stopStatusPolling(queueEntry);
 		startStatusPolling(queueEntry);
 
@@ -778,7 +847,7 @@
 				const eta = speed > 0 ? Math.max(0, (e.total - e.loaded) / speed) : 0;
 				sub = pct + '% · ' + formatSize(speed) + '/s' + (eta > 1 ? ' · ' + Math.ceil(eta) + 's' : '');
 			}
-			updateFileItem(id, 'uploading', t('up.uploading'), sub, pct);
+			updateFileItem(id, 'uploading', msg('up.uploading'), sub, pct);
 		};
 
 		xhr.onload = async () => {
@@ -793,10 +862,10 @@
 					queueItem.serverId = fileId;
 					queueItem.deleteToken = deleteToken;
 				}
-				updateFileItem(id, 'success', t('up.done'), t('up.uploaded'), 100);
+				updateFileItem(id, 'success', msg('up.done'), msg('up.uploaded'), 100);
 				renewedOnce.delete(id);
 				const removeButton = document.getElementById(id)?.querySelector('.remove');
-				if (removeButton && deletesServerFile(id)) removeButton.title = t('up.remove_delete');
+				if (removeButton && deletesServerFile(id)) setTitle(removeButton, msg('up.remove_delete'));
 				// The session line ("Pliki: 3/5") moves with every upload, captcha or not; with a
 				// spent session the next upload then starts a new one instead of being refused.
 				if (uploadToken) {
@@ -806,7 +875,7 @@
 			} else if (xhr.status === 409 && (xhr.responseText || '').indexOf('"cancelled"') >= 0) {
 				// An administrator cut this transfer from the dashboard. Said plainly, because
 				// "network error" would send the uploader off to check their connection.
-				updateFileItem(id, 'error', t('up.cancelled_admin'), t('up.cancelled_admin_sub'), 0);
+				updateFileItem(id, 'error', msg('up.cancelled_admin'), msg('up.cancelled_admin_sub'), 0);
 				queueEntry.status = 'error';
 			} else {
 				const failure = describeUploadFailure(xhr.status, xhr.responseText);
@@ -822,9 +891,9 @@
 		xhr.onerror = () => {
 			stopPolling();
 			if (queueEntry.cancelledByAdmin) {
-				updateFileItem(id, 'error', t('up.cancelled_admin'), t('up.cancelled_admin_sub'), 0);
+				updateFileItem(id, 'error', msg('up.cancelled_admin'), msg('up.cancelled_admin_sub'), 0);
 			} else {
-				updateFileItem(id, 'error-network', t('up.net_error'), t('up.click_retry'), 0);
+				updateFileItem(id, 'error-network', msg('up.net_error'), msg('up.click_retry'), 0);
 			}
 			queueEntry.status = 'error';
 		};
@@ -834,8 +903,8 @@
 			updateFileItem(
 				id,
 				'error',
-				t(queueEntry.cancelledByAdmin ? 'up.cancelled_admin' : 'up.cancelled'),
-				queueEntry.cancelledByAdmin ? t('up.cancelled_admin_sub') : '',
+				msg(queueEntry.cancelledByAdmin ? 'up.cancelled_admin' : 'up.cancelled'),
+				queueEntry.cancelledByAdmin ? msg('up.cancelled_admin_sub') : '',
 				0
 			);
 		};
@@ -883,14 +952,14 @@
 		const actions = makeNode('div', 'result-actions');
 		actions.appendChild(makeActionButton(
 			'result-btn',
-			t('up.qr_title'),
+			msg('up.qr_title'),
 			'fa-qrcode',
 			() => showQr(f.id)
 		));
 		if (f.token) {
 			const passwordButton = makeActionButton(
 				'result-btn' + (f.hasPassword ? ' has-pw' : ''),
-				t('up.pw_title_set'),
+				msg('up.pw_title_set'),
 				'fa-lock',
 				() => showPwSet(f.id)
 			);
@@ -899,7 +968,7 @@
 		}
 		actions.appendChild(makeActionButton(
 			'result-btn',
-			t('common.copy'),
+			msg('common.copy'),
 			'fa-copy',
 			event => copy(event, f.id)
 		));
@@ -907,7 +976,7 @@
 		open.href = f.url;
 		open.target = '_blank';
 		open.rel = 'noopener noreferrer';
-		open.title = t('up.open');
+		setTitle(open, msg('up.open'));
 		open.appendChild(makeIcon('fa-up-right-from-square'));
 		actions.appendChild(open);
 		main.append(icon, info, actions);
@@ -916,16 +985,16 @@
 		if (f.token) {
 			const tokenBox = makeNode('div', 'result-token');
 			const tokenLabel = makeNode('div', 'token-label');
-			tokenLabel.append(
-				makeIcon('fa-shield-halved'),
-				document.createTextNode(' ' + t('up.delete_token_label'))
-			);
+			const tokenLabelText = makeNode('span');
+			setText(tokenLabelText, msg('up.delete_token_label'));
+			tokenLabel.append(makeIcon('fa-shield-halved'), document.createTextNode(' '), tokenLabelText);
 			const tokenRow = makeNode('div', 'token-row');
 			const tokenInput = makeNode('input', 'token-input');
 			tokenInput.type = 'text';
 			tokenInput.value = f.token;
 			tokenInput.readOnly = true;
-			const tokenCopy = makeNode('button', 'token-copy', t('common.copy'));
+			const tokenCopy = makeNode('button', 'token-copy');
+			setText(tokenCopy, msg('common.copy'));
 			tokenCopy.type = 'button';
 			tokenCopy.addEventListener('click', event => copyTok(event, f.id));
 			tokenRow.append(tokenInput, tokenCopy);
@@ -1341,7 +1410,7 @@
 		const btn = document.getElementById('pwbtn-' + id);
 		if (!btn) return;
 		btn.classList.toggle('has-pw', on);
-		btn.title = on ? t('up.pw_title_change') : t('up.pw_title_set');
+		setTitle(btn, msg(on ? 'up.pw_title_change' : 'up.pw_title_set'));
 	}
 
 	/**

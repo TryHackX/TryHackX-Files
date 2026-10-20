@@ -1045,15 +1045,30 @@
             else if (trap.el) release(true);
         }
 
+        /**
+         * The heading names the dialog. Its id comes from the dialog's own id, never at random,
+         * and is marked as added here: the live language switch (ui.js) lines the page up with
+         * the server's copy, which has no such id, and a random one made every dialog title
+         * look like a different element, so it stayed in the old language.
+         */
+        function labelDialog(modal, index) {
+            var h = modal.querySelector('h1, h2, h3, .captcha-title');
+            if (!h) return;
+            if (!h.id) {
+                var base = (modal.id || 'fh-dialog-' + index) + '-title';
+                var id = base;
+                for (var n = 2; document.getElementById(id); n++) id = base + '-' + n;
+                h.id = id;
+                h.setAttribute('data-fh-runtime-id', '');
+            }
+            modal.setAttribute('aria-labelledby', h.id);
+        }
+
         function initA11y() {
-            document.querySelectorAll(OVERLAY_SEL).forEach(function (modal) {
+            document.querySelectorAll(OVERLAY_SEL).forEach(function (modal, index) {
                 modal.setAttribute('role', 'dialog');
                 modal.setAttribute('aria-modal', 'true');
-                var h = modal.querySelector('h1, h2, h3, .captcha-title');
-                if (h) {
-                    if (!h.id) h.id = 'mh_' + Math.random().toString(36).slice(2, 9);
-                    modal.setAttribute('aria-labelledby', h.id);
-                }
+                labelDialog(modal, index);
             });
             document.querySelectorAll('button[title], a[title]').forEach(function (el) {
                 if (!el.getAttribute('aria-label') && !el.textContent.trim()) {

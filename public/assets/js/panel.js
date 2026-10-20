@@ -319,12 +319,21 @@
 	// icon-only controls an accessible name from their `title`. One pass at load — the
 	// static markup; dynamically-rendered action buttons already carry a `title`.
 	function initA11y() {
-		document.querySelectorAll('.modal-bg, .auth-modal').forEach(modal => {
+		document.querySelectorAll('.modal-bg, .auth-modal').forEach((modal, index) => {
 			modal.setAttribute('role', 'dialog');
 			modal.setAttribute('aria-modal', 'true');
 			const h = modal.querySelector('.modal-header h3, h3');
 			if (h) {
-				if (!h.id) h.id = 'mh_' + Math.random().toString(36).slice(2, 9);
+				// Derived from the dialog's id, never random, and marked as added here: the live
+				// language switch (ui.js) compares the page with the server's copy, which has no
+				// such id, and a random id kept every dialog title in the old language.
+				if (!h.id) {
+					const base = (modal.id || 'fh-dialog-' + index) + '-title';
+					let id = base;
+					for (let n = 2; document.getElementById(id); n++) id = base + '-' + n;
+					h.id = id;
+					h.setAttribute('data-fh-runtime-id', '');
+				}
 				modal.setAttribute('aria-labelledby', h.id);
 			}
 		});

@@ -316,8 +316,11 @@
 	// Attributes that hold user-visible copy. `value` is deliberately absent: it would
 	// overwrite what someone has typed.
 	var TEXT_ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
-	// Walked into, never through: their content is code or what someone typed.
-	var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1 };
+	// Walked into, never through: their content is code.
+	var SKIP_TAGS = { SCRIPT: 1, STYLE: 1 };
+	// Their copy attributes (a placeholder) follow the language; their content never does: it is
+	// what someone typed, or the default that typing replaces.
+	var VALUE_TAGS = { TEXTAREA: 1 };
 	// Not part of the comparison at all. The server puts no copy in them, and third-party
 	// widgets and the browser add them at run time.
 	var IGNORED_TAGS = { SCRIPT: 1, STYLE: 1, LINK: 1, NOSCRIPT: 1, TEMPLATE: 1, IFRAME: 1, INS: 1 };
@@ -329,11 +332,16 @@
 		return !node.hasAttribute('data-fh-runtime');
 	}
 
-	/** What a child is, for lining it up: element, id and leading class (scripts only append classes). */
+	/**
+	 * What a child is, for lining it up: element, id and leading class (scripts only append
+	 * classes). An id a script gave the node after load (`data-fh-runtime-id`: the dialog
+	 * headings named for aria-labelledby) is not in the server's copy, so it does not count.
+	 */
 	function identity(node) {
 		if (node.nodeType === 3) return '#text';
 		var leading = String(node.getAttribute('class') || '').trim().split(/\s+/)[0];
-		return node.nodeName + '#' + (node.getAttribute('id') || '') + '.' + leading;
+		var id = node.hasAttribute('data-fh-runtime-id') ? '' : (node.getAttribute('id') || '');
+		return node.nodeName + '#' + id + '.' + leading;
 	}
 
 	/**
@@ -395,6 +403,7 @@
 				live.setAttribute(a, fresh.getAttribute(a));
 			}
 		});
+		if (VALUE_TAGS[live.nodeName]) return;
 
 		// No pairing = a subtree the page rendered itself. Leave it alone.
 		var pairs = align(live, fresh);

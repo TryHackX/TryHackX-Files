@@ -152,7 +152,13 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, 
 		await flush();
 	};
 	const rows = () => document.getElementById('fileList').children;
-	return { window, document, calls, toasts, pickFiles, pickFile, rows, listeners, pendingTimers, runNextTimer, sessionStore, dropZone };
+	/** Swap the dictionary and announce it, as ui.js does after a live language switch. */
+	const switchLanguage = translate => {
+		context.t = translate;
+		window.t = translate;
+		(document.listeners['fh:languagechange'] || []).forEach(handler => handler({ type: 'fh:languagechange' }));
+	};
+	return { window, document, calls, toasts, pickFiles, pickFile, rows, listeners, pendingTimers, runNextTimer, sessionStore, dropZone, switchLanguage };
 }
 
 /** The visible text of a file row: main status, sub status, and whether it offers Retry. */
@@ -618,4 +624,31 @@ test('the "at once" cap counts uploads still running, not finished rows', async 
 	page.pickFiles('d.txt');
 	await flush();
 	assert.equal(FakeXhr.instances.length, 3, 'a finished upload frees its place');
+});
+
+/**
+ * The live language switch (ui.js) only rewrites what the server rendered. The rows, result
+ * cards and session line this script wrote itself stayed in the old language until a reload.
+ */
+test('the rows, result cards and session line the page wrote follow the live language switch', async () => {
+	const page = loadIndex({ api: { token_info: validSession({ files_uploaded: 1, files_limit: 5 }) } });
+	await flush();
+	page.pickFiles('done.txt');
+	page.pickFile({ name: 'huge.bin', size: 6 * 1024 * 1024 * 1024, lastModified: 7 });
+	await flush();
+	await FakeXhr.instances[0].finish(200, 'id1:tok1');
+	await flush();
+	assert.equal(rowState(page.rows()[0]).main, 'up.done');
+
+	page.switchLanguage((key, params) => 'EN ' + key + (params ? ' ' + JSON.stringify(params) : ''));
+
+	const [done, huge] = page.rows();
+	assert.deepEqual(rowState(done), { main: 'EN up.done', sub: 'EN up.uploaded', retry: false, error: false });
+	assert.equal(done.querySelector('.remove').title, 'EN up.remove_delete');
+	assert.equal(rowState(huge).main, 'EN up.too_big');
+	assert.equal(rowState(huge).sub, 'EN up.max_size {"size":"5.00 GiB"}', 'with its parameters');
+	const card = page.document.getElementById('resultList').children[0];
+	assert.equal(card.querySelector('.token-label').textContent.trim(), 'EN up.delete_token_label');
+	assert.equal(card.querySelector('.token-copy').textContent, 'EN common.copy');
+	assert.match(page.document.getElementById('sessionInfo').textContent, /^EN up\.session \d+ EN up\.minutes \| EN up\.files_left 4\/5$/);
 });

@@ -233,6 +233,58 @@ test('the live language switch still translates the page after scripts added nod
 	assert.equal(document.dispatched[0].type, 'fh:languagechange');
 });
 
+test('dialog titles named at run time and textarea placeholders follow the live language switch', () => {
+	let live;
+	const { window } = loadLanguageSwitch({
+		live(doc) {
+			pageSkeleton(doc, { greeting: 'Witaj', close: 'Zamknij' });
+			const dialog = doc.add('div', 'reportModal');
+			const heading = doc.createElement('h3');
+			heading.textContent = 'Zgłoś naruszenie';
+			// What auth.js and panel.js do at load, so the dialog can point aria-labelledby at it.
+			heading.id = 'reportModal-title';
+			heading.setAttribute('data-fh-runtime-id', '');
+			dialog.appendChild(heading);
+			const note = doc.createElement('textarea');
+			note.id = 'reportInfo';
+			note.setAttribute('placeholder', 'Opisz problem…');
+			note.textContent = 'Domyślny opis';
+			note.value = 'what the visitor typed';
+			dialog.appendChild(note);
+			live = { heading, note };
+		},
+		fresh(doc) {
+			pageSkeleton(doc, { greeting: 'Hello', close: 'Close' });
+			const dialog = doc.add('div', 'reportModal');
+			const heading = doc.createElement('h3');
+			heading.textContent = 'Report a violation';
+			dialog.appendChild(heading);
+			const note = doc.createElement('textarea');
+			note.id = 'reportInfo';
+			note.setAttribute('placeholder', 'Describe the problem…');
+			note.textContent = 'Default description';
+			dialog.appendChild(note);
+		}
+	});
+
+	window.FHLang.apply('<html>', '/?lang=en');
+
+	assert.equal(live.heading.textContent, 'Report a violation', 'the title is translated despite its run-time id');
+	assert.equal(live.heading.id, 'reportModal-title', 'and keeps the id aria-labelledby points at');
+	assert.equal(live.note.getAttribute('placeholder'), 'Describe the problem…');
+	assert.equal(live.note.value, 'what the visitor typed', 'what someone typed is never touched');
+	assert.equal(live.note.textContent, 'Domyślny opis', 'nor is the text a textarea starts with');
+});
+
+test('dialog headings get a stable id marked as added at run time, never a random one', () => {
+	for (const file of ['auth.js', 'panel.js']) {
+		const source = read(file);
+		assert.doesNotMatch(source, /Math\.random\(\)\.toString\(36\)/, file + ' still names headings at random');
+		assert.match(source, /\(modal\.id \|\| 'fh-dialog-' \+ index\) \+ '-title'/, file);
+		assert.match(source, /setAttribute\('data-fh-runtime-id', ''\)/, file);
+	}
+});
+
 test('the live language switch never copies a "Loading…" placeholder over what the page rendered', () => {
 	let list;
 	const { window } = loadLanguageSwitch({
