@@ -724,8 +724,11 @@ final class PremiumController
 		}
 		$payment = PaymentRepository::byExtOrderId((string) ($_GET['order'] ?? ''));
 		$isAdmin = !empty($_SESSION['is_admin']) || Permissions::has('premium.payments');
+		// An administrator's grant or revocation is a ledger entry, not a sale: there is nothing
+		// to give a numbered receipt for ("0,00 PLN, paid via ADMIN").
 		if (!$payment
 			|| (!$isAdmin && (int) $payment['user_id'] !== (int) $_SESSION['user_id'])
+			|| in_array($payment['kind'] ?? '', [PaymentRepository::KIND_ADMIN_GRANT, PaymentRepository::KIND_ADMIN_REVOKE], true)
 			|| !in_array($payment['status'], [PaymentRepository::COMPLETED, PaymentRepository::REFUNDED], true)) {
 			http_response_code(404);
 			exit(__('api.payment_not_found'));
@@ -906,6 +909,10 @@ final class PremiumController
 		}
 		$input = json_decode(file_get_contents('php://input'), true) ?: [];
 		$id = (int) ($input['id'] ?? 0);
+		if ($id && PromoCodeRepository::wasUsed($id)) {
+			echo json_encode(['success' => false, 'error' => __('panel.promo.err_used')]);
+			return;
+		}
 		if (!$id || !PromoCodeRepository::delete($id)) {
 			echo json_encode(['success' => false, 'error' => __('common.error')]);
 			return;

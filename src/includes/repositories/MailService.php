@@ -180,6 +180,38 @@ final class MailService
 		return $output;
 	}
 
+	/**
+	 * Whether a message was queued under any of these idempotency keys at or after $since.
+	 *
+	 * @param list<string> $idempotencyKeys
+	 */
+	public static function queuedSince(array $idempotencyKeys, int $since): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $idempotencyKeys === []) {
+			return false;
+		}
+		$hashes = array_values(array_unique(array_map(
+			static fn($key): string => hash('sha256', (string) $key),
+			$idempotencyKeys
+		)));
+		try {
+			foreach (array_chunk($hashes, 500) as $chunk) {
+				$stmt = $pdo->prepare(
+					"SELECT 1 FROM `" . Database::table('mail_outbox') . "` WHERE `idempotency_key` IN ("
+					. implode(',', array_fill(0, count($chunk), '?')) . ") AND `created_at` >= ? LIMIT 1"
+				);
+				$stmt->execute([...$chunk, $since]);
+				if ($stmt->fetchColumn()) {
+					return true;
+				}
+			}
+			return false;
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
 	/** @param array<string,string>|null $envelope */
 	private static function enqueue(?array $envelope, ?string $idempotencyKey): bool
 	{

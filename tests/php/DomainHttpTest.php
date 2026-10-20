@@ -96,6 +96,7 @@ final class DomainHttpTest extends TestCase
 
 		// B-F1: the built-in checkout against a local stand-in for PayU (fixtures/fake_payu.php).
 		Database::setSetting('premium_enabled', '1');
+		Database::setSetting('invoice_enabled', '1');
 		Database::setSetting('ads_selling_enabled', '1');
 		Database::setSetting('payment_builtin_provider', 'payu');
 		PaymentPlugins::save('payu', [
@@ -192,6 +193,7 @@ final class DomainHttpTest extends TestCase
 		Database::setSetting('ads_enabled', '0');
 		Database::setSetting('ads_selling_enabled', '0');
 		Database::setSetting('premium_enabled', '0');
+		Database::setSetting('invoice_enabled', '0');
 		Database::setSetting('payment_builtin_provider', '');
 		$pdo = Database::getInstance();
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=0');
@@ -201,7 +203,7 @@ final class DomainHttpTest extends TestCase
 		if (!empty(self::$ids['group'])) {
 			$pdo->prepare("DELETE FROM `" . Database::table('groups') . "` WHERE `id` = ?")->execute([(int) self::$ids['group']]);
 		}
-		foreach (['files', 'collections', 'collection_files', 'ads', 'ad_packages', 'payments', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
+		foreach (['files', 'collections', 'collection_files', 'ads', 'ad_packages', 'payments', 'promo_reservations', 'promo_codes', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
 			$pdo->exec('TRUNCATE TABLE `' . Database::table($t) . '`');
 		}
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=1');
@@ -667,5 +669,73 @@ final class DomainHttpTest extends TestCase
 			 AND `provider_order_id` LIKE 'FAKE%'"
 		)->fetchColumn();
 		$this->assertSame(2, $pending, 'both orders reached the provider and wait for its verdict');
+	}
+
+	/** The server's English wording of a key (this suite's own `__()` returns keys). */
+	private static function english(string $key): string
+	{
+		$english = require PROJECT_ROOT . '/src/lang/en.php';
+		return (string) ($english[$key] ?? $key);
+	}
+
+	/**
+	 * C-F22: every checkout that priced a code in leaves a reservation row, which keeps the
+	 * code from being deleted. The panel now says why (and that the code can be disabled)
+	 * instead of a generic error; a code no checkout ever used is still deleted.
+	 */
+	public function testAPromoCodeUsedAtCheckoutIsRefusedWithTheReason(): void
+	{
+		PromoCodeRepository::save(null, ['code' => 'HTTPUSED', 'percent_off' => 10, 'max_uses' => 5, 'enabled' => 1]);
+		PromoCodeRepository::save(null, ['code' => 'HTTPFRESH', 'percent_off' => 10, 'max_uses' => 5, 'enabled' => 1]);
+		$used = PromoCodeRepository::findByCode('HTTPUSED');
+		$fresh = PromoCodeRepository::findByCode('HTTPFRESH');
+		$owner = Database::getUserByEmailOrUsername('httpowner');
+		$ext = PaymentRepository::start('payu', (int) self::$ids['plan'], (int) $owner['id'], 1710, 'PLN', $used);
+		$this->assertNotNull($ext);
+		// The buyer walked away: the reservation is released, but stays on record.
+		PaymentRepository::setStatus((string) $ext, PaymentRepository::CANCELED);
+
+		self::freshSession();
+		$ip = '203.0.113.170';
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpboss', 'password' => 'HttpBoss1!x'], $ip);
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+
+		$refused = self::json('POST', '/api.php?action=admin_promo_code_delete&lang=en', ['id' => (int) $used['id']], $ip);
+		$this->assertFalse($refused['success'] ?? true);
+		$this->assertSame(self::english('panel.promo.err_used'), $refused['error'] ?? null);
+		$this->assertNotNull(PromoCodeRepository::findByCode('HTTPUSED'));
+
+		$deleted = self::json('POST', '/api.php?action=admin_promo_code_delete&lang=en', ['id' => (int) $fresh['id']], $ip);
+		$this->assertTrue($deleted['success'] ?? false, json_encode($deleted));
+		$this->assertNull(PromoCodeRepository::findByCode('HTTPFRESH'));
+	}
+
+	/**
+	 * C-F26: a plan an administrator granted or revoked is a ledger line, not a sale; it printed
+	 * a numbered receipt for "0,00 PLN, paid via ADMIN". A real purchase still prints.
+	 */
+	public function testAnAdministratorsGrantHasNoReceipt(): void
+	{
+		$owner = Database::getUserByEmailOrUsername('httpowner');
+		$boss = Database::getUserByEmailOrUsername('httpboss');
+		$pdo = Database::getInstance();
+		$sale = (string) PaymentRepository::start('payu', (int) self::$ids['plan'], (int) $owner['id'], 1900, 'PLN');
+		$pdo->prepare("UPDATE `" . Database::table('payments') . "` SET `status` = ?, `granted_at` = ? WHERE `ext_order_id` = ?")
+			->execute([PaymentRepository::COMPLETED, time(), $sale]);
+		PaymentRepository::recordAdminAction(PaymentRepository::KIND_ADMIN_GRANT, (int) self::$ids['plan'], (int) $owner['id'], (int) $boss['id']);
+		$grant = (string) $pdo->query(
+			"SELECT `ext_order_id` FROM `" . Database::table('payments') . "` WHERE `kind` = 'admin_grant' ORDER BY `id` DESC LIMIT 1"
+		)->fetchColumn();
+		$this->assertNotSame('', $grant);
+
+		self::freshSession();
+		$ip = '203.0.113.171';
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpboss', 'password' => 'HttpBoss1!x'], $ip);
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+
+		$receipt = self::request('GET', '/api.php?action=invoice&order=' . rawurlencode($sale), null, ['X-Forwarded-For: ' . $ip]);
+		$this->assertSame(200, $receipt['status'], substr($receipt['body'], 0, 300));
+		$ledger = self::request('GET', '/api.php?action=invoice&order=' . rawurlencode($grant), null, ['X-Forwarded-For: ' . $ip]);
+		$this->assertSame(404, $ledger['status']);
 	}
 }

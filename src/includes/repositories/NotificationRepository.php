@@ -145,6 +145,23 @@ final class NotificationRepository
 		}
 	}
 
+	/** Whether a notification was written under this dedupe key at or after $since. */
+	public static function dedupeKeySince(string $dedupeKey, int $since): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $dedupeKey === '') {
+			return false;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT 1 FROM `" . self::table() . "`
+				WHERE `dedupe_key` = ? AND `created_at` >= ? LIMIT 1");
+			$stmt->execute([mb_substr($dedupeKey, 0, 80), $since]);
+			return (bool) $stmt->fetchColumn();
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
 	/**
 	 * The same one-off notice for many accounts, in a few multi-row statements instead of a
 	 * handful of queries per account — the broadcast path. Rows carry $dedupeKey, so a retried

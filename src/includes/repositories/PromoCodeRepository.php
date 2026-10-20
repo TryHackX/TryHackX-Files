@@ -368,4 +368,24 @@ final class PromoCodeRepository
 			return false;
 		}
 	}
+
+	/**
+	 * Whether any checkout ever priced this code in. Its reservations are the record of those
+	 * orders (reserved, released or redeemed) and keep the code from being deleted, so such a
+	 * code can only be switched off.
+	 */
+	public static function wasUsed(int $id): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $id <= 0) {
+			return false;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT 1 FROM `" . Database::table('promo_reservations') . "` WHERE `promo_id` = ? LIMIT 1");
+			$stmt->execute([$id]);
+			return (bool) $stmt->fetchColumn();
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
 }

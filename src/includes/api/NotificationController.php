@@ -41,6 +41,34 @@ final class NotificationController
 	}
 
 	/**
+	 * The ten-minute bucket a broadcast's retry keys are made from. A retry seconds after the
+	 * first send can fall into the next bucket and would have sent everything again, so when
+	 * this very message went out under the previous bucket within the last ten minutes, that
+	 * bucket is reused.
+	 */
+	public static function broadcastWindow(string $channel, string $format, string $text, string $subject, string $emailBody, int $now): int
+	{
+		$window = intdiv($now, 600);
+		$previous = $window - 1;
+		$since = $now - 600;
+		if (in_array($channel, ['app', 'both'], true)
+			&& NotificationRepository::dedupeKeySince('broadcast:' . sha1($text) . ':' . $previous, $since)) {
+			return $previous;
+		}
+		if (in_array($channel, ['email', 'both'], true)) {
+			$batchId = sha1($format . "\0" . $subject . "\0" . $emailBody) . ':' . $previous;
+			$keys = array_map(
+				static fn(array $recipient): string => 'broadcast:' . $batchId . ':' . $recipient['id'],
+				NotificationRepository::activeRecipients()
+			);
+			if (MailService::queuedSince($keys, $since)) {
+				return $previous;
+			}
+		}
+		return $window;
+	}
+
+	/**
 	 * The list, rendered.
 	 *
 	 * `?scope=bell` is the popover's short read; anything else pages the full history. The
@@ -225,7 +253,7 @@ final class NotificationController
 
 		// The same message sent again within ten minutes is treated as a retry of the first
 		// (a double click, a timed-out request): accounts that already have it get nothing new.
-		$window = intdiv(time(), 600);
+		$window = self::broadcastWindow($channel, $format, $text, $subject, $emailBody, time());
 		$appSent = 0;
 		if (in_array($channel, ['app', 'both'], true)) {
 			$appSent = Notifications::broadcastApp(

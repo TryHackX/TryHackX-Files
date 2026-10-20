@@ -1658,6 +1658,7 @@ return array (
   'panel.promo.err_duplicate' => 'Ese código ya existe.',
   'panel.promo.err_plan' => 'Selecciona un plan de pago existente para este código.',
   'panel.promo.err_db' => 'No se pudo guardar el código.',
+  'panel.promo.err_used' => 'Este código ya se usó en un pago y forma parte del historial: desactívalo en lugar de eliminarlo.',
   'premium.err_unconfigured' => 'Los pagos aún no están configurados.',
   'premium.err_provider' => 'El proveedor de pagos rechazó el pedido. Inténtalo más tarde.',
   'premium.err_disabled' => 'La venta de planes está desactivada.',

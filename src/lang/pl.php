@@ -1775,6 +1775,7 @@ return [
 	'panel.promo.err_duplicate' => 'Taki kod już istnieje.',
 	'panel.promo.err_plan' => 'Wybierz istniejący płatny plan dla tego kodu.',
 	'panel.promo.err_db' => 'Nie udało się zapisać kodu.',
+	'panel.promo.err_used' => 'Ten kod był już użyty przy zakupie i należy do historii płatności — wyłącz go zamiast usuwać.',
 	'premium.err_unconfigured' => 'Płatności nie są jeszcze skonfigurowane.',
 	'premium.err_provider' => 'Operator płatności odrzucił zamówienie. Spróbuj ponownie później.',
 	'premium.err_disabled' => 'Sprzedaż planów jest wyłączona.',

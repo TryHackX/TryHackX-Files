@@ -1658,6 +1658,7 @@ return array (
   'panel.promo.err_duplicate' => '该优惠码已存在。',
   'panel.promo.err_plan' => '请为此优惠码选择现有的付费套餐。',
   'panel.promo.err_db' => '无法保存优惠码。',
+  'panel.promo.err_used' => '此优惠码已在结账时使用，属于付款记录的一部分——请停用它，而不是删除。',
   'premium.err_unconfigured' => '支付尚未配置。',
   'premium.err_provider' => '支付服务商拒绝了该订单，请稍后再试。',
   'premium.err_disabled' => '套餐销售已关闭。',

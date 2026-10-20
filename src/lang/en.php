@@ -1773,6 +1773,7 @@ return [
 	'panel.promo.err_duplicate' => 'That code already exists.',
 	'panel.promo.err_plan' => 'Select an existing paid plan for this code.',
 	'panel.promo.err_db' => 'Could not save the code.',
+	'panel.promo.err_used' => 'This code was already used at checkout and is part of the payment history — disable it instead of deleting it.',
 	'premium.err_unconfigured' => 'Payments are not configured yet.',
 	'premium.err_provider' => 'The payment provider refused the order. Please try again later.',
 	'premium.err_disabled' => 'Plan sales are switched off.',

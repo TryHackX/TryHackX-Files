@@ -1,5 +1,7 @@
 <?php
 
+require_once PROJECT_ROOT . '/src/includes/api/NotificationController.php';
+
 /**
  * Notifications: the two behaviours everything else depends on — stacking (a hundred downloads
  * are one line that counts up, and reading it closes the stack) and the three-way preference
@@ -247,6 +249,40 @@ final class NotificationRepositoryTest extends RepoTestCase
 
 		$this->assertSame(0, Notifications::broadcastApp('Maintenance tonight', '/panel', 'broadcast:test:1'));
 		$this->assertSame(1, $count($this->userId), 'a retried broadcast adds nothing');
+	}
+
+	/**
+	 * C-F25: "the same message within ten minutes is a retry" was a fixed wall-clock bucket, so
+	 * a retry two seconds after the first send could cross into the next bucket and send
+	 * everything again. The previous bucket is reused while its send is under ten minutes old.
+	 */
+	public function testABroadcastRetryAcrossTheBucketBoundaryKeepsTheFirstKey(): void
+	{
+		$now = 600 * 3000000 + 2;
+		$window = intdiv($now, 600);
+		$pdo = Database::getInstance();
+		$age = function (string $table, int $seconds) use ($pdo, $now): void {
+			$pdo->exec("UPDATE `" . Database::table($table) . "` SET `created_at` = " . ($now - $seconds));
+		};
+
+		$this->assertSame($window, NotificationController::broadcastWindow('app', 'standard', 'Maintenance tonight', '', '', $now));
+		$this->assertGreaterThanOrEqual(1, Notifications::broadcastApp(
+			'Maintenance tonight',
+			'/panel',
+			'broadcast:' . sha1('Maintenance tonight') . ':' . ($window - 1)
+		));
+		$age('notifications', 5);
+		$this->assertSame($window - 1, NotificationController::broadcastWindow('app', 'standard', 'Maintenance tonight', '', '', $now));
+		$this->assertSame($window, NotificationController::broadcastWindow('app', 'standard', 'Another message', '', '', $now));
+		$age('notifications', 700);
+		$this->assertSame($window, NotificationController::broadcastWindow('app', 'standard', 'Maintenance tonight', '', '', $now), 'an older send is not a retry');
+
+		$batchId = sha1("standard\0Planned work\0The site is down at night.") . ':' . ($window - 1);
+		Database::setSetting('email_from', 'noreply@example.test');
+		$this->assertTrue(MailService::send('notif@example.com', 'Planned work', 'The site is down at night.', 'broadcast:' . $batchId . ':' . $this->userId));
+		$age('mail_outbox', 5);
+		$this->assertSame($window - 1, NotificationController::broadcastWindow('email', 'standard', '', 'Planned work', 'The site is down at night.', $now));
+		$this->assertSame($window, NotificationController::broadcastWindow('email', 'html', '', 'Planned work', 'The site is down at night.', $now));
 	}
 
 	/**
