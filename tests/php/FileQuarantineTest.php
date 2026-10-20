@@ -121,6 +121,43 @@ final class FileQuarantineTest extends RepoTestCase
 		$this->assertSame('quarantined', FileQuarantine::find($id)['state']);
 	}
 
+	/**
+	 * C-F18: copying and hashing a file into the quarantine is the cleanup job's work. A web
+	 * request deleting many files ("delete all my files", cleaning an account) did it inline,
+	 * after the delete had committed. Outside the command line the queue now leaves those jobs
+	 * to the job, and still processes the ones queued behind them.
+	 */
+	public function testOnlyTheCleanupJobCopiesFilesIntoTheQuarantine(): void
+	{
+		$held = $this->fixture('held');
+		// The inline attempt fails, so the copy is still owed when the "request" comes.
+		putenv('FILEHOST_TEST_QUARANTINE_FAIL_STAGE=copy');
+		$this->assertTrue(FileManager::deleteFileAdmin($held));
+		putenv('FILEHOST_TEST_QUARANTINE_FAIL_STAGE');
+		$this->assertSame('pending', FileQuarantine::find($held)['state']);
+		$pdo = Database::getInstance();
+		$queue = Database::table('file_deletion_queue');
+		$pdo->prepare("UPDATE `{$queue}` SET `next_attempt_at` = 0, `created_at` = 1 WHERE `file_id` = ?")->execute([$held]);
+		$plain = 'q_plain_' . substr(hash('sha256', uniqid('', true)), 0, 12);
+		$this->ids[] = $plain;
+		mkdir(UPLOADS_DIR . '/' . $plain, 0777, true);
+		file_put_contents(UPLOADS_DIR . '/' . $plain . '/gone.bin', 'gone');
+		$pdo->prepare(
+			"INSERT INTO `{$queue}` (`file_id`, `attempts`, `next_attempt_at`, `last_error`, `created_at`) VALUES (?, 0, 0, NULL, 2)"
+		)->execute([$plain]);
+
+		$request = FileManager::processDeletionQueue(1, false);
+		$this->assertSame(['processed' => 1, 'deleted' => 1, 'quarantined' => 0, 'failed' => 0], $request);
+		$this->assertDirectoryDoesNotExist(UPLOADS_DIR . '/' . $plain, 'the job behind it is not held up');
+		$this->assertSame('pending', FileQuarantine::find($held)['state']);
+		$this->assertDirectoryExists(UPLOADS_DIR . '/' . $held, 'nothing is removed before its copy exists');
+
+		$cleanup = FileManager::processDeletionQueue(10);
+		$this->assertSame(1, $cleanup['quarantined']);
+		$this->assertSame('quarantined', FileQuarantine::find($held)['state']);
+		$this->assertDirectoryDoesNotExist(UPLOADS_DIR . '/' . $held);
+	}
+
 	public static function captureFailureStages(): array
 	{
 		return [['copy'], ['manifest'], ['publish']];

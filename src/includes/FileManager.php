@@ -477,10 +477,17 @@ class FileManager
 	/**
 	 * Retry durable filesystem deletion jobs. Missing artifacts count as success.
 	 *
+	 * A job whose file still has to be copied into the quarantine (state `pending`) copies and
+	 * hashes the whole upload directory. That is the cleanup job's work: a request deleting a
+	 * large account or "all my files" did it inline, for minutes, after the delete had already
+	 * committed. So unless $captureQuarantine says otherwise, only the command line (the
+	 * cleanup job) takes those jobs; a request processes the others and leaves them queued.
+	 *
 	 * @return array{processed:int,deleted:int,quarantined:int,failed:int}
 	 */
-	public static function processDeletionQueue(int $limit = 100): array
+	public static function processDeletionQueue(int $limit = 100, ?bool $captureQuarantine = null): array
 	{
+		$captureQuarantine ??= PHP_SAPI === 'cli';
 		$result = ['processed' => 0, 'deleted' => 0, 'quarantined' => 0, 'failed' => 0];
 		$limit = max(1, min(500, $limit));
 		$pdo = Database::getInstance();
@@ -503,10 +510,13 @@ class FileManager
 		}
 
 		$queue = self::table('file_deletion_queue');
+		$leaveCaptures = $captureQuarantine ? '' : " AND NOT EXISTS (
+				SELECT 1 FROM `" . self::table('file_quarantine') . "` fq
+				WHERE fq.`file_id` = q.`file_id` AND fq.`state` = 'pending')";
 		try {
 			$stmt = $pdo->prepare(
-				"SELECT `file_id`, `attempts` FROM `{$queue}`
-				 WHERE `next_attempt_at` <= ? ORDER BY `created_at` ASC LIMIT {$limit}"
+				"SELECT q.`file_id`, q.`attempts` FROM `{$queue}` q
+				 WHERE q.`next_attempt_at` <= ?{$leaveCaptures} ORDER BY q.`created_at` ASC LIMIT {$limit}"
 			);
 			$stmt->execute([time()]);
 			$remove = $pdo->prepare("DELETE FROM `{$queue}` WHERE `file_id` = ?");
