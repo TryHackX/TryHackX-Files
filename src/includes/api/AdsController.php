@@ -617,8 +617,12 @@ final class AdsController
 				(string) ($_GET['sig'] ?? '')
 			);
 		$sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
+		// The owner and ad managers see any creative. A reviewer holding only ads.approve sees
+		// every creative past the buyer's own draft — what the queue asks them to approve.
 		$canPreview = $sessionUserId > 0
-			&& ((int) ($ad['owner_id'] ?? 0) === $sessionUserId || Permissions::has('ads.manage'));
+			&& ((int) ($ad['owner_id'] ?? 0) === $sessionUserId
+				|| Permissions::has('ads.manage')
+				|| (Permissions::has('ads.approve') && ($ad['status'] ?? '') !== 'draft'));
 		if (!$isPublic && !$canPreview) {
 			http_response_code(404);
 			exit;

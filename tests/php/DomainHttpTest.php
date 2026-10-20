@@ -764,6 +764,57 @@ final class DomainHttpTest extends TestCase
 	}
 
 	/**
+	 * C-F15: the review queue is open to staff holding ads.approve, but a queued creative's
+	 * banner was served only to its owner and to ads.manage, so such a reviewer approved
+	 * pictures they could not see. They now see every creative past the buyer's draft.
+	 */
+	public function testAReviewerSeesTheCreativeTheyAreAskedToApprove(): void
+	{
+		$pdo = Database::getInstance();
+		$staff = GroupRepository::getBySlug('moderator');
+		$this->assertNotNull($staff);
+		$permissions = (string) ($staff['permissions'] ?? '');
+		$this->assertNotContains('ads.manage', Permissions::parse($permissions));
+		$owner = Database::getUserByEmailOrUsername('httpowner');
+		$saved = AdRepository::save(null, [
+			'name' => 'Queued creative',
+			'type' => 'image',
+			'zone' => 'home_top',
+			'status' => 'pending',
+			'target_url' => 'https://ads.example.test/queued',
+			'alt_text' => 'Queued',
+		]);
+		$this->assertTrue($saved['success'] ?? false);
+		$adId = (int) $saved['id'];
+		$banner = bin2hex(random_bytes(16)) . '.png';
+		$dir = PROJECT_ROOT . '/tests/php/.tmp-data-http/ads';
+		if (!is_dir($dir)) {
+			mkdir($dir, 0777, true);
+		}
+		file_put_contents($dir . '/' . $banner, 'queued-banner-bytes');
+		$setAd = $pdo->prepare("UPDATE `" . Database::table('ads') . "` SET `owner_id` = ?, `image_path` = ?, `image_mime` = 'image/png', `status` = ? WHERE `id` = ?");
+		$setAd->execute([(int) $owner['id'], $banner, 'pending', $adId]);
+		$setPerms = $pdo->prepare("UPDATE `" . Database::table('groups') . "` SET `permissions` = ? WHERE `id` = ?");
+		$setPerms->execute([Permissions::serialize(array_merge(Permissions::parse($permissions), ['ads.approve'])), (int) $staff['id']]);
+		try {
+			self::freshSession();
+			$ip = '203.0.113.174';
+			$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpmod', 'password' => 'HttpMod1!x'], $ip);
+			$this->assertTrue($login['success'] ?? false, json_encode($login));
+
+			$queued = self::request('GET', '/api.php?action=ad_banner&id=' . $adId, null, ['X-Forwarded-For: ' . $ip]);
+			$this->assertSame(200, $queued['status']);
+			$this->assertSame('queued-banner-bytes', $queued['body']);
+
+			$setAd->execute([(int) $owner['id'], $banner, 'draft', $adId]);
+			$draft = self::request('GET', '/api.php?action=ad_banner&id=' . $adId, null, ['X-Forwarded-For: ' . $ip]);
+			$this->assertSame(404, $draft['status'], "the buyer's unfinished draft stays the buyer's");
+		} finally {
+			$setPerms->execute([$permissions, (int) $staff['id']]);
+		}
+	}
+
+	/**
 	 * C-F26: a plan an administrator granted or revoked is a ledger line, not a sale; it printed
 	 * a numbered receipt for "0,00 PLN, paid via ADMIN". A real purchase still prints.
 	 */
