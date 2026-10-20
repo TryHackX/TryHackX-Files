@@ -85,6 +85,38 @@ final class UtilityRegressionTest extends RepoTestCase
 	}
 
 	/**
+	 * Every process resolves UPLOADS_PATH / DATA_PATH the same way. The integrity report and the
+	 * mail worker used to ignore DATA_PATH and read (and write) a settings cache under
+	 * project/data that the panel never invalidates.
+	 */
+	public function testStorageRootsResolveTheSameWayEverywhere(): void
+	{
+		require_once PROJECT_ROOT . '/src/includes/LocalConfig.php';
+		$root = '/srv/files';
+		$this->assertSame('/srv/files/data', filehostResolveStoragePath(null, '/srv/files/data', $root));
+		$this->assertSame('/srv/files/data', filehostResolveStoragePath('  ', '/srv/files/data', $root));
+		$this->assertSame('/mnt/storage/data', filehostResolveStoragePath('/mnt/storage/data/', '/x', $root));
+		$this->assertSame('D:/files/data', filehostResolveStoragePath('D:\\files\\data', '/x', $root));
+		$this->assertSame('//nas/share/data', filehostResolveStoragePath('//nas/share/data', '/x', $root));
+		$this->assertSame('/srv/files/storage/data', filehostResolveStoragePath('storage/data', '/x', $root));
+		$this->assertSame('/x', filehostResolveStoragePath('/', '/x', $root), 'a bare slash is no location');
+
+		foreach (['scripts/check-db-integrity.php', 'scripts/mail-worker.php', 'src/config.php'] as $file) {
+			$source = (string) file_get_contents(PROJECT_ROOT . '/' . $file);
+			$this->assertMatchesRegularExpression(
+				"/define\('DATA_DIR', filehostResolveStoragePath\(\s*defined\('DATA_PATH'\)/",
+				$source,
+				$file
+			);
+		}
+		$this->assertStringNotContainsString(
+			'Database::getSetting(',
+			(string) file_get_contents(PROJECT_ROOT . '/scripts/check-db-integrity.php'),
+			'the read-only report reads the schema version from the table, not the cache'
+		);
+	}
+
+	/**
 	 * PHP 8.5 deprecates curl_close(). The 8.5 CI leg fails on any deprecation a test reaches
 	 * (phpunit.xml); this also covers the code paths no test executes, such as a live provider.
 	 */

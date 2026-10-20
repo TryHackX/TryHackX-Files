@@ -34,6 +34,25 @@ require_once $configLocal;
 if (!defined('PROJECT_ROOT')) {
 	define('PROJECT_ROOT', $projectRoot);
 }
+// The same storage roots as the web app. Without DATA_DIR the settings cache was read from
+// project/data, which panel writes never invalidate when DATA_PATH points elsewhere: a mail
+// transport changed in the panel stayed unseen until the worker restarted, and the runtime
+// snapshot for Settings -> E-mail landed where the panel does not look.
+require_once $projectRoot . '/src/includes/LocalConfig.php';
+if (!defined('DATA_DIR')) {
+	define('DATA_DIR', filehostResolveStoragePath(
+		defined('DATA_PATH') ? (string) constant('DATA_PATH') : null,
+		$projectRoot . '/data',
+		$projectRoot
+	));
+}
+if (!defined('UPLOADS_DIR')) {
+	define('UPLOADS_DIR', filehostResolveStoragePath(
+		defined('UPLOADS_PATH') ? (string) constant('UPLOADS_PATH') : null,
+		$projectRoot . '/uploads',
+		$projectRoot
+	));
+}
 if (!defined('APP_VERSION')) {
 	define('APP_VERSION', '2.80.1');
 }

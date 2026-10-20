@@ -1,6 +1,22 @@
 <?php
 
 /**
+ * A storage root as config/config.local.php names it (UPLOADS_PATH, DATA_PATH): an absolute path
+ * (`/mnt/storage/data`, `D:/files`, `//nas/share`) is used as-is, a relative one resolves against
+ * the project root, and an unset or empty one is $default. The web app, the cron scripts and the
+ * workers all resolve it here, so they agree on where the uploads, the settings cache and its
+ * lock live — a worker reading another directory's cache never sees the panel's changes.
+ */
+function filehostResolveStoragePath(?string $configured, string $default, string $projectRoot): string
+{
+	$path = rtrim(str_replace('\\', '/', trim((string) $configured)), '/');
+	if ($path === '') {
+		return $default;
+	}
+	return preg_match('#^(//|/|[A-Za-z]:/)#', $path) === 1 ? $path : $projectRoot . '/' . ltrim($path, '/');
+}
+
+/**
  * Write (or replace) a string constant in config/config.local.php.
  *
  * The upload location lives there — not in the DB — because it is the one file that both PHP

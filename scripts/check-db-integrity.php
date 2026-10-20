@@ -23,11 +23,22 @@ if (!is_file($configLocal)) {
 }
 
 require_once $configLocal;
+// The storage roots the web app uses (DATA_PATH / UPLOADS_PATH included), not project/data:
+// otherwise a run under sudo leaves root-owned files where the app does not even look.
+require_once $projectRoot . '/src/includes/LocalConfig.php';
 if (!defined('DATA_DIR')) {
-	define('DATA_DIR', $projectRoot . '/data');
+	define('DATA_DIR', filehostResolveStoragePath(
+		defined('DATA_PATH') ? (string) constant('DATA_PATH') : null,
+		$projectRoot . '/data',
+		$projectRoot
+	));
 }
 if (!defined('UPLOADS_DIR')) {
-	define('UPLOADS_DIR', $projectRoot . '/uploads');
+	define('UPLOADS_DIR', filehostResolveStoragePath(
+		defined('UPLOADS_PATH') ? (string) constant('UPLOADS_PATH') : null,
+		$projectRoot . '/uploads',
+		$projectRoot
+	));
 }
 require_once $projectRoot . '/src/includes/Database.php';
 
@@ -79,6 +90,14 @@ $relations = [
 
 $orphans = [];
 try {
+	// Straight from the table: a read-only report has no business reading (or writing) the
+	// settings cache, which may be stale or belong to another user.
+	$schemaStatement = $pdo->prepare(
+		"SELECT `setting_value` FROM `" . Database::table('settings') . "` WHERE `setting_key` = 'schema_version'"
+	);
+	$schemaStatement->execute();
+	$schemaVersion = (int) $schemaStatement->fetchColumn();
+
 	foreach ($relations as [$child, $childColumn, $parent, $parentColumn]) {
 		$childTable = Database::table($child);
 		$parentTable = Database::table($parent);
@@ -96,7 +115,7 @@ try {
 $invalid = array_filter($orphans, static fn(int $count): bool => $count > 0);
 $result = [
 	'success' => $invalid === [],
-	'schema_version' => (int) Database::getSetting('schema_version', 0),
+	'schema_version' => $schemaVersion,
 	'checked_relations' => count($orphans),
 	'orphan_counts' => $orphans,
 ];

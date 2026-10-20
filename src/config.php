@@ -108,21 +108,17 @@ if (PHP_SAPI !== 'cli') {
  * used as-is (`D:/filehost-uploads`, `/mnt/storage/uploads`, `//nas/share/uploads`); a
  * relative one resolves against the project root, so the default stays `<project>/uploads`.
  */
-$resolveStoragePath = static function (string $constant, string $default): string {
-	if (!defined($constant)) {
-		return $default;
-	}
-	$path = trim((string) constant($constant));
-	if ($path === '') {
-		return $default;
-	}
-	$path = rtrim(str_replace('\\', '/', $path), '/');
-	$isAbsolute = preg_match('#^(//|/|[A-Za-z]:/)#', $path) === 1;
-	return $isAbsolute ? $path : PROJECT_ROOT . '/' . ltrim($path, '/');
-};
-define('UPLOADS_DIR', $resolveStoragePath('UPLOADS_PATH', PROJECT_ROOT . '/uploads'));
-define('DATA_DIR', $resolveStoragePath('DATA_PATH', PROJECT_ROOT . '/data'));
-unset($resolveStoragePath);
+require_once APP_ROOT . '/includes/LocalConfig.php';
+define('UPLOADS_DIR', filehostResolveStoragePath(
+	defined('UPLOADS_PATH') ? (string) constant('UPLOADS_PATH') : null,
+	PROJECT_ROOT . '/uploads',
+	PROJECT_ROOT
+));
+define('DATA_DIR', filehostResolveStoragePath(
+	defined('DATA_PATH') ? (string) constant('DATA_PATH') : null,
+	PROJECT_ROOT . '/data',
+	PROJECT_ROOT
+));
 
 // The HTTP test server must not share WAMP/Apache's global session directory. Files there
 // may belong to another service account, which makes an otherwise-correct cookie jar fail
