@@ -393,6 +393,40 @@ class FileManager
 		return $delete->rowCount() === 1;
 	}
 
+	/**
+	 * The owners' `delete` webhooks for files removed in bulk or by somebody else — retention,
+	 * the storage policy, moderation, an administrator's clean-up, "delete all my files". Only
+	 * the owner's own single deletes used to fire them, so integrations kept links to files
+	 * that were gone. Called inside the deleting transaction, so an event is sent only if the
+	 * delete commits; `reason` says why the file went.
+	 *
+	 * @param list<string> $ids rows still present (locked by the caller)
+	 */
+	private static function queueDeleteWebhooks(PDO $pdo, array $ids, string $reason): void
+	{
+		$files = self::table('files');
+		$byOwner = [];
+		foreach (array_chunk($ids, 500) as $chunk) {
+			$stmt = $pdo->prepare(
+				"SELECT `id`, `user_id`, `original_name`, `mime_type`, `size` FROM `{$files}`
+				 WHERE `id` IN (" . implode(',', array_fill(0, count($chunk), '?')) . ") AND `user_id` IS NOT NULL"
+			);
+			$stmt->execute($chunk);
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+				$byOwner[(int) $row['user_id']][] = [
+					'file' => [
+						'id' => (string) $row['id'],
+						'name' => $row['original_name'],
+						'mime' => $row['mime_type'],
+						'size' => (int) $row['size'],
+					],
+					'reason' => $reason,
+				];
+			}
+		}
+		WebhookRepository::enqueueForOwners('delete', $byOwner);
+	}
+
 	/** Queue and remove a bounded set of rows in one transaction. */
 	private static function deleteFileIds(
 		array $ids,
@@ -437,6 +471,7 @@ class FileManager
 				return 0;
 			}
 
+			self::queueDeleteWebhooks($pdo, array_map('strval', $selected), $reason);
 			foreach ($selected as $id) {
 				self::enqueuePhysicalDeletion(
 					$pdo,
@@ -782,6 +817,7 @@ class FileManager
 				return false;
 			}
 
+			self::queueDeleteWebhooks($pdo, [$id], 'admin_delete');
 			if (!self::deleteLockedFile($pdo, $id, 'admin_delete', 'admin')) {
 				throw new RuntimeException('The locked file row could not be deleted.');
 			}
@@ -931,6 +967,7 @@ class FileManager
 				$pdo->rollBack();
 				return false;
 			}
+			self::queueDeleteWebhooks($pdo, [$id], 'storage_policy');
 			if (!self::deleteLockedFile(
 				$pdo,
 				$id,

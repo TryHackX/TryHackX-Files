@@ -62,6 +62,42 @@ final class WebhookRepositoryTest extends RepoTestCase
 	}
 
 	/**
+	 * C-F20: only the owner's own single deletes told the owner's webhooks; files removed by
+	 * retention, the storage policy, moderation, an administrator's clean-up or "delete all"
+	 * left integrations holding links to nothing. Every path now sends `delete`, with the
+	 * reason, to owners subscribed to it — and only if the delete commits.
+	 */
+	public function testEveryKindOfRemovalTellsTheOwnersWebhooks(): void
+	{
+		$this->truncate('file_deletion_queue', 'files');
+		Database::createWebhook(3, 'https://example.com/del', 'sec', 'delete');
+		Database::createWebhook(8, 'https://example.com/up', 'sec', 'upload');
+		foreach (['wh3a' => 3, 'wh3b' => 3, 'wh3c' => 3, 'wh8' => 8, 'wh9' => 9, 'whguest' => null] as $id => $owner) {
+			$this->insertFile($id, $owner, ['original_name' => $id . '.txt', 'mime_type' => 'text/plain', 'size' => 5]);
+		}
+		$events = function (): array {
+			$rows = Database::getInstance()->query(
+				"SELECT `payload` FROM `" . Database::table('webhook_deliveries') . "` WHERE `event` = 'delete' ORDER BY `id`"
+			)->fetchAll(PDO::FETCH_COLUMN);
+			return array_map(static function (string $payload): array {
+				$decoded = json_decode($payload, true);
+				return [$decoded['file']['id'] ?? null, $decoded['reason'] ?? null];
+			}, $rows);
+		};
+
+		$this->assertSame(4, FileManager::deleteCleanupCandidates(['wh3a', 'wh8', 'wh9', 'whguest']));
+		$this->assertSame([['wh3a', 'admin_cleanup']], $events(), 'only an owner subscribed to delete hears');
+
+		$this->assertTrue(FileManager::deleteFileAdmin('wh3b'));
+		$this->assertSame(1, FileManager::deleteAllUserFiles(3));
+		$this->assertSame([
+			['wh3a', 'admin_cleanup'],
+			['wh3b', 'admin_delete'],
+			['wh3c', 'owner_delete_all'],
+		], $events());
+	}
+
+	/**
 	 * C-F14: a webhook reports every new upload of the account to its URL, and one added from a
 	 * hijacked session survived the owner's password change. A password change — the owner's
 	 * own, through a reset link, or set by an administrator — now removes the account's

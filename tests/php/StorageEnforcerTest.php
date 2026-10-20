@@ -122,6 +122,25 @@ final class StorageEnforcerTest extends RepoTestCase
 		$this->assertNull(StorageEnforcer::status($this->userId)['since']);
 	}
 
+	/** C-F20: the owner's integrations hear about a file the storage policy removed, and why. */
+	public function testAPolicyRemovalTellsTheOwnersWebhooks(): void
+	{
+		$this->truncate('webhook_deliveries', 'webhooks');
+		Database::createWebhook($this->userId, 'https://example.com/del', 'sec', 'delete');
+		for ($i = 0; $i < 6; $i++) {
+			$this->file('se_w' . $i, 2, 10 - $i);
+		}
+		StorageEnforcer::enforce($this->userId);
+		$this->backdateClock(20);
+		$this->assertSame(1, StorageEnforcer::enforce($this->userId)['deleted']);
+
+		$payload = json_decode((string) Database::getInstance()->query(
+			"SELECT `payload` FROM `" . Database::table('webhook_deliveries') . "` WHERE `event` = 'delete'"
+		)->fetchColumn(), true);
+		$this->assertSame('se_w0', $payload['file']['id'] ?? null);
+		$this->assertSame('storage_policy', $payload['reason'] ?? null);
+	}
+
 	/** A file larger than the group's per-file limit is a violation on its own. */
 	public function testOversizeFileIsReportedAndRemovedFirst(): void
 	{

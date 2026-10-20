@@ -96,6 +96,40 @@ final class WebhookRepository
 	}
 
 	/**
+	 * enqueueEvent() for a batch: one event per payload, grouped by owner. Owners without an
+	 * active webhook cost one shared lookup, not one per file, so a retention sweep or an
+	 * administrator's clean-up of thousands of files stays cheap. Runs on the caller's
+	 * connection, so inside its transaction the deliveries exist only if that commits.
+	 *
+	 * @param array<int, list<array<string, mixed>>> $payloadsByOwner owner id => payloads
+	 * @return int deliveries queued
+	 */
+	public static function enqueueForOwners(string $event, array $payloadsByOwner): int
+	{
+		$owners = array_values(array_filter(array_map('intval', array_keys($payloadsByOwner)), fn($id) => $id > 0));
+		$pdo = Database::getInstance();
+		if (!$pdo || $owners === [] || !in_array($event, self::EVENTS, true)) {
+			return 0;
+		}
+		$queued = 0;
+		try {
+			foreach (array_chunk($owners, 500) as $chunk) {
+				$stmt = $pdo->prepare("SELECT DISTINCT `user_id` FROM `" . Database::table('webhooks') . "`
+					WHERE `is_active` = 1 AND `user_id` IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")");
+				$stmt->execute($chunk);
+				foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $ownerId) {
+					foreach ($payloadsByOwner[(int) $ownerId] ?? [] as $payload) {
+						$queued += self::enqueueEvent((int) $ownerId, $event, $payload);
+					}
+				}
+			}
+		} catch (PDOException $e) {
+			return $queued;
+		}
+		return $queued;
+	}
+
+	/**
 	 * Enqueue a delivery for every active webhook of $userId subscribed to $event.
 	 * Cheap and non-blocking (one indexed lookup + inserts); the worker does the POSTs.
 	 * Returns the number of deliveries queued.
