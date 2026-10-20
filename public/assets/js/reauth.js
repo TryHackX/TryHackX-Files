@@ -34,7 +34,15 @@
 	}
 
 	function buildDialog() {
-		var bg = el('div', { class: 'modal-bg', id: 'reauthModal', role: 'dialog', 'aria-modal': 'true' });
+		// `data-fh-runtime`: built here, never part of a server page (see the live language
+		// switch in ui.js, which lines the two up).
+		var bg = el('div', {
+			class: 'modal-bg',
+			id: 'reauthModal',
+			role: 'dialog',
+			'aria-modal': 'true',
+			'data-fh-runtime': ''
+		});
 		var modal = el('div', { class: 'modal' });
 		var header = el('div', { class: 'modal-header' });
 		header.appendChild(el('h3', {}, tr('panel.reauth.title')));

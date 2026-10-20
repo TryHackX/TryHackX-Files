@@ -25,6 +25,8 @@
 		if (stack && stack.isConnected) return stack;
 		stack = document.createElement('div');
 		stack.className = 'toast-stack';
+		// Added at run time, so the live language switch must not expect it in a fresh page.
+		stack.setAttribute('data-fh-runtime', '');
 		document.body.appendChild(stack);
 		return stack;
 	}
@@ -138,6 +140,7 @@
 		var item = tpl.cloneNode(true);
 		item.classList.remove('show');
 		item.classList.add('toast-item');
+		item.setAttribute('data-fh-runtime', '');
 		var itemText = textNode(item);
 		itemText.setAttribute('data-toast-text', '');
 		itemText.textContent = String(message);
@@ -300,6 +303,12 @@
  * JS-rendered tables the freshly fetched one still shows as "Loading…", and those must not be
  * clobbered. They pick the new language up on their next refresh, because `window.I18N` is
  * swapped too. Anything unexpected falls back to a normal navigation, which always works.
+ *
+ * Nodes added at run time — the toast stack, the copy tip, the password prompt (all marked
+ * `data-fh-runtime`), captcha and ad frames, whatever a browser extension inserts — exist only
+ * in the live page. They are passed over when the two trees are lined up; comparing raw child
+ * counts used to make the whole <body> look "different" after the first toast, so nothing below
+ * it was translated any more.
  */
 (function () {
 	'use strict';
@@ -307,11 +316,73 @@
 	// Attributes that hold user-visible copy. `value` is deliberately absent: it would
 	// overwrite what someone has typed.
 	var TEXT_ATTRS = ['placeholder', 'title', 'aria-label', 'alt'];
+	// Walked into, never through: their content is code or what someone typed.
 	var SKIP_TAGS = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1 };
+	// Not part of the comparison at all. The server puts no copy in them, and third-party
+	// widgets and the browser add them at run time.
+	var IGNORED_TAGS = { SCRIPT: 1, STYLE: 1, LINK: 1, NOSCRIPT: 1, TEMPLATE: 1, IFRAME: 1, INS: 1 };
+
+	/** Does this child belong to the server-rendered shape the two trees are compared on? */
+	function comparable(node) {
+		if (node.nodeType === 3) return /\S/.test(node.nodeValue || '');
+		if (node.nodeType !== 1 || IGNORED_TAGS[node.nodeName]) return false;
+		return !node.hasAttribute('data-fh-runtime');
+	}
+
+	/** What a child is, for lining it up: element, id and leading class (scripts only append classes). */
+	function identity(node) {
+		if (node.nodeType === 3) return '#text';
+		var leading = String(node.getAttribute('class') || '').trim().split(/\s+/)[0];
+		return node.nodeName + '#' + (node.getAttribute('id') || '') + '.' + leading;
+	}
+
+	/**
+	 * Pair the live children with the freshly rendered ones: [[live, fresh], …], or null when the
+	 * two cannot be lined up.
+	 *
+	 * Same count: in order, as the page rendered them (a pair whose identity differs is left out
+	 * rather than written into the wrong element). Different counts: the shorter list has to fit
+	 * into the longer one in order — something was added at run time, or a script removed a
+	 * node — and the leftovers are passed over. Anything else is a subtree the page rendered
+	 * itself.
+	 */
+	function align(live, fresh) {
+		var liveKids = Array.prototype.filter.call(live.childNodes, comparable);
+		var freshKids = Array.prototype.filter.call(fresh.childNodes, comparable);
+		var pairs = [];
+		var i;
+		if (liveKids.length === freshKids.length) {
+			for (i = 0; i < liveKids.length; i++) {
+				if (identity(liveKids[i]) === identity(freshKids[i])) pairs.push([liveKids[i], freshKids[i]]);
+			}
+			return pairs;
+		}
+		var liveLonger = liveKids.length > freshKids.length;
+		var shorter = liveLonger ? freshKids : liveKids;
+		var longer = liveLonger ? liveKids : freshKids;
+		var at = 0;
+		for (i = 0; i < shorter.length; i++) {
+			var wanted = identity(shorter[i]);
+			while (at < longer.length && identity(longer[at]) !== wanted) at++;
+			if (at === longer.length) return null;
+			pairs.push(liveLonger ? [longer[at], shorter[i]] : [shorter[i], longer[at]]);
+			at++;
+		}
+		return pairs;
+	}
+
+	/**
+	 * "Loading…" is only ever a placeholder. Whatever the live page shows in its place by now —
+	 * a table, or "nothing here" — is newer than that text, so it is never copied over.
+	 */
+	function isPlaceholder(text) {
+		var loading = window.I18N && window.I18N['common.loading'];
+		return Boolean(loading) && String(text).trim() === loading;
+	}
 
 	function sync(live, fresh) {
 		if (live.nodeType === 3 && fresh.nodeType === 3) {
-			if (live.nodeValue !== fresh.nodeValue) {
+			if (live.nodeValue !== fresh.nodeValue && !isPlaceholder(fresh.nodeValue)) {
 				live.nodeValue = fresh.nodeValue;
 			}
 			return;
@@ -325,24 +396,39 @@
 			}
 		});
 
-		// Different shape = a subtree the page rendered itself. Leave it alone.
-		if (live.childNodes.length !== fresh.childNodes.length) return;
-		for (var i = 0; i < live.childNodes.length; i++) {
-			sync(live.childNodes[i], fresh.childNodes[i]);
-		}
+		// No pairing = a subtree the page rendered itself. Leave it alone.
+		var pairs = align(live, fresh);
+		if (!pairs) return;
+		pairs.forEach(function (pair) { sync(pair[0], pair[1]); });
+	}
+
+	/**
+	 * Accessible names the page derived from a `title` at load (icon-only buttons) are not in
+	 * the fetched page, so they are derived again from the title that has just been translated.
+	 */
+	function refreshDerivedLabels() {
+		Array.prototype.forEach.call(document.querySelectorAll('[data-fh-aria-from-title]'), function (el) {
+			var title = el.getAttribute('title');
+			if (title) el.setAttribute('aria-label', title);
+		});
 	}
 
 	function apply(html, href) {
 		var doc = new DOMParser().parseFromString(html, 'text/html');
 		var data = doc.getElementById('i18n-data');
 		if (!data || !doc.body) throw new Error('unexpected response');
+		// The top level of every page is server output. If even that cannot be lined up, the
+		// caller falls back to a normal navigation — before anything here was changed.
+		var top = align(document.body, doc.body);
+		if (!top) throw new Error('page structure changed');
 
 		// New dictionary first, so anything re-rendered afterwards is already translated.
 		window.I18N = JSON.parse(data.textContent);
 		window.LANG = doc.documentElement.getAttribute('lang') || window.LANG;
 		document.documentElement.setAttribute('lang', window.LANG);
 
-		sync(document.body, doc.body);
+		top.forEach(function (pair) { sync(pair[0], pair[1]); });
+		refreshDerivedLabels();
 
 		// The switcher's own active state and links are pure server output — take them whole.
 		var freshSwitch = doc.querySelector('.lang-switch');
@@ -353,15 +439,19 @@
 		if (title) document.title = title.textContent;
 
 		// Drop ?lang= from the address bar: the choice now lives in the cookie, and a reload
-		// should not look like a fresh switch.
+		// should not look like a fresh switch. A password-reset token (and the action that
+		// opens its form) never goes back into the address bar either: auth.js removed it on
+		// purpose, so the link cannot be shared or kept in history by accident.
 		try {
 			var url = new URL(href, window.location.href);
-			url.searchParams.delete('lang');
+			['lang', 'token', 'action'].forEach(function (name) { url.searchParams.delete(name); });
 			window.history.replaceState({}, '', url.pathname + url.search + url.hash);
 		} catch (e) { /* address bar is cosmetic here */ }
 
 		document.dispatchEvent(new CustomEvent('fh:languagechange', { detail: { lang: window.LANG } }));
 	}
+
+	window.FHLang = Object.freeze({ align: align, sync: sync, apply: apply });
 
 	document.addEventListener('click', function (e) {
 		var link = e.target.closest ? e.target.closest('.lang-switch .lang-opt') : null;

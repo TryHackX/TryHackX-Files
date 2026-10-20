@@ -20,6 +20,10 @@
         // premium link takes the place it used to occupy.
         $__langBase = strtok($_SERVER['REQUEST_URI'] ?? '/', '?');
         $__langQuery = $_GET;
+        // A password-reset link must not travel on in the language links: auth.js strips the
+        // token from the address bar so it is not shared by accident, and the live switch would
+        // put it straight back. `action` only opens that form (or sign-in) once.
+        unset($__langQuery['token'], $__langQuery['action']);
         ?>
         <div class="lang-switch" role="group" aria-label="<?= _h('common.language') ?>">
             <?php /* pt 6: the switcher lists what the admin chose to offer here — not every

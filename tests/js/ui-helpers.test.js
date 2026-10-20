@@ -136,6 +136,159 @@ test('no page script reads the theme back from web storage any more', () => {
 	assert.doesNotMatch(read('panel.js'), /document\.cookie\s*=/);
 });
 
+/**
+ * The live language switch, run against two small element trees: the page as it is now (`live`,
+ * with whatever scripts added since it loaded) and the same page fetched in the new language.
+ */
+function loadLanguageSwitch({ live, fresh, location = 'https://files.example/' }) {
+	const { createMiniDocument } = require('./support/mini-dom');
+	const document = createMiniDocument();
+	document.documentElement.setAttribute('lang', 'pl');
+	document.title = 'Strona';
+	document.cookie = '';
+	document.dispatched = [];
+	document.dispatchEvent = event => { document.dispatched.push(event); };
+	live(document);
+
+	const freshDoc = createMiniDocument();
+	freshDoc.documentElement.setAttribute('lang', 'en');
+	const data = freshDoc.createElement('script');
+	data.id = 'i18n-data';
+	data.textContent = JSON.stringify({ 'common.loading': 'Loading…', greeting: 'Hello' });
+	fresh(freshDoc);
+	freshDoc.body.appendChild(data);
+	const findInFresh = freshDoc.querySelector;
+	freshDoc.querySelector = selector => (selector === 'title' ? { textContent: 'Page' } : findInFresh(selector));
+
+	const replaced = [];
+	const window = {
+		innerHeight: 900, innerWidth: 1200,
+		addEventListener() {}, removeEventListener() {},
+		history: { replaceState: (_state, _title, url) => replaced.push(url) },
+		location: { href: location },
+		I18N: { 'common.loading': 'Ładowanie…', greeting: 'Witaj' },
+		LANG: 'pl'
+	};
+	window.window = window;
+	const context = {
+		document,
+		window,
+		requestAnimationFrame: cb => cb(),
+		setTimeout: () => 1,
+		clearTimeout() {},
+		DOMParser: class { parseFromString() { return freshDoc; } },
+		CustomEvent: class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } },
+		URL,
+		fetch: async () => ({ ok: true, text: async () => '<html>' }),
+		Promise
+	};
+	vm.createContext(context);
+	vm.runInContext(read('ui.js'), context, { filename: 'ui.js' });
+	return { window, document, replaced };
+}
+
+/** The bits of a page both trees share: a header with the switcher, a greeting, a close button. */
+function pageSkeleton(doc, { greeting, close }) {
+	const header = doc.add('header');
+	const sw = doc.createElement('div');
+	sw.className = 'lang-switch';
+	header.appendChild(sw);
+	const p = doc.add('p', 'greeting');
+	p.textContent = greeting;
+	const button = doc.add('button', 'closeBtn');
+	button.setAttribute('title', close);
+	return { header, p, button };
+}
+
+test('the live language switch still translates the page after scripts added nodes to <body>', () => {
+	let livePage;
+	const { window, document, replaced } = loadLanguageSwitch({
+		location: 'https://files.example/?action=reset&token=SECRET',
+		live(doc) {
+			livePage = pageSkeleton(doc, { greeting: 'Witaj', close: 'Zamknij' });
+			livePage.button.setAttribute('aria-label', 'Zamknij');
+			livePage.button.setAttribute('data-fh-aria-from-title', '');
+			// What the page and the world add after load: our toast stack, a captcha frame and
+			// whatever a browser extension appends (no marker on that one).
+			const stack = doc.add('div');
+			stack.className = 'toast-stack';
+			stack.setAttribute('data-fh-runtime', '');
+			stack.textContent = 'Skopiowano';
+			doc.add('iframe');
+			doc.add('div').className = 'extension-widget';
+		},
+		fresh(doc) { pageSkeleton(doc, { greeting: 'Hello', close: 'Close' }); }
+	});
+
+	window.FHLang.apply('<html>', '/?lang=en&action=reset&token=SECRET');
+
+	assert.equal(livePage.p.textContent, 'Hello', 'text below <body> is translated');
+	assert.equal(livePage.button.getAttribute('title'), 'Close');
+	assert.equal(livePage.button.getAttribute('aria-label'), 'Close', 'a label derived from the title follows it');
+	assert.equal(window.I18N.greeting, 'Hello');
+	assert.equal(window.LANG, 'en');
+	assert.equal(document.documentElement.getAttribute('lang'), 'en');
+	assert.equal(document.querySelector('.toast-stack').textContent, 'Skopiowano', 'run-time nodes are left alone');
+	assert.deepEqual(replaced, ['/'], 'neither lang nor the reset token goes back into the address bar');
+	assert.equal(document.dispatched[0].type, 'fh:languagechange');
+});
+
+test('the live language switch never copies a "Loading…" placeholder over what the page rendered', () => {
+	let list;
+	const { window } = loadLanguageSwitch({
+		live(doc) {
+			pageSkeleton(doc, { greeting: 'Witaj', close: 'Zamknij' });
+			list = doc.add('div', 'myList');
+			const empty = doc.createElement('p');
+			empty.className = 'empty';
+			empty.textContent = 'Brak plików';
+			list.appendChild(empty);
+		},
+		fresh(doc) {
+			pageSkeleton(doc, { greeting: 'Hello', close: 'Close' });
+			const placeholder = doc.add('div', 'myList');
+			const loading = doc.createElement('p');
+			loading.className = 'empty';
+			loading.textContent = 'Loading…';
+			placeholder.appendChild(loading);
+		}
+	});
+
+	window.FHLang.apply('<html>', '/?lang=en');
+	assert.equal(list.textContent, 'Brak plików');
+	assert.equal(window.LANG, 'en');
+});
+
+test('a page whose top level no longer matches falls back to a normal navigation, untouched', async () => {
+	let livePage;
+	const { window, document } = loadLanguageSwitch({
+		live(doc) {
+			livePage = pageSkeleton(doc, { greeting: 'Witaj', close: 'Zamknij' });
+		},
+		fresh(doc) {
+			doc.add('main').textContent = 'Something else entirely';
+			doc.add('aside');
+			doc.add('footer');
+			doc.add('nav');
+		}
+	});
+
+	assert.throws(() => window.FHLang.apply('<html>', '/?lang=en'), /structure/);
+	assert.equal(livePage.p.textContent, 'Witaj');
+	assert.equal(window.I18N.greeting, 'Witaj', 'the dictionary is not swapped either');
+
+	// Through the click handler: the failure becomes a plain navigation to the link.
+	const link = { classList: { contains: () => false }, getAttribute: () => '/?lang=en' };
+	const event = {
+		target: { closest: selector => (selector === '.lang-switch .lang-opt' ? link : null) },
+		button: 0,
+		preventDefault() {}
+	};
+	(document.listeners.click || []).forEach(handler => handler(event));
+	for (let i = 0; i < 5; i += 1) await new Promise(resolve => setImmediate(resolve));
+	assert.equal(window.location.href, '/?lang=en');
+});
+
 test('singleFlight() runs a task once while it is in flight and marks the control busy', async () => {
 	const { context } = loadUi();
 	const button = element('button');

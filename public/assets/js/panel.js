@@ -145,6 +145,7 @@
 		const overlay = document.createElement('div');
 		overlay.className = 'table-loading-overlay';
 		overlay.setAttribute('aria-hidden', 'true');
+		overlay.setAttribute('data-fh-runtime', '');
 		overlay.innerHTML = '<span class="skel table-loading-indicator"></span>';
 
 		wrapper.classList.add('table-loading');
@@ -319,6 +320,8 @@
 		document.querySelectorAll('button[title], a[title]').forEach(el => {
 			if (!el.getAttribute('aria-label') && !el.textContent.trim()) {
 				el.setAttribute('aria-label', el.getAttribute('title'));
+				// Re-derived from the translated title after a live language switch (ui.js).
+				el.setAttribute('data-fh-aria-from-title', '');
 			}
 		});
 		bindLabels(document);
@@ -957,8 +960,10 @@
 
 		// pkt 1: the header can change language without a reload, but the tables on this page are
 		// rendered by JS and still hold the old strings. Re-render the active tab once the new
-		// dictionary is in place.
+		// dictionary is in place. The refresher is the silent poll, so the stored ETags go first:
+		// the data has not changed, and a 304 would leave every row in the old language.
 		document.addEventListener('fh:languagechange', () => {
+			Object.keys(liveEtags).forEach(key => { delete liveEtags[key]; });
 			const refresh = liveRefresher();
 			if (refresh) refresh();
 		});

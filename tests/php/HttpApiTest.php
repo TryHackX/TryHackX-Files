@@ -1429,6 +1429,22 @@ final class HttpApiTest extends TestCase
 		$this->assertStringNotContainsString('Your account is suspended', $tab['body']);
 	}
 
+	/** The language links on a password-reset page do not carry the reset token along. */
+	public function testLanguageLinksDropThePasswordResetToken(): void
+	{
+		$marker = 'resetmarker' . bin2hex(random_bytes(6));
+		$page = self::rawRequest('GET', '/index.php?action=reset&token=' . $marker . '&msg=verified');
+		$this->assertSame(200, $page['status']);
+		$this->assertStringNotContainsString($marker, $page['body'], 'the token is printed nowhere, language links included');
+		preg_match_all('/<a href="([^"]*)"\s+class="lang-opt/', $page['body'], $links);
+		$this->assertNotEmpty($links[1], 'the header offers the language switch');
+		foreach ($links[1] as $href) {
+			$query = html_entity_decode($href, ENT_QUOTES | ENT_HTML5);
+			$this->assertStringNotContainsString('action=', $query);
+			$this->assertStringContainsString('msg=verified', $query, 'ordinary parameters still follow the switch');
+		}
+	}
+
 	/** A second recovery request moments later leaves the first link alone and mails nothing. */
 	public function testRecoveryIsNotResentForTheSameAccountWithinMinutes(): void
 	{

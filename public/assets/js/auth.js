@@ -1052,7 +1052,11 @@
                 }
             });
             document.querySelectorAll('button[title], a[title]').forEach(function (el) {
-                if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', el.getAttribute('title'));
+                if (!el.getAttribute('aria-label') && !el.textContent.trim()) {
+                    el.setAttribute('aria-label', el.getAttribute('title'));
+                    // Re-derived from the translated title after a live language switch (ui.js).
+                    el.setAttribute('data-fh-aria-from-title', '');
+                }
             });
             document.querySelectorAll('.auth-close, .modal-close, .captcha-close').forEach(function (el) {
                 if (!el.getAttribute('aria-label') && !el.textContent.trim()) el.setAttribute('aria-label', t('js.close'));

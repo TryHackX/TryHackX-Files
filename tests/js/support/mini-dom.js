@@ -14,6 +14,9 @@ class MiniText {
 		this.parentNode = null;
 	}
 
+	get nodeName() { return '#text'; }
+	get nodeValue() { return this.data; }
+	set nodeValue(value) { this.data = String(value); }
 	get textContent() { return this.data; }
 }
 
@@ -52,6 +55,9 @@ class MiniElement {
 	set className(value) { this._classes = new Set(String(value).split(/\s+/).filter(Boolean)); }
 	get id() { return this.attributes.id || ''; }
 	set id(value) { this.attributes.id = String(value); }
+	get nodeName() { return this.tagName; }
+	/** Text and element children together, like the DOM's childNodes (this tree keeps both in `children`). */
+	get childNodes() { return this.children; }
 	get isConnected() {
 		let node = this;
 		while (node) {
@@ -77,10 +83,22 @@ class MiniElement {
 	get innerHTML() { return this._html; }
 	set innerHTML(value) { this._html = String(value); this.children = []; }
 
-	setAttribute(name, value) { this.attributes[name] = String(value); }
-	getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null; }
-	hasAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attributes, name); }
-	removeAttribute(name) { delete this.attributes[name]; }
+	setAttribute(name, value) {
+		if (name === 'class') { this.className = value; return; }
+		this.attributes[name] = String(value);
+	}
+	getAttribute(name) {
+		if (name === 'class') return this._classes.size ? this.className : null;
+		return Object.prototype.hasOwnProperty.call(this.attributes, name) ? this.attributes[name] : null;
+	}
+	hasAttribute(name) {
+		if (name === 'class') return this._classes.size > 0;
+		return Object.prototype.hasOwnProperty.call(this.attributes, name);
+	}
+	removeAttribute(name) {
+		if (name === 'class') { this._classes = new Set(); return; }
+		delete this.attributes[name];
+	}
 
 	appendChild(node) {
 		if (node.parentNode) node.parentNode.removeChild(node);

@@ -449,6 +449,16 @@
 			if (document.querySelector('.modal-bg.show, .auth-modal.show')) return;
 			loadActiveDownloads();
 		}, ACTIVE_POLL_MS);
+		// After a live language switch the next tick redraws both tables whole: an empty table
+		// otherwise keeps its "nothing running" line in the old language until something starts.
+		document.addEventListener('fh:languagechange', () => {
+			['activeDownloadsBody', 'activeUploadsBody'].forEach(id => {
+				const tbody = document.getElementById(id);
+				if (!tbody) return;
+				delete tbody.dataset.syncState;
+				tbody.liveRows = [];
+			});
+		});
 	}
 
 

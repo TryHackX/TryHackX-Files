@@ -821,6 +821,7 @@
 		if (!copyTipEl) {
 			copyTipEl = document.createElement('div');
 			copyTipEl.className = 'copy-tip';
+			copyTipEl.setAttribute('data-fh-runtime', ''); // not in the server's page (ui.js, live language switch)
 			document.body.appendChild(copyTipEl);
 		}
 		copyTipEl.textContent = text;
