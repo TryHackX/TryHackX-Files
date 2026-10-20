@@ -168,15 +168,10 @@ final class TokenRepository
 			if (!$row) {
 				return null;
 			}
-			// The cap the panel saves and the upload server enforces, per audience. This used to
-			// read `recaptcha_max_files_per_session`, a key nothing writes, so the page always
-			// showed "unlimited" until the upload server refused the next file.
-			$maxFiles = (int) Database::getSetting(
-				!empty($row['user_id'])
-					? 'recaptcha_max_files_per_session_auth'
-					: 'recaptcha_max_files_per_session_guest',
-				0
-			);
+			// The cap the upload server applies to this session: the token owner's group, or the
+			// flat per-session setting where the group leaves it at 0 (GroupRepository::
+			// filesPerSession). The flat setting alone ignored a group's own cap.
+			$maxFiles = GroupRepository::filesPerSession(!empty($row['user_id']) ? (int) $row['user_id'] : null);
 			return [
 				'valid' => true,
 				'files_uploaded' => (int) ($row['files_count'] ?? 0),

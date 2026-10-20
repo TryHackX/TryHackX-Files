@@ -189,7 +189,11 @@ final class PremiumController
 		$items = [
 			'quota' => ['icon' => 'fa-database', 'label' => __('premium.limit_quota'), 'value' => $mb((int) $group['storage_quota_mb'])],
 			'file' => ['icon' => 'fa-file-arrow-up', 'label' => __('premium.limit_file'), 'value' => $mb((int) $group['max_file_size_mb'])],
-			'files' => ['icon' => 'fa-layer-group', 'label' => __('premium.limit_files'), 'value' => $count((int) $group['max_files_per_session'])],
+			// The cap the upload server applies: a group's 0 means the flat per-session setting,
+			// not "unlimited" (which is what this card used to promise).
+			'files' => ['icon' => 'fa-layer-group', 'label' => __('premium.limit_files'), 'value' => $count(
+				GroupRepository::filesPerSessionFor($group, ($group['slug'] ?? '') !== 'guest')
+			)],
 			'concurrent' => ['icon' => 'fa-download', 'label' => __('premium.limit_concurrent'), 'value' => $count((int) $group['concurrent_downloads'])],
 		];
 
@@ -1081,7 +1085,7 @@ final class PremiumController
 				'name' => (string) $group['name'],
 				'quotaMb' => (int) ($effectiveGroup['storage_quota_mb'] ?? 0),
 				'maxFileMb' => (int) ($effectiveGroup['max_file_size_mb'] ?? 0),
-				'filesPerSession' => (int) ($effectiveGroup['max_files_per_session'] ?? 0),
+				'filesPerSession' => GroupRepository::filesPerSessionFor($effectiveGroup, true),
 				'concurrent' => (int) ($effectiveGroup['concurrent_downloads'] ?? 0),
 				'retentionDays' => GroupRepository::retentionDays($effectiveGroup),
 				'transferLimit' => (int) ($effectiveGroup['transfer_quota_bytes'] ?? 0),

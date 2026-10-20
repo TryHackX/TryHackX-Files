@@ -310,6 +310,34 @@ final class GroupRepository
 		return self::mergeLimits(self::forUser($userId), self::staffForUser($userId));
 	}
 
+	/**
+	 * How many files one upload session (one upload token) may take — the cap the upload server
+	 * applies (upload_server.py, reserve_upload_slot): the group's `max_files_per_session`, or,
+	 * where the group leaves it at 0, the flat per-session setting for signed-in accounts or
+	 * for guests. 0 = no cap. The plans page, the upload page and the session line all ask here,
+	 * so none of them promises a number the upload server does not apply.
+	 */
+	public static function filesPerSessionFor(?array $group, bool $signedIn): int
+	{
+		$own = max(0, (int) ($group['max_files_per_session'] ?? 0));
+		if ($own > 0) {
+			return $own;
+		}
+		return max(0, (int) Database::getSetting(
+			$signedIn ? 'recaptcha_max_files_per_session_auth' : 'recaptcha_max_files_per_session_guest',
+			0
+		));
+	}
+
+	/** filesPerSessionFor() for one uploader: an account (its effective group) or a guest. */
+	public static function filesPerSession(?int $userId): int
+	{
+		if ($userId !== null && $userId > 0) {
+			return self::filesPerSessionFor(self::effectiveForUser($userId), true);
+		}
+		return self::filesPerSessionFor(self::getBySlug('guest'), false);
+	}
+
 	/** Create (id = null) or update a group. Returns ['success'=>bool, 'id'=>int] or an error. */
 	public static function save(?int $id, array $data): array
 	{

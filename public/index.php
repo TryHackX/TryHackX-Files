@@ -41,21 +41,22 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 
 // Effective per-user limits come from the user's group (A8), falling back to the flat
 // user-tier settings when a group leaves a field at 0. Guests use the guest-tier settings.
+// The files-per-session cap is the one the upload server applies (0 = no cap); see
+// GroupRepository::filesPerSession().
 $userLimitMB = USER_MAX_FILE_SIZE_MB;
-$userLimitFiles = USER_MAX_FILES;
+$userLimitFiles = GroupRepository::filesPerSessionFor(GroupRepository::getDefault(), true);
+$guestLimitFiles = GroupRepository::filesPerSession(null);
 if ($currentUser) {
 	$grp = Database::getUserEffectiveGroup((int) $currentUser['id']);
 	if ($grp) {
 		if ((int) $grp['max_file_size_mb'] > 0) {
 			$userLimitMB = (int) $grp['max_file_size_mb'];
 		}
-		if ((int) $grp['max_files_per_session'] > 0) {
-			$userLimitFiles = (int) $grp['max_files_per_session'];
-		}
+		$userLimitFiles = GroupRepository::filesPerSessionFor($grp, true);
 	}
 }
 $maxSizeMB = $currentUser ? $userLimitMB : GUEST_MAX_FILE_SIZE_MB;
-$maxFiles = $currentUser ? $userLimitFiles : GUEST_MAX_FILES;
+$maxFiles = $currentUser ? $userLimitFiles : $guestLimitFiles;
 
 // Single source of truth for the blocked-extension list (DB), shared with the Python server.
 $blockedExtList = array_values(array_filter(array_map(
@@ -345,7 +346,7 @@ $homeNotice = [
 		'uploadUrl' => $appUrl . '/api/upload',
 		'guestLimitMB' => GUEST_MAX_FILE_SIZE_MB,
 		'userLimitMB' => $userLimitMB,
-		'guestLimitFiles' => GUEST_MAX_FILES,
+		'guestLimitFiles' => $guestLimitFiles,
 		'userLimitFiles' => $userLimitFiles,
 		'maxSizeMB' => $maxSizeMB,
 		'maxFiles' => $maxFiles,
