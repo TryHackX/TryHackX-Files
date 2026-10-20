@@ -24,6 +24,7 @@ $appUrl = APP_URL;
 $fileId = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
 $file = null;
 $error = null;
+$fileGone = false;
 $isProtected = false;
 $previewPolicy = ['allowed' => false, 'reason' => ''];
 
@@ -39,8 +40,20 @@ if (empty($fileId)) {
 	$error = __('download.err_bad_id');
 } else {
 	$file = FileManager::getFile($fileId);
+	$closedReason = $file ? FileManager::linkClosedReason(Database::getFileSharingState($fileId)) : null;
 	if (!$file) {
 		$error = __('download.err_gone');
+	} elseif ($closedReason !== null) {
+		// The link expired, its one use is spent or its download cap is reached: the upload
+		// server refuses the bytes, so the page says which instead of offering a button that
+		// could only fail.
+		$error = __([
+			'expired' => 'download.err_expired',
+			'used' => 'download.err_used',
+			'limit' => 'download.err_limit',
+		][$closedReason]);
+		$fileGone = true;
+		$file = null;
 	} else {
 		// Names are stored exactly as uploaded (the sidecar decodes the header once); decoding
 		// again turned `C++ notes.pdf` into `C   notes.pdf`.
@@ -54,11 +67,12 @@ if (empty($fileId)) {
 	}
 }
 // A dead link answers like one, so link checkers, caches and search engines drop it instead of
-// keeping the error page as a live document. A deleted file cannot be told apart from one that
-// never existed (nothing is kept of it), so both are 404 rather than 410.
+// keeping the error page as a live document: 410 for a link that expired or was used up (it will
+// not come back), 404 for an id that is missing, malformed or unknown. A deleted file cannot be
+// told apart from one that never existed (nothing is kept of it), so it is a 404.
 $robotsNoindex = $error !== null;
 if ($error !== null) {
-	http_response_code(404);
+	http_response_code($fileGone ? 410 : 404);
 }
 ?>
 <?php
@@ -90,7 +104,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 		<?php if ($error): ?>
 			<div class="error-box">
 				<div class="icon"><i class="fa-regular fa-face-frown"></i></div>
-				<h2><?= _h('download.not_found_title') ?></h2>
+				<h2><?= _h($fileGone ? 'download.gone_title' : 'download.not_found_title') ?></h2>
 				<p><?= htmlspecialchars($error) ?></p>
 				<a href="<?= $appUrl ?>/" class="btn btn-primary">
 					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

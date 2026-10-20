@@ -143,6 +143,29 @@ class FileManager
 	}
 
 	/**
+	 * Why a share link — a file's or a collection's row — opens nothing any more: 'expired' (its
+	 * expiry passed), 'used' (a one-time link that has been used) or 'limit' (its download cap
+	 * is reached), or null while it still works. The upload server refuses all three, so the
+	 * pages answer 410 with the reason instead of a download button that could only fail.
+	 *
+	 * @param array<string, mixed> $row columns expires_at, one_time, consumed_at, max_downloads, downloads
+	 */
+	public static function linkClosedReason(array $row, ?int $now = null): ?string
+	{
+		$now ??= time();
+		if (!empty($row['expires_at']) && (int) $row['expires_at'] < $now) {
+			return 'expired';
+		}
+		if (!empty($row['one_time']) && !empty($row['consumed_at'])) {
+			return 'used';
+		}
+		if (!empty($row['max_downloads']) && (int) ($row['downloads'] ?? 0) >= (int) $row['max_downloads']) {
+			return 'limit';
+		}
+		return null;
+	}
+
+	/**
 	 * May this visitor receive the whole file as an inline preview?
 	 *
 	 * A preview is the complete file — a video player or `curl` gets every byte of it — yet it

@@ -1286,10 +1286,35 @@ final class HttpApiTest extends TestCase
 		}
 	}
 
+	/** A stored file the HTTP server can serve: bytes on disk under the test uploads root, plus its row. */
+	private static function storeHttpFile(string $name, string $bytes, array $extra = []): string
+	{
+		$id = bin2hex(random_bytes(8));
+		$dir = PROJECT_ROOT . '/tests/php/.tmp-uploads-http/' . $id;
+		mkdir($dir, 0700, true);
+		file_put_contents($dir . '/' . $name, $bytes);
+		$cols = array_merge([
+			'id' => $id,
+			'original_name' => $name,
+			'mime_type' => 'text/plain',
+			'size' => strlen($bytes),
+			'delete_token' => password_hash('tok', PASSWORD_DEFAULT),
+			'uploaded_at' => time(),
+			'uploaded_ip' => '203.0.113.1',
+			'downloads' => 0,
+		], $extra);
+		Database::getInstance()->prepare(
+			'INSERT INTO `' . Database::table('files') . '` (`' . implode('`,`', array_keys($cols)) . '`)
+			 VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')'
+		)->execute(array_values($cols));
+		return $id;
+	}
+
 	/**
 	 * A dead file or collection link answers like one — 404 for a missing, malformed or unknown
-	 * id, 410 for a collection link that expired or was used up — and asks not to be indexed,
-	 * so link checkers, caches and search engines stop treating it as a live page.
+	 * id, 410 for a link that expired, was used up or reached its download cap, saying which and
+	 * offering no download — and asks not to be indexed, so link checkers, caches and search
+	 * engines stop treating it as a live page.
 	 */
 	public function testDeadLinksAnswerNotFoundOrGone(): void
 	{
@@ -1326,6 +1351,37 @@ final class HttpApiTest extends TestCase
 		$live = self::rawRequest('GET', '/collection.php?id=httplive' . $suffix);
 		$this->assertSame(200, $live['status']);
 		$this->assertStringNotContainsString($noindex, $live['body']);
+
+		// A download cap reached with "keep" leaves the collection, but not its link.
+		Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('collections') . "`
+			 (`id`, `name`, `user_id`, `delete_token`, `downloads`, `created_at`, `max_downloads`, `one_time`)
+			 VALUES (?, 'Capped', NULL, ?, 1, ?, 1, 0)"
+		)->execute(['httpcapped' . $suffix, $token, time() - 7200]);
+
+		// The page names what happened — to a file or to a collection — and offers no download.
+		$english = require PROJECT_ROOT . '/src/lang/en.php';
+		$gone = [
+			'httpexpired' . $suffix => ['collection', 'collection.err_expired'],
+			'httpusedup' . $suffix => ['collection', 'collection.err_used'],
+			'httpcapped' . $suffix => ['collection', 'collection.err_limit'],
+			self::storeHttpFile('expired.txt', 'expired', ['expires_at' => time() - 60]) => ['download', 'download.err_expired'],
+			self::storeHttpFile('once.txt', 'once', ['one_time' => 1, 'consumed_at' => time() - 60]) => ['download', 'download.err_used'],
+			self::storeHttpFile('capped.txt', 'capped', ['max_downloads' => 2, 'downloads' => 2]) => ['download', 'download.err_limit'],
+		];
+		foreach ($gone as $id => [$page, $key]) {
+			$res = self::rawRequest('GET', '/' . $page . '.php?id=' . $id . '&lang=en');
+			$this->assertSame(410, $res['status'], $key);
+			$this->assertStringContainsString($noindex, $res['body'], $key);
+			$this->assertStringContainsString('<p>' . $english[$key] . '</p>', $res['body'], $key);
+			$this->assertStringContainsString('<h2>' . $english[$page . '.gone_title'] . '</h2>', $res['body'], $key);
+			$this->assertStringNotContainsString('data-download-action="download"', $res['body'], $key);
+			$this->assertStringNotContainsString('data-collection-download', $res['body'], $key);
+		}
+		$liveFile = self::rawRequest('GET', '/download.php?id=' . self::storeHttpFile('live.txt', 'live') . '&lang=en');
+		$this->assertSame(200, $liveFile['status']);
+		$this->assertStringContainsString('data-download-action="download"', $liveFile['body']);
+		self::$cookies = [];
 	}
 
 	/**

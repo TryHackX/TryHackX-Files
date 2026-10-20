@@ -204,7 +204,7 @@ final class FileController
 				return;
 			}
 			if (!empty($row['expires_at']) && (int) $row['expires_at'] < time()) {
-				echo json_encode(['success' => false, 'error' => __('collection.err_expired')]);
+				echo json_encode(['success' => false, 'error' => __('download.err_expired')]);
 				return;
 			}
 		}
@@ -1735,6 +1735,10 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('collection.err_used')]);
 			return;
 		}
+		if (!empty($col['max_downloads']) && (int) ($col['downloads'] ?? 0) >= (int) $col['max_downloads']) {
+			echo json_encode(['success' => false, 'error' => __('collection.err_limit')]);
+			return;
+		}
 		if (empty($col['password_hash'])) {
 			// Not protected — no token needed; the id-based link works directly.
 			echo json_encode(['success' => true, 'token' => '']);
@@ -1981,11 +1985,11 @@ final class FileController
 		}
 		if (!empty($collection['max_downloads'])
 			&& (int) ($collection['downloads'] ?? 0) >= (int) $collection['max_downloads']) {
-			echo json_encode(['success' => false, 'error' => __('download.err_limit')]);
+			echo json_encode(['success' => false, 'error' => __('collection.err_limit')]);
 			return;
 		}
 		if (!empty($collection['one_time']) && !empty($collection['consumed_at'])) {
-			echo json_encode(['success' => false, 'error' => __('api.one_time_used')]);
+			echo json_encode(['success' => false, 'error' => __('collection.err_used')]);
 			return;
 		}
 		$policy = self::collectionProtectedPolicy();

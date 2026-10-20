@@ -116,6 +116,25 @@ final class FileManagerSecurityTest extends RepoTestCase
 		$this->assertSame(200, FileManager::parseByteRange('bytes=0-1,4-5', 100)['status']);
 	}
 
+	/** Why a file or collection link opens nothing any more — the 410 the pages answer with. */
+	public function testLinkClosedReasonNamesExpiredUsedAndCappedLinks(): void
+	{
+		$now = 1_800_000_000;
+		$this->assertNull(FileManager::linkClosedReason([], $now));
+		$this->assertNull(FileManager::linkClosedReason(['expires_at' => $now + 60, 'downloads' => 3], $now));
+		$this->assertSame('expired', FileManager::linkClosedReason(['expires_at' => $now - 1], $now));
+		$this->assertSame('used', FileManager::linkClosedReason(['one_time' => 1, 'consumed_at' => $now - 5], $now));
+		$this->assertNull(FileManager::linkClosedReason(['one_time' => 1, 'consumed_at' => null], $now), 'not used yet');
+		$this->assertSame('limit', FileManager::linkClosedReason(['max_downloads' => 2, 'downloads' => 2], $now));
+		$this->assertNull(FileManager::linkClosedReason(['max_downloads' => 2, 'downloads' => 1], $now));
+		$this->assertNull(FileManager::linkClosedReason(['max_downloads' => 0, 'downloads' => 9], $now), '0 = no cap');
+		$this->assertSame(
+			'expired',
+			FileManager::linkClosedReason(['expires_at' => $now - 1, 'one_time' => 1, 'consumed_at' => $now], $now),
+			'an expired link says so first'
+		);
+	}
+
 	public function testAdminDeleteDoesNotTouchArtifactsWithoutDatabaseRow(): void
 	{
 		$id = $this->fixtureId('orphan');

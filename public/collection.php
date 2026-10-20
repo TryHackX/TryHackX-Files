@@ -3,6 +3,7 @@
 $i18nScope = 'public';
 require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/Database.php';
+require_once __DIR__ . '/../src/includes/FileManager.php';
 require_once __DIR__ . '/../src/includes/file_icons.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 
@@ -51,12 +52,15 @@ if (empty($collectionId)) {
 $needsPassword = false;
 $collectionGone = false;
 if ($collection) {
-	if (!empty($collection['expires_at']) && (int) $collection['expires_at'] < time()) {
-		$error = __('collection.err_expired');
-		$collection = null;
-		$collectionGone = true;
-	} elseif (!empty($collection['one_time']) && !empty($collection['consumed_at'])) {
-		$error = __('collection.err_used');
+	// Expired, a one-time link already used, or its download cap reached ("keep" leaves the
+	// collection, but not its link): nothing can be downloaded from it any more.
+	$closedReason = FileManager::linkClosedReason($collection);
+	if ($closedReason !== null) {
+		$error = __([
+			'expired' => 'collection.err_expired',
+			'used' => 'collection.err_used',
+			'limit' => 'collection.err_limit',
+		][$closedReason]);
 		$collection = null;
 		$collectionGone = true;
 	} elseif (!empty($collection['password_hash'])) {
@@ -100,7 +104,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 		<?php if ($error): ?>
 			<div class="error-box">
 				<div class="icon"><i class="fa-regular fa-face-frown"></i></div>
-				<h2><?= _h('collection.not_found_title') ?></h2>
+				<h2><?= _h($collectionGone ? 'collection.gone_title' : 'collection.not_found_title') ?></h2>
 				<p><?= htmlspecialchars($error) ?></p>
 				<a href="<?= $appUrl ?>/" class="btn btn-primary">
 					<i class="fa-solid fa-house"></i>
