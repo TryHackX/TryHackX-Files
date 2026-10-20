@@ -32,7 +32,8 @@ import socket
 import ssl
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import unquote, quote, urlsplit
@@ -3673,17 +3674,111 @@ async def notify_file_download(
     except Exception as exc:
         print(f"   Warning: download notification failed ({type(exc).__name__})")
 
+QUARANTINE_MANIFEST_VERSION = 1
+
+
+def _manifest_value(value):
+    """A column value the way PHP's PDO hands it to json_encode() in a quarantine manifest."""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _quarantine_manifest(
+    file_row: dict,
+    memberships: list,
+    deleted_at: int,
+    reason: str,
+    actor_type: str,
+    actor_id: str | None = None,
+) -> str:
+    """The manifest FileQuarantine::enqueue() writes, which FileQuarantine::restore() reads.
+
+    tests/fixtures/sidecar-quarantine.json pins this exact output, and a PHP test restores a
+    file from it, so the two sides cannot drift apart unnoticed.
+    """
+    return json.dumps(
+        {
+            "version": QUARANTINE_MANIFEST_VERSION,
+            "file": {column: _manifest_value(value) for column, value in file_row.items()},
+            "collections": [
+                {column: _manifest_value(value) for column, value in membership.items()}
+                for membership in memberships
+            ],
+            "deleted_at": deleted_at,
+            "reason": reason,
+            "actor": {"type": actor_type, "id": actor_id},
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+async def _enqueue_file_quarantine(cur, prefix: str, file_id: str, file_row: dict, now: int) -> bool:
+    """Capture restore metadata in the caller's deletion transaction, as PHP does.
+
+    The mirror of FileQuarantine::enqueue(): with `file_quarantine_days` above zero the PHP
+    deletion worker then copies and verifies the bytes before it removes them, so the file
+    can be brought back with `scripts/file-quarantine.php restore`. Zero keeps the immediate
+    purge. Returns whether a quarantine row was written.
+    """
+    await cur.execute(
+        f"SELECT `setting_value` FROM `{prefix}settings` "
+        f"WHERE `setting_key` = 'file_quarantine_days'"
+    )
+    row = await cur.fetchone()
+    days = max(0, min(3650, safe_int(row[0] if row else 0, 0)))
+    if days < 1:
+        return False
+    await cur.execute(
+        f"SELECT `collection_id`, `position` FROM `{prefix}collection_files` "
+        f"WHERE `file_id` = %s ORDER BY `collection_id`, `position`",
+        (file_id,),
+    )
+    memberships = [
+        {"collection_id": collection_id, "position": position}
+        for collection_id, position in await cur.fetchall()
+    ]
+    manifest = _quarantine_manifest(file_row, memberships, now, "download_limit", "system")
+    values = (
+        manifest, "download_limit", "system", None, safe_int(file_row.get("size"), 0),
+        now + days * 86400,
+    )
+    await cur.execute(
+        f"INSERT INTO `{prefix}file_quarantine` "
+        f"(`file_id`, `manifest_json`, `reason`, `actor_type`, `actor_id`, `size`, "
+        f"`checksum`, `state`, `quarantine_until`, `attempts`, `next_attempt_at`, "
+        f"`last_error`, `created_at`, `updated_at`) "
+        f"VALUES (%s, %s, %s, %s, %s, %s, NULL, 'pending', %s, 0, 0, NULL, %s, %s) "
+        f"ON DUPLICATE KEY UPDATE `manifest_json` = %s, `reason` = %s, `actor_type` = %s, "
+        f"`actor_id` = %s, `size` = %s, `checksum` = NULL, `state` = 'pending', "
+        f"`quarantine_until` = %s, `attempts` = 0, `next_attempt_at` = 0, "
+        f"`last_error` = NULL, `created_at` = %s, `updated_at` = %s",
+        (file_id, *values, now, now, *values, now, now),
+    )
+    return True
+
+
 async def delete_file_after_limit(file_id: str):
     """
     Remove a file whose download cap has just been spent, when its owner chose
     `on_limit_action = 'delete'`.
 
-    Runs after the response finished streaming. The business row and relations disappear in
-    one transaction while physical cleanup is handed to PHP's durable deletion outbox.
+    Runs after the response finished streaming, under PHP's deletion contract
+    (FileManager::deleteLockedFile): the file is captured for quarantine when retention is
+    on, the owner's webhooks get a `delete` event, and the row and its relations disappear
+    in one transaction while physical cleanup is handed to PHP's durable deletion outbox.
     """
     pool = await get_db_pool()
     if not pool:
         return
+    quarantined = False
     try:
         prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
         async with pool.acquire() as conn:
@@ -3691,12 +3786,28 @@ async def delete_file_after_limit(file_id: str):
                 async with conn.cursor() as cur:
                     await cur.execute("START TRANSACTION")
                     await cur.execute(
-                        f"SELECT `id` FROM `{prefix}files` WHERE `id` = %s FOR UPDATE",
+                        f"SELECT * FROM `{prefix}files` WHERE `id` = %s FOR UPDATE",
                         (file_id,),
                     )
-                    if not await cur.fetchone():
+                    row = await cur.fetchone()
+                    if not row:
                         await cur.execute("ROLLBACK")
                         return
+                    file_row = dict(zip((column[0] for column in cur.description), row, strict=True))
+                    now = int(time.time())
+                    quarantined = await _enqueue_file_quarantine(cur, prefix, file_id, file_row, now)
+                    # Same transaction: the owner hears about the deletion only if it commits.
+                    await enqueue_webhook_event(
+                        file_row.get("user_id"),
+                        "delete",
+                        {"file": {
+                            "id": file_id,
+                            "name": file_row.get("original_name"),
+                            "mime": file_row.get("mime_type"),
+                            "size": safe_int(file_row.get("size"), 0),
+                        }},
+                        cursor=cur,
+                    )
                     await cur.execute(
                         f"DELETE FROM `{prefix}collection_files` WHERE `file_id` = %s",
                         (file_id,),
@@ -3722,7 +3833,10 @@ async def delete_file_after_limit(file_id: str):
             except Exception:
                 await conn.rollback()
                 raise
-        info_log(f"{file_id} deleted after reaching its download limit")
+        info_log(
+            f"{file_id} deleted after reaching its download limit"
+            + (" (kept in quarantine)" if quarantined else "")
+        )
     except Exception as e:
         print(f"⚠️  Post-limit delete failed for {file_id}: {e}")
 
@@ -4060,34 +4174,45 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
 # WEBHOOKS — enqueue user events + a delivery worker (Faza 4.1)
 # ============================================================================
 
-async def enqueue_webhook_event(user_id, event: str, payload: dict):
+async def enqueue_webhook_event(user_id, event: str, payload: dict, cursor=None):
     """Queue a delivery row per active webhook of user_id subscribed to `event`.
-    Cheap and non-blocking on the hot path — the worker does the actual POSTs."""
+
+    Cheap and non-blocking on the hot path — the worker does the actual POSTs. Given a
+    `cursor`, the rows join the caller's transaction, as WebhookRepository::enqueueEvent()
+    does on the PHP side: a `delete` event is only sent if the deletion commits.
+    """
     if not user_id:
         return
-    pool = await get_db_pool()
-    if not pool:
-        return
+    prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
+    wh_table = f"{prefix}webhooks"
+    del_table = f"{prefix}webhook_deliveries"
+    now = int(time.time())
+    body = json.dumps({"event": event, "timestamp": now, **payload}, ensure_ascii=False, separators=(',', ':'))
+
+    async def insert_rows(cur):
+        await cur.execute(f"SELECT `id`, `events` FROM `{wh_table}` WHERE `user_id`=%s AND `is_active`=1", (user_id,))
+        hooks = await cur.fetchall()
+        for hid, events in hooks:
+            subs = [e.strip() for e in (events or '').split(',')]
+            if event not in subs:
+                continue
+            await cur.execute(
+                f"INSERT INTO `{del_table}` "
+                f"(`webhook_id`,`event_id`,`event`,`payload`,`attempts`,`status`,`next_attempt_at`,`created_at`) "
+                f"VALUES (%s,%s,%s,%s,0,'pending',%s,%s)",
+                (hid, secrets.token_hex(16), event, body, now, now)
+            )
+
     try:
-        prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
-        wh_table = f"{prefix}webhooks"
-        del_table = f"{prefix}webhook_deliveries"
-        now = int(time.time())
-        body = json.dumps({"event": event, "timestamp": now, **payload}, ensure_ascii=False, separators=(',', ':'))
+        if cursor is not None:
+            await insert_rows(cursor)
+            return
+        pool = await get_db_pool()
+        if not pool:
+            return
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(f"SELECT `id`, `events` FROM `{wh_table}` WHERE `user_id`=%s AND `is_active`=1", (user_id,))
-                hooks = await cur.fetchall()
-                for hid, events in hooks:
-                    subs = [e.strip() for e in (events or '').split(',')]
-                    if event not in subs:
-                        continue
-                    await cur.execute(
-                        f"INSERT INTO `{del_table}` "
-                        f"(`webhook_id`,`event_id`,`event`,`payload`,`attempts`,`status`,`next_attempt_at`,`created_at`) "
-                        f"VALUES (%s,%s,%s,%s,0,'pending',%s,%s)",
-                        (hid, secrets.token_hex(16), event, body, now, now)
-                    )
+                await insert_rows(cur)
     except Exception as e:
         print(f"⚠️  webhook enqueue error: {e}")
 

@@ -2069,6 +2069,89 @@ class _RowcountCursor(_ScriptedCursor):
         self.rowcount = next((value for needle, value in self.rowcounts if needle in query), 1)
 
 
+QUARANTINE_FIXTURE = json.loads(
+    (Path(__file__).resolve().parents[1] / "fixtures" / "sidecar-quarantine.json").read_text(encoding="utf-8")
+)
+
+
+class TestDeletionAfterTheLastDownloadFollowsPhpsContract:
+    """Quarantine row and `delete` webhook, as FileManager::deleteLockedFile() does it."""
+
+    def test_the_manifest_is_exactly_what_the_php_restore_test_uses(self):
+        manifest = us._quarantine_manifest(
+            QUARANTINE_FIXTURE["file_row"], QUARANTINE_FIXTURE["memberships"],
+            QUARANTINE_FIXTURE["deleted_at"], "download_limit", "system",
+        )
+        assert manifest == QUARANTINE_FIXTURE["manifest_json"]
+
+    def test_database_types_are_carried_the_way_pdo_hands_them_to_php(self):
+        from datetime import datetime as dt
+        from decimal import Decimal
+
+        manifest = json.loads(us._quarantine_manifest(
+            {"price": Decimal("12.50"), "stamp": dt(2026, 10, 20, 8, 5, 9), "raw": b"bin\xc3\xa9"},
+            [], 1, "download_limit", "system",
+        ))
+        assert manifest["file"] == {"price": "12.50", "stamp": "2026-10-20 08:05:09", "raw": "biné"}
+
+    @staticmethod
+    def _delete(monkeypatch, retention, owner):
+        row = dict(QUARANTINE_FIXTURE["file_row"], user_id=owner)
+        cursor = _ScriptedCursor(
+            answers=[
+                ("SELECT * FROM `fh_files`", tuple(row.values())),
+                ("'file_quarantine_days'", (str(retention),)),
+            ],
+            all_answers=[
+                ("FROM `fh_collection_files`", [("qsidecarcoll01", 2)]),
+                ("FROM `fh_webhooks`", [(11, "upload,download,delete"), (12, "upload")]),
+            ],
+        )
+        cursor.description = [(column,) for column in row]
+        pool = _OneConnectionPool(cursor)
+
+        async def same_pool(*_args, **_kwargs):
+            return pool
+
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_", "database": "files"})
+        asyncio.run(us.delete_file_after_limit(row["id"]))
+        return row, [query for query, _ in cursor.queries], cursor.queries
+
+    def test_with_retention_the_file_is_quarantined_and_the_owner_told(self, monkeypatch):
+        row, queries, calls = self._delete(monkeypatch, retention=30, owner=7)
+
+        quarantine = next(i for i, q in enumerate(queries) if q.startswith("INSERT INTO `fh_file_quarantine`"))
+        memberships_gone = next(i for i, q in enumerate(queries) if q.startswith("DELETE FROM `fh_collection_files`"))
+        assert quarantine < memberships_gone, "memberships are captured before they are removed"
+        params = calls[quarantine][1]
+        manifest = json.loads(params[1])
+        assert params[0] == row["id"] and params[2:5] == ("download_limit", "system", None)
+        assert manifest["file"] == row
+        assert manifest["collections"] == [{"collection_id": "qsidecarcoll01", "position": 2}]
+        assert manifest["actor"] == {"type": "system", "id": None}
+        assert params[6] - params[7] == 30 * 86400, "quarantine_until follows the retention setting"
+
+        deliveries = [p for q, p in calls if q.startswith("INSERT INTO `fh_webhook_deliveries`")]
+        assert [p[0] for p in deliveries] == [11], "only hooks subscribed to `delete`"
+        event = json.loads(deliveries[0][3])
+        assert event["event"] == "delete" and event["file"]["name"] == row["original_name"]
+        assert queries.index("COMMIT") > queries.index(next(q for q in queries if q.startswith("DELETE FROM `fh_files`")))
+
+    def test_without_retention_nothing_is_kept_but_the_owner_is_still_told(self, monkeypatch):
+        _row, queries, _calls = self._delete(monkeypatch, retention=0, owner=7)
+
+        assert not any(q.startswith("INSERT INTO `fh_file_quarantine`") for q in queries)
+        assert any(q.startswith("INSERT INTO `fh_webhook_deliveries`") for q in queries)
+        assert any(q.startswith("INSERT INTO `fh_file_deletion_queue`") for q in queries)
+
+    def test_a_guests_file_has_nobody_to_tell(self, monkeypatch):
+        _row, queries, _calls = self._delete(monkeypatch, retention=30, owner=None)
+
+        assert any(q.startswith("INSERT INTO `fh_file_quarantine`") for q in queries)
+        assert not any("fh_webhook" in q for q in queries)
+
+
 class TestFinalizationSurvivesChangedRows:
     """The bytes have left by the time a download is finalized; nothing may undo that."""
 
