@@ -6,9 +6,10 @@ current runner output is authoritative.
 
 CI covers PHP 8.1, 8.4 and 8.5 with MySQL 8.4 and MariaDB 11.4 and 11.8 (the pairs are listed
 in the workflow; 8.5 with MariaDB 11.8 is the production combination), plus Python 3.11, 3.13 and
-3.14. Separate policy checks validate syntax, pinned action SHAs, lock hashes and agreement,
-digest-pinned container bases, the release number in every file that states it, and common secret
-formats.
+3.14. Separate policy checks validate syntax, pinned action SHAs, lock hashes and agreement, that
+each lock satisfies every name and version range of the requirements file it was compiled from,
+the uv version below, digest-pinned container bases, the release number in every file that states
+it, and common secret formats.
 
 ## PHPUnit
 

@@ -3,8 +3,10 @@
  * Lightweight repository supply-chain and secret policy checks.
  *
  * This complements (rather than replaces) language-aware analyzers: it fails CI when a
- * third-party GitHub Action is tag-pinned, a lock file loses hashes, a floating `latest`
- * container appears, or a tracked file contains a well-known credential shape.
+ * third-party GitHub Action is tag-pinned, a lock file loses hashes or no longer satisfies the
+ * requirements it was compiled from, a floating `latest` container appears, or a tracked file
+ * contains a well-known credential shape. tests/php/RepositoryPolicyTest.php proves each rule
+ * on a mutated copy.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -19,10 +21,11 @@ $workflowFiles = glob($root . '/.github/workflows/*.{yml,yaml}', GLOB_BRACE) ?: 
 foreach ($workflowFiles as $workflow) {
 	$lines = file($workflow, FILE_IGNORE_NEW_LINES) ?: [];
 	foreach ($lines as $index => $line) {
-		if (!preg_match('/^\s*uses:\s*([^\s#]+)\s*/', $line, $match)) {
+		// Both `uses:` under a named step and the `- uses:` step shorthand.
+		if (!preg_match('/^\s*(?:-\s+)?uses:\s*([^\s#]+)/', $line, $match)) {
 			continue;
 		}
-		$reference = $match[1];
+		$reference = trim($match[1], '"\'');
 		if (str_starts_with($reference, './')) {
 			continue;
 		}
@@ -34,6 +37,12 @@ foreach ($workflowFiles as $workflow) {
 				. ' must pin each external action to a full commit SHA';
 		}
 	}
+}
+
+/** A package name in PEP 503 form, so `Pillow`/`pillow` and `typing_extensions`/`typing-extensions` match. */
+function policyNormaliseName(string $name): string
+{
+	return strtolower((string) preg_replace('/[-_.]+/', '-', $name));
 }
 
 /**
@@ -50,7 +59,7 @@ function policyParseLock(string $content): array
 	$current = null;
 	foreach (preg_split('/\R/', $content) ?: [] as $line) {
 		if (preg_match('/^([A-Za-z0-9][A-Za-z0-9._-]*)==([^\s;\\\\]+)\s*(?:;\s*([^\\\\]*?))?\s*\\\\?\s*$/', $line, $match)) {
-			$current = strtolower(str_replace('_', '-', $match[1]));
+			$current = policyNormaliseName($match[1]);
 			$pins[$current] = ['version' => $match[2], 'marker' => trim($match[3] ?? ''), 'hashes' => 0];
 			continue;
 		}
@@ -59,6 +68,70 @@ function policyParseLock(string $content): array
 		}
 	}
 	return $pins;
+}
+
+/**
+ * The requirements of a human-maintained requirements file: normalised name => the version
+ * specifiers on its line (`>=0.143.2`, `==0.17.1`; none for a bare name). Comments, options
+ * such as `-r`, extras and environment markers are skipped.
+ *
+ * @return array<string, list<string>>
+ */
+function policyParseRequirements(string $content): array
+{
+	$requirements = [];
+	foreach (preg_split('/\R/', $content) ?: [] as $line) {
+		$line = (string) preg_replace('/(?:^|\s)#.*$/', '', $line);
+		if (!preg_match('/^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(?:\[[^\]]*\])?\s*([^;]*)/', $line, $match)) {
+			continue;
+		}
+		$specifiers = array_values(array_filter(
+			array_map('trim', explode(',', $match[2])),
+			static fn(string $specifier): bool => $specifier !== ''
+		));
+		$requirements[policyNormaliseName($match[1])] = $specifiers;
+	}
+	return $requirements;
+}
+
+/**
+ * Whether a locked version satisfies one specifier. Only the numeric release segment is
+ * compared (`0.143` equals `0.143.0`), which covers the final releases the locks pin; `null`
+ * means the specifier is not understood, so the caller reports it instead of passing it.
+ */
+function policySatisfies(string $version, string $specifier): ?bool
+{
+	if (!preg_match('/^(~=|===|==|!=|<=|>=|<|>)\s*(\d+(?:\.\d+)*)(\.\*)?$/', $specifier, $match)
+		|| !preg_match('/^(\d+(?:\.\d+)*)/', $version, $locked)) {
+		return null;
+	}
+	[, $operator, $wanted] = $match;
+	$wildcard = isset($match[3]) && $match[3] !== '';
+	$have = array_map('intval', explode('.', $locked[1]));
+	$want = array_map('intval', explode('.', $wanted));
+	$order = 0;
+	for ($i = 0, $n = max(count($have), count($want)); $i < $n && $order === 0; $i++) {
+		$order = ($have[$i] ?? 0) <=> ($want[$i] ?? 0);
+	}
+	$prefix = static fn(array $parts): bool => array_slice($have + array_fill(0, count($parts), 0), 0, count($parts)) === $parts;
+	if ($wildcard) {
+		return match ($operator) {
+			'==' => $prefix($want),
+			'!=' => !$prefix($want),
+			default => null,
+		};
+	}
+	return match ($operator) {
+		'==', '===' => $order === 0,
+		'!=' => $order !== 0,
+		'>=' => $order >= 0,
+		'<=' => $order <= 0,
+		'>' => $order > 0,
+		'<' => $order < 0,
+		// ~=1.4.5 means >=1.4.5 and ==1.4.*; a single segment is not a valid compatible release.
+		'~=' => count($want) > 1 ? $order >= 0 && $prefix(array_slice($want, 0, -1)) : null,
+		default => null,
+	};
 }
 
 $lockPins = [];
@@ -92,13 +165,26 @@ foreach ($runtimePins as $name => $pin) {
 	}
 }
 
-// A requirement added to requirements.txt without recompiling would otherwise install nothing.
-$requirementsText = is_file($root . '/requirements.txt') ? (string) file_get_contents($root . '/requirements.txt') : '';
-foreach (preg_split('/\R/', $requirementsText) ?: [] as $requirementLine) {
-	if (preg_match('/^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/', $requirementLine, $match)) {
-		$requirementName = strtolower(str_replace('_', '-', $match[1]));
-		if (!isset($runtimePins[$requirementName])) {
-			$errors[] = "requirements-lock.txt does not pin {$requirementName} from requirements.txt";
+// Each human-maintained input must be what its lock was compiled from. A requirement added
+// without recompiling would install nothing, and a floor raised for a security fix
+// (`cryptography>=51`) would look done while production keeps installing the old pin. The dev
+// lock also contains requirements.txt; the agreement check above covers that half.
+foreach (['requirements.txt' => 'requirements-lock.txt', 'requirements-dev.txt' => 'requirements-dev-lock.txt'] as $input => $lock) {
+	$inputText = is_file($root . '/' . $input) ? (string) file_get_contents($root . '/' . $input) : '';
+	foreach (policyParseRequirements($inputText) as $name => $specifiers) {
+		$pin = $lockPins[$lock][$name] ?? null;
+		if ($pin === null) {
+			$errors[] = "{$lock} does not pin {$name} from {$input}";
+			continue;
+		}
+		foreach ($specifiers as $specifier) {
+			$satisfied = policySatisfies($pin['version'], $specifier);
+			if ($satisfied === null) {
+				$errors[] = "{$input} gives {$name} the specifier '{$specifier}', which this check cannot compare";
+			} elseif (!$satisfied) {
+				$errors[] = "{$lock} pins {$name}=={$pin['version']}, which does not satisfy {$name}{$specifier} "
+					. "from {$input}; recompile the locks with the commands in tests/README.md";
+			}
 		}
 	}
 }
@@ -170,6 +256,16 @@ if (preg_match_all('/phpunit_sha256:\s*([0-9a-f]{64})/', $workflowText, $found))
 	}
 }
 
+// The same file tells developers which uv compiles the locks. It has to be the one
+// requirements-dev.txt pins, otherwise the documented commands run a resolver CI never used.
+$devRequirements = is_file($root . '/requirements-dev.txt') ? (string) file_get_contents($root . '/requirements-dev.txt') : '';
+if (preg_match('/^\s*uv\s*==\s*([^\s;#]+)/mi', $devRequirements, $uvPin)) {
+	preg_match_all('/\buv==([^\s`]+)/', $testsReadme, $documentedUv);
+	if (array_values(array_unique($documentedUv[1])) !== [$uvPin[1]]) {
+		$errors[] = "tests/README.md must install uv=={$uvPin[1]}, the version requirements-dev.txt pins";
+	}
+}
+
 // Keep the pre-install process contract and destructive smoke test in sync. A typo in the
 // Supervisor program name previously made the lease-recovery smoke fail only inside Docker,
 // while eager worker startup could exhaust its retries before the installer created config.
@@ -191,7 +287,8 @@ if (!str_contains($dockerfile, 'chmod 0755 /app/docker/wait-for-install.sh')
 	|| !str_contains($waitForInstall, 'while [ ! -f /app/config/config.local.php ]')) {
 	$errors[] = 'docker/wait-for-install.sh must be executable and wait for the persistent config';
 }
-if (!str_contains($dockerSmoke, 'supervisorctl pid upload')) {
+// The command itself, not the failure label next to it that names it, and not a comment.
+if (!preg_match('/^(?![ \t]*#).*\bsupervisorctl\s+-c\s+\S+\s+pid\s+upload\b/m', $dockerSmoke)) {
 	$errors[] = 'tests/smoke/docker-transfer.sh must target the upload Supervisor program';
 }
 
