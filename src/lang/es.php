@@ -1725,7 +1725,7 @@ return array (
   'panel.prem.bulk_title' => 'Concesión Premium masiva',
   'panel.prem.bulk_intro' => 'Primero revisa el número exacto de destinatarios. La lista queda congelada y caduca en 10 minutos.',
   'panel.prem.bulk_source' => 'Destinatarios',
-  'panel.prem.bulk_active' => 'Suscriptores Premium activos',
+  'panel.prem.bulk_active' => 'Suscriptores activos del plan que se concede (amplía su plan)',
   'panel.prem.bulk_group' => 'Miembros activos de un grupo',
   'panel.prem.bulk_buyers' => 'Compradores en un intervalo',
   'panel.prem.bulk_bought_plan' => 'Plan comprado',

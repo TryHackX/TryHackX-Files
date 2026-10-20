@@ -193,6 +193,73 @@ final class PlanRepositoryTest extends RepoTestCase
 		$this->assertSame($this->groupId, (int) Database::getUserGroup($userId)['id']);
 	}
 
+	/**
+	 * C-F4: days granted on top of a membership that never ends (a lifetime plan, a manual
+	 * assignment) leave it never-ending. It used to become a now + N days membership, and the
+	 * payment that bought the lifetime stays the one a refund would revoke.
+	 */
+	public function testALifetimeMemberStaysLifetimeWhenDaysAreGranted(): void
+	{
+		$lifetime = $this->makePlan(['name' => 'Lifetime', 'duration_days' => 0]);
+		$monthly = $this->makePlan(['name' => 'Monthly', 'duration_days' => 30]);
+		$userId = $this->makeUser();
+		$this->assertTrue(PlanRepository::grant($userId, $lifetime, null, 'fh-lifetime')['success']);
+
+		$week = PlanRepository::grant($userId, $monthly, 7, 'fh-monthly');
+		$this->assertTrue($week['success']);
+		$this->assertNull($week['expires_at']);
+		$user = Database::getUserById($userId);
+		$this->assertNull($user['group_expires_at']);
+		$this->assertSame($this->groupId, (int) $user['group_id']);
+		$this->assertSame('fh-lifetime', $user['group_payment_ext_order_id']);
+
+		// A timed membership is still extended as before.
+		$other = $this->makeUser();
+		$first = PlanRepository::grant($other, $monthly)['expires_at'];
+		$this->assertSame($first + 7 * 86400, PlanRepository::grant($other, $monthly, 7)['expires_at']);
+	}
+
+	/**
+	 * C-F4/C-F23: "active subscribers" are holders of a paid plan, and the bulk tool's
+	 * subscriber source extends the chosen plan's own subscribers instead of moving holders of
+	 * other plans (or of the free tier) into it.
+	 */
+	public function testSubscribersAreHoldersOfAPaidPlanAndTheBulkSourceStaysInThePlan(): void
+	{
+		$paid = $this->makePlan(['name' => 'Paid']);
+		$other = Database::saveGroup(null, ['name' => 'Other ' . bin2hex(random_bytes(3))]);
+		$otherPlan = PlanRepository::save(null, ['name' => 'Other', 'group_id' => (int) $other['id'], 'duration_days' => 30, 'enabled' => 1]);
+		$free = GroupRepository::getBySlug('user');
+		$this->assertNotNull($free);
+		try {
+			$subscriber = $this->makeUser();
+			PlanRepository::grant($subscriber, $paid);
+			$otherSubscriber = $this->makeUser();
+			PlanRepository::grant($otherSubscriber, PlanRepository::get((int) $otherPlan['id']));
+			$freeUser = $this->makeUser();
+			Database::getInstance()->prepare('UPDATE `' . Database::table('users') . '` SET `group_id` = ? WHERE `id` = ?')
+				->execute([(int) $free['id'], $freeUser]);
+			PlanRepository::save(null, ['name' => 'Free card', 'kind' => 'free', 'group_id' => (int) $free['id'], 'enabled' => 1]);
+
+			$listed = array_map(static fn(array $row): int => (int) $row['id'], PaymentRepository::subscribers());
+			sort($listed);
+			$expected = [$subscriber, $otherSubscriber];
+			sort($expected);
+			$this->assertSame($expected, $listed, 'the free tier is nobody\'s subscription');
+			$this->assertSame(2, PaymentRepository::stats(30)['active']);
+
+			$this->assertSame([$subscriber], PaymentRepository::bulkGrantCandidates([
+				'source' => 'active_subscribers',
+				'plan_group_id' => $this->groupId,
+			]));
+		} finally {
+			Database::getInstance()->prepare('UPDATE `' . Database::table('users') . '` SET `group_id` = NULL WHERE `group_id` = ?')
+				->execute([(int) $other['id']]);
+			$this->truncate('plans');
+			Database::deleteGroup((int) $other['id']);
+		}
+	}
+
 	public function testGrantRefusesAGroupDeletedAfterCheckoutConfiguration(): void
 	{
 		$plan = $this->makePlan();

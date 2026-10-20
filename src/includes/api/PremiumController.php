@@ -951,7 +951,7 @@ final class PremiumController
 		}
 		$source = in_array($input['source'] ?? '', ['active_subscribers', 'group', 'buyers'], true)
 			? (string) $input['source'] : 'active_subscribers';
-		$criteria = ['source' => $source];
+		$criteria = ['source' => $source, 'plan_group_id' => (int) ($plan['group_id'] ?? 0)];
 		if ($source === 'group') {
 			$criteria['group_id'] = max(1, (int) ($input['group_id'] ?? 0));
 		}

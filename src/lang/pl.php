@@ -1842,7 +1842,7 @@ return [
 	'panel.prem.bulk_title' => 'Masowe nadanie Premium',
 	'panel.prem.bulk_intro' => 'Najpierw sprawdź dokładną liczbę odbiorców. Operacja wykorzysta raz zamrożoną listę, a podgląd wygaśnie po 10 minutach.',
 	'panel.prem.bulk_source' => 'Odbiorcy',
-	'panel.prem.bulk_active' => 'Wszyscy aktywni subskrybenci Premium',
+	'panel.prem.bulk_active' => 'Aktywni subskrybenci przyznawanego planu (przedłuża ich plan)',
 	'panel.prem.bulk_group' => 'Wszyscy aktywni członkowie grupy',
 	'panel.prem.bulk_buyers' => 'Kupujący w podanym okresie',
 	'panel.prem.bulk_bought_plan' => 'Kupiony plan',

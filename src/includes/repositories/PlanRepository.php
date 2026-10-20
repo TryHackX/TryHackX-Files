@@ -405,18 +405,34 @@ final class PlanRepository
 				return ['success' => false, 'error' => __('api.user_not_found')];
 			}
 
+			$sameGroupNow = (int) ($current['group_id'] ?? 0) === $groupId;
+			// The account already holds this group without an end (a lifetime plan, or a
+			// manual assignment): days on top of "for ever" are still "for ever". Writing
+			// now + days here turned a lifetime membership into a week-long one. The payment
+			// that bought the lifetime stays the one a refund would revoke.
+			if ($sameGroupNow && $current['group_expires_at'] === null) {
+				Database::logAudit(
+					'plan_granted',
+					'plan #' . ($plan['id'] ?? '?') . ' → user #' . $userId
+						. ', group #' . $groupId . ', no expiry (already held without one)',
+					$userId
+				);
+				if ($ownsTransaction) {
+					$pdo->commit();
+				}
+				return ['success' => true, 'expires_at' => null];
+			}
+
 			$expires = null;
 			if ($days > 0) {
-				$sameGroup = (int) ($current['group_id'] ?? 0) === $groupId;
 				$remaining = (int) ($current['group_expires_at'] ?? 0);
-				$base = ($sameGroup && $remaining > time()) ? $remaining : time();
+				$base = ($sameGroupNow && $remaining > time()) ? $remaining : time();
 				$expires = $base + ($days * 86400);
 			}
 
 			// pt 6: a move between groups restarts the retention clock, so the new group's
 			// rules apply from now on rather than retroactively to old uploads. Extending the
 			// same plan is not a move and leaves the stamp alone.
-			$sameGroupNow = (int) ($current['group_id'] ?? 0) === $groupId;
 			if ($sameGroupNow) {
 				$upd = $pdo->prepare(
 					"UPDATE `{$users}` SET `group_id` = ?, `group_expires_at` = ?,

@@ -1725,7 +1725,7 @@ return array (
   'panel.prem.bulk_title' => '批量授予 Premium',
   'panel.prem.bulk_intro' => '先预览准确的接收人数。名单会被冻结且在 10 分钟后过期。',
   'panel.prem.bulk_source' => '接收者',
-  'panel.prem.bulk_active' => '所有有效 Premium 订阅者',
+  'panel.prem.bulk_active' => '所授予方案的有效订阅者（延长其方案）',
   'panel.prem.bulk_group' => '某组的所有有效成员',
   'panel.prem.bulk_buyers' => '日期范围内的购买者',
   'panel.prem.bulk_bought_plan' => '已购买套餐',

@@ -1840,7 +1840,7 @@ return [
 	'panel.prem.bulk_title' => 'Bulk Premium grant',
 	'panel.prem.bulk_intro' => 'First preview the exact recipient count. Execution uses that frozen list once and the preview expires after 10 minutes.',
 	'panel.prem.bulk_source' => 'Recipients',
-	'panel.prem.bulk_active' => 'All active Premium subscribers',
+	'panel.prem.bulk_active' => 'Active subscribers of the plan to grant (extends their plan)',
 	'panel.prem.bulk_group' => 'All active members of a group',
 	'panel.prem.bulk_buyers' => 'Buyers in a date range',
 	'panel.prem.bulk_bought_plan' => 'Purchased plan',

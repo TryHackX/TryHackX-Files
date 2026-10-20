@@ -918,10 +918,12 @@ final class PaymentRepository
 			$out['buyers'] = (int) $stmt->fetchColumn();
 
 			// Live subscriptions, which is a different question from "who bought recently":
-			// a yearly plan sold in January is still a subscriber in June.
+			// a yearly plan sold in January is still a subscriber in June. Only groups sold by
+			// a paid plan count — the free and guest showcase cards are bound to the user/guest
+			// groups, and an account explicitly placed in "User" is no subscriber.
 			$stmt = $pdo->prepare(
 				"SELECT COUNT(DISTINCT u.`id`) FROM `{$users}` u
-				 JOIN `{$plans}` p ON p.`group_id` = u.`group_id`
+				 JOIN `{$plans}` p ON p.`group_id` = u.`group_id` AND p.`kind` = 'paid'
 				 WHERE u.`is_active` = 1
 				  AND (u.`group_expires_at` IS NULL OR u.`group_expires_at` > ?)"
 			);
@@ -1074,7 +1076,7 @@ final class PaymentRepository
 				WHERE u.`is_active` = 1
 				  AND (u.`group_expires_at` IS NULL OR u.`group_expires_at` > ?)
 				  AND EXISTS (
-					SELECT 1 FROM `{$plans}` p WHERE p.`group_id` = u.`group_id`
+					SELECT 1 FROM `{$plans}` p WHERE p.`group_id` = u.`group_id` AND p.`kind` = 'paid'
 				  )
 				ORDER BY (u.`group_expires_at` IS NULL) ASC, u.`group_expires_at` ASC
 				LIMIT " . max(1, min(500, $limit)));
@@ -1118,12 +1120,16 @@ final class PaymentRepository
 				JOIN `{$users}` u ON u.`id` = p.`user_id`
 				WHERE " . implode(' AND ', $where) . " ORDER BY u.`id` LIMIT {$limit}";
 		} else {
+			// Active subscribers of the plan being granted. Extending a subscription is what this
+			// source is for; handing it to holders of other plans would replace their plan with
+			// this one (PlanRepository::grant moves an account between groups).
 			$sql = "SELECT DISTINCT u.`id` FROM `{$users}` u
 				WHERE u.`is_active` = 1
 				  AND (u.`group_expires_at` IS NULL OR u.`group_expires_at` > ?)
+				  AND u.`group_id` = ?
 				  AND EXISTS (SELECT 1 FROM `{$plans}` p WHERE p.`group_id` = u.`group_id` AND p.`kind` = 'paid')
 				ORDER BY u.`id` LIMIT {$limit}";
-			$params = [time()];
+			$params = [time(), (int) ($criteria['plan_group_id'] ?? 0)];
 		}
 		try {
 			$stmt = $pdo->prepare($sql);
