@@ -2253,6 +2253,119 @@ class TestCollectionTagsFromTheQueryString:
         assert re.fullmatch(r"[a-f0-9]{32}", request.scope["filehost.traffic"]["reservation_id"])
 
 
+class TestAbandonedZipClosesItsMember:
+    """Real uvicorn and the real /collection handler; the visitor leaves mid-archive."""
+
+    def test_the_member_file_is_closed_as_soon_as_the_visitor_leaves(self, monkeypatch, tmp_path):
+        import uvicorn
+
+        member = tmp_path / "member.bin"
+        member.write_bytes(b"Z" * (16 * 1024 * 1024))
+        cursor = _ScriptedCursor(
+            answers=[
+                ("GET_LOCK", (1,)),
+                ("COUNT(", (0,)),
+                ("FROM `fh_download_tokens` WHERE `token`", (None,)),
+                ("FROM `fh_collections` WHERE `id`",
+                 ("Holiday", None, None, None, 0, 0, None, None, "hash", "keep", 9)),
+            ],
+            all_answers=[
+                ("FROM `fh_collection_files`",
+                 [("file1", "member.bin", member.stat().st_size, None, None, None, 0, 0, None, None)]),
+            ],
+        )
+        pool = _OneConnectionPool(cursor)
+        opened, finalised = [], []
+        real_open = open
+
+        def tracking_open(path, *args, **kwargs):
+            handle = real_open(path, *args, **kwargs)
+            if Path(path) == member:
+                opened.append(handle)
+            return handle
+
+        async def none(*_args, **_kwargs):
+            return None
+
+        async def same_pool(*_args, **_kwargs):
+            return pool
+
+        async def resolved(*_args, **_kwargs):
+            return member
+
+        async def not_killed(_active_id):
+            await asyncio.sleep(0.002)
+            return False
+
+        async def finalize(_context, state, sent):
+            finalised.append((state, sent))
+
+        for name, value in (
+            ("update_settings", none), ("require_storage_ready", same_pool),
+            ("get_db_pool", same_pool), ("resolve_storage_file", resolved),
+            ("mark_download_reservation_started", none), ("heartbeat_download", none),
+            ("download_was_killed", not_killed), ("log_traffic", none),
+            ("register_download_end", none), ("_finalize_download_context", finalize),
+        ):
+            monkeypatch.setattr(us, name, value)
+        monkeypatch.setattr(us, "open", tracking_open, raising=False)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_", "database": "files"})
+        # Throttled, so the archive is still being written when the visitor leaves.
+        monkeypatch.setitem(us.settings_cache, "groups", {
+            1: USER_GROUPS[1], 2: {**USER_GROUPS[2], "limit_download": 2 * 1024 * 1024},
+        })
+        monkeypatch.setitem(us.settings_cache, "default_group_id", 1)
+        monkeypatch.setitem(us.settings_cache, "collection_counts_files", False)
+
+        def visitor(port):
+            sock = socket.create_connection(("127.0.0.1", port), timeout=20)
+            sock.sendall(b"GET /collection?id=c1&dt=x HTTP/1.1\r\nHost: files\r\n\r\n")
+            got = 0
+            while got < 1_500_000:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                got += len(chunk)
+            sock.close()  # gives up mid-archive
+            return got
+
+        async def scenario():
+            probe = socket.socket()
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+            probe.close()
+            server = uvicorn.Server(uvicorn.Config(
+                us.app, host="127.0.0.1", port=port, log_level="warning", access_log=False,
+                lifespan="off",
+            ))
+            task = asyncio.create_task(server.serve())
+            for _ in range(500):
+                if server.started:
+                    break
+                await asyncio.sleep(0.02)
+            assert server.started, "uvicorn did not start"
+            try:
+                got = await asyncio.to_thread(visitor, port)
+                left_at = time.monotonic()
+                for _ in range(100):  # bounded: two seconds at most
+                    if opened and opened[0].closed:
+                        break
+                    await asyncio.sleep(0.02)
+                closed_after = time.monotonic() - left_at
+            finally:
+                server.should_exit = True
+                await task
+            return got, closed_after
+
+        got, closed_after = asyncio.run(scenario())
+
+        assert got >= 1_500_000
+        assert opened, "the member was never opened"
+        assert opened[0].closed, "the member file stayed open after the visitor left"
+        assert closed_after < 1.0
+        assert finalised and finalised[0][0] == "released"
+
+
 class TestQrBodyIsBounded:
     def test_oversized_body_is_refused_while_streaming(self):
         receive, state = _receive_chunks([b"x" * 4096] * 10)

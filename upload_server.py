@@ -4384,20 +4384,41 @@ async def _throttled_sync_iterator(
     active_id: int = 0,
     transfer_state: dict | None = None,
 ):
-    """Stream a blocking iterator with optional throttling and an admin kill check."""
+    """Stream a blocking iterator with optional throttling and an admin kill check.
+
+    Closing this generator closes the blocking one as well. A visitor who left mid-archive
+    used to leave the ZIP generator suspended in a reference cycle, so its member file stayed
+    open until a full GC pass: one descriptor per abandoned ZIP, deleted members still holding
+    disk space, purges failing on Windows, and ZipFile's finaliser printing a traceback.
+    """
     async_iterator = iterate_in_threadpool(iterator)
     stream = throttled_iterator(async_iterator, limit_Bps) if limit_Bps > 0 else async_iterator
     last_kill_check = 0.0
-    async for chunk in stream:
-        now = time.monotonic()
-        if active_id and now - last_kill_check >= 0.5:
-            last_kill_check = now
-            if await download_was_killed(active_id):
-                if transfer_state is not None:
-                    transfer_state["interrupted"] = True
-                info_log(f"Download {active_id} severed by admin")
-                break
-        yield chunk
+    try:
+        async for chunk in stream:
+            now = time.monotonic()
+            if active_id and now - last_kill_check >= 0.5:
+                last_kill_check = now
+                if await download_was_killed(active_id):
+                    if transfer_state is not None:
+                        transfer_state["interrupted"] = True
+                    info_log(f"Download {active_id} severed by admin")
+                    break
+            yield chunk
+    finally:
+        for layer in dict.fromkeys((stream, async_iterator)):
+            try:
+                await layer.aclose()
+            except Exception:
+                pass  # closing must not mask why the stream ended
+        close = getattr(iterator, "close", None)
+        if close is not None:
+            try:
+                # No next() is in flight here, so the generator's own `with` blocks run now:
+                # the member file, the member writer and the archive close in order.
+                await asyncio.to_thread(close)
+            except ValueError:
+                pass  # still executing in a worker thread; it finishes and closes on its own
 
 
 async def notify_collection_download(
@@ -4935,6 +4956,9 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
     stream = _throttled_sync_iterator(
         stream, limit_Bps, active_id, transfer_state
     )
+    # Closed once the response is over, however it ended — the same guarantee as the single
+    # file reader in download_file(); a visitor leaving mid-archive no longer leaks its member.
+    background_tasks.add_task(close_stream_reader, stream)
     # No Content-Length: the archive is produced on the fly, so we stream it chunked.
     return StreamingResponse(stream, media_type="application/zip", headers=headers)
 
