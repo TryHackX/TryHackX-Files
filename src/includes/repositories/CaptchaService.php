@@ -1,6 +1,6 @@
 <?php
 /**
- * CaptchaService (Faza 5 · #2; multi-provider since 2.79.0).
+ * CaptchaService (multi-provider since 2.79.0).
  *
  * Verification + enabled-state check for the captcha provider the operator picked in
  * Settings → Security. Four providers are supported and they all speak the same

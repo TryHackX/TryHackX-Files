@@ -13,8 +13,8 @@ const source = fs.readFileSync(
 
 function loadModule() {
 	const bootstrap = { dataset: { config: JSON.stringify({
-		appUrl: 'http://pon.localhost',
-		apiUrl: 'http://pon.localhost/api.php'
+		appUrl: 'http://files.example.test',
+		apiUrl: 'http://files.example.test/api.php'
 	}) } };
 	const context = {
 		document: {

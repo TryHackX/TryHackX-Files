@@ -16,7 +16,7 @@ function loadModule() {
 		dataset: {
 			config: JSON.stringify({
 				apiUrl: '/api.php',
-				appUrl: '/pon',
+				appUrl: '/app',
 				perms: []
 			})
 		}

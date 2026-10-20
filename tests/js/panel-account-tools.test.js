@@ -58,8 +58,8 @@ function createHarness(responses) {
 		webhooksBody: new TestElement('tbody')
 	};
 	elements.panelBootstrap.dataset.config = JSON.stringify({
-		appUrl: 'http://pon.localhost',
-		host: 'pon.localhost'
+		appUrl: 'http://files.example.test',
+		host: 'files.example.test'
 	});
 
 	const context = {

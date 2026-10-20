@@ -11,6 +11,8 @@
 *.sh text eol=lf
 *.service text eol=lf
 *.bat text eol=crlf
+# The template people copy to scripts\filehost-env.bat; cmd.exe needs CRLF there as well.
+*.bat.example text eol=crlf
 
 # Files that end up inside containers, on servers or in hash-locked installs keep their bytes
 # identical on every checkout.
