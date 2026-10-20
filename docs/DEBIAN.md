@@ -59,18 +59,52 @@ of going back to the defaults:
 ### Service account
 
 Both services run as `www-data` by default, which is also the user of the default PHP-FPM pool
-and of every other site on the machine. On a shared host give the application its own account so
-that another site cannot read `config/config.local.php` (database credentials and
-`APP_SECRET_KEY`), the stored files or `data/`:
+and of every other site on the machine. On a shared host give the application its own account
+and its own PHP-FPM pool, so that another site cannot read `config/config.local.php` (database
+credentials and `APP_SECRET_KEY`), the stored files or `data/`. These commands replace step 1:
 
 ```bash
 sudo adduser --system --group --no-create-home filehost
-# a dedicated PHP-FPM pool running as that user, with its own socket for this virtual host
-# (pool.d/filehost.conf: user = filehost, group = filehost, listen = /run/php/filehost.sock,
-#  php_admin_value[open_basedir] limited to /var/www/filehost and the temp directory)
-sudo FILEHOST_SERVICE_USER=filehost FILEHOST_SERVICE_GROUP=filehost \
+# The project root has to be traversable for that account and for Apache; config/, uploads/
+# and data/ stay private (0750, owned by filehost).
+sudo install -d -o "$USER" -g "$USER" -m 0711 /var/www/filehost
+# Copy or clone the release into /var/www/filehost.
+cd /var/www/filehost
+sudo FILEHOST_SERVICE_USER=filehost FILEHOST_SERVICE_GROUP=filehost FILEHOST_PHP_SAPI=fpm \
     bash scripts/install-debian.sh
 ```
+
+The `0750 $USER:www-data` root of step 1 would lock the account out: the units fail with
+`200/CHDIR` and PHP-FPM answers "Primary script unknown". Do not add `www-data` to the `filehost`
+group instead; that would open `config/` to the PHP of every other site.
+
+Then create the site's pool, `/etc/php/8.4/fpm/pool.d/filehost.conf` (`8.2` on Debian 12), and
+reload it with `sudo systemctl reload php8.4-fpm`:
+
+```ini
+[filehost]
+user = filehost
+group = filehost
+listen = /run/php/filehost.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 16
+; max_execution_time counts CPU time on Linux, so a worker blocked on a slow client is never
+; freed by it. This wall-clock limit is the backstop; keep it above the 300 seconds the
+; application allows an answer PHP streams itself (setting php_stream_max_seconds).
+request_terminate_timeout = 360s
+; Advertisement banners are uploaded to PHP (ads_max_banner_kb, 5 MiB by default), while
+; Debian's php.ini stops at 2 MiB. File uploads go to the upload service and never depend on
+; these two values.
+php_admin_value[upload_max_filesize] = 8M
+php_admin_value[post_max_size] = 12M
+```
+
+`php_admin_value[open_basedir]` can confine the pool further; it then has to include the
+project, the temporary directory, the session directory (`session.save_path`) and any storage
+moved out of the project ([STORAGE.md](STORAGE.md)).
 
 `FILEHOST_SERVICE_USER` and `FILEHOST_SERVICE_GROUP` set `User=` and `Group=` of both units and
 the owner of `config/`, `uploads/` and `data/`; Apache itself only needs to reach `public/`. Later
@@ -149,6 +183,21 @@ this site inside the same `VirtualHost`:
 belong in the pool (`php_admin_value[...]`) or in `php.ini`. `public/.htaccess` already restricts
 its `Content-Security-Policy` fallback to static files because PHP emits its own.
 
+PHP's upload limits matter only for advertisement banners, which PHP receives itself (up to
+`ads_max_banner_kb`, 5 MiB by default), and Debian's `php.ini` allows 2 MiB. With PHP-FPM they are
+set in the pool (see [Service account](#service-account)); with `libapache2-mod-php`, add them to
+the `<Directory>` block above:
+
+```apache
+        php_admin_value upload_max_filesize 8M
+        php_admin_value post_max_size 12M
+```
+
+File uploads are proxied to the upload service, which enforces the group and system size limits
+itself; they do not depend on PHP's limits. For the same reason `public/.htaccess` lifts Apache's
+request-body limit (1 GiB by default since Apache 2.4.54) for the two proxied upload routes, so
+keep `AllowOverride All`, or copy those rules into the virtual host.
+
 ## 3. Prepare the database
 
 TryHackX Files needs MySQL 8.0.1+ or MariaDB 10.6+ (Debian 12 and 13 ship MariaDB 10.11 and
@@ -169,15 +218,23 @@ production.
 
 ## 4. Temporarily authorize the web installer
 
-The installer requires a one-time random secret and a source-IP allowlist in the Apache service
-environment. Generate a secret:
+The installer requires a one-time random secret and a source-IP allowlist in PHP's environment.
+Generate a secret:
 
 ```bash
 openssl rand -hex 32
-sudo systemctl edit apache2
 ```
 
-Add a temporary drop-in:
+With PHP-FPM, PHP never sees Apache's environment, so put both values into the site's pool
+(`/etc/php/8.4/fpm/pool.d/filehost.conf`) and reload it with `sudo systemctl reload php8.4-fpm`:
+
+```ini
+env[FILEHOST_INSTALL_TOKEN] = replace-with-the-generated-secret
+env[FILEHOST_INSTALL_ALLOW_IPS] = 203.0.113.10/32
+```
+
+With `libapache2-mod-php`, PHP runs inside Apache: open `sudo systemctl edit apache2` and add a
+temporary drop-in:
 
 ```ini
 [Service]
@@ -193,9 +250,10 @@ sudo systemctl restart apache2
 Open `https://files.example.com/install.php`, enter the same secret and complete the English
 wizard. Use the exact public URL as the canonical URL.
 
-After success, remove the two environment lines with `sudo systemctl edit apache2`, reload the
-daemon and restart Apache. Existing configuration or installation lock keeps the installer
-closed even if the environment variable is accidentally left behind.
+After success, remove the two lines again: from the pool, then reload PHP-FPM; or with
+`sudo systemctl edit apache2`, then reload the daemon and restart Apache. Existing configuration
+or installation lock keeps the installer closed even if the environment variable is
+accidentally left behind.
 
 ## 5. Start services
 

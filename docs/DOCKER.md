@@ -31,7 +31,8 @@ as a deployment test.
 The image is built on the official `php:8.5-apache-trixie` (PHP 8.5 and Python 3.13 on Debian 13,
 the production combination), pinned by digest; Dependabot refreshes tag and digest. It starts from
 `php.ini-production` plus `docker/php-overrides.ini` (errors to the container log, no
-`X-Powered-By`) and `docker/apache-security.conf` (no Apache version banner), and its GD supports
+`X-Powered-By`, PHP uploads up to 8 MiB for advertisement banners; file uploads go to the
+upload server) and `docker/apache-security.conf` (no Apache version banner), and its GD supports
 JPEG, PNG, WebP and FreeType. The Python environment is installed from `requirements-lock.txt`
 before the sources are copied, so editing code does not reinstall it.
 
