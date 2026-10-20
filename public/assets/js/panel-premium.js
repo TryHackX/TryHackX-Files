@@ -800,7 +800,7 @@
 		document.getElementById('promoFormPercent').value = c ? c.percentOff : 10;
 		document.getElementById('promoFormMaxUses').value = c ? c.maxUses : 0;
 		document.getElementById('promoFormExpires').value = c && c.expiresAt
-			? new Date(c.expiresAt * 1000).toISOString().slice(0, 10) : '';
+			? window.FHUtil.serverDate(c.expiresAt, PANEL.timeZone) : '';
 		document.getElementById('promoFormEnabled').checked = c ? !!c.enabled : true;
 		onPromoScopeChange();
 		openModal('promoFormModal');
@@ -919,9 +919,10 @@
 		document.getElementById('bulkTargetPlan').innerHTML = planOptions;
 		document.getElementById('bulkBoughtPlan').innerHTML = `<option value="0">${esc(t('panel.prem.bulk_any_plan'))}</option>${planOptions}`;
 		document.getElementById('bulkGroup').innerHTML = bulkGroups.map(group => `<option value="${group.id}">${esc(group.name)}</option>`).join('');
-		const today = new Date();
-		const monthAgo = new Date(today.getTime() - 30 * 86400000);
-		const iso = date => date.toISOString().slice(0, 10);
+		const now = Math.floor(Date.now() / 1000);
+		const iso = ts => window.FHUtil.serverDate(ts, PANEL.timeZone);
+		const today = now;
+		const monthAgo = now - 30 * 86400;
 		document.getElementById('bulkFrom').value = iso(monthAgo);
 		document.getElementById('bulkTo').value = iso(today);
 		updateBulkSourceFields();

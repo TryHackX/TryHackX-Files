@@ -359,6 +359,8 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 		'isAdmin' => (bool) $isAdmin,
 		'isMod' => (bool) $isMod,
 		'loggedIn' => true,
+		// Date fields are read with strtotime() in this zone; the panel shows them in it too.
+		'timeZone' => date_default_timezone_get(),
 		'inputLimits' => [
 			'usernameMin' => InputLimits::usernameMin(),
 			'usernameMax' => InputLimits::usernameMax(),

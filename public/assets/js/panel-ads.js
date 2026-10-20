@@ -281,7 +281,7 @@
 		document.getElementById('adFormAdsenseSlot').value = ad ? ad.adsenseSlot : '';
 		document.getElementById('adFormWeight').value = ad ? ad.weight : 1;
 		document.getElementById('adFormStatus').value = ad && ad.status === 'paused' ? 'paused' : 'active';
-		const toDate = ts => ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '';
+		const toDate = ts => window.FHUtil.serverDate(ts, panel.timeZone);
 		document.getElementById('adFormStarts').value = ad ? toDate(ad.startsAt) : '';
 		document.getElementById('adFormEnds').value = ad ? toDate(ad.endsAt) : '';
 		adFormTypeChanged();

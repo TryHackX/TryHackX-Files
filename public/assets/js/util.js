@@ -83,6 +83,26 @@
 	}
 
 	/**
+	 * A UNIX timestamp (seconds) as the "YYYY-MM-DD" of a date field, in the server's time zone
+	 * (`timeZone`, an IANA name the panel gets from the server). The API reads those fields with
+	 * strtotime() in that zone, so formatting them in UTC moved the date back a day on every save
+	 * on a server east of UTC (and a promo's expiry forward a day west of it). Empty → ''.
+	 */
+	function serverDate(ts, timeZone) {
+		if (!ts) return '';
+		var date = new Date(ts * 1000);
+		try {
+			var parts = {};
+			new Intl.DateTimeFormat('en-US', {
+				timeZone: timeZone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit'
+			}).formatToParts(date).forEach(function (part) { parts[part.type] = part.value; });
+			return parts.year + '-' + parts.month + '-' + parts.day;
+		} catch (error) {
+			return date.toISOString().slice(0, 10);   // unknown zone name: the old UTC reading
+		}
+	}
+
+	/**
 	 * Copy text to the clipboard and report whether it really happened.
 	 *
 	 * `navigator.clipboard` is missing on plain-http installs and rejects when the document is
@@ -123,6 +143,7 @@
 		safeHttpUrl: safeHttpUrl,
 		formatSize: formatSize,
 		formatDate: formatDate,
+		serverDate: serverDate,
 		copyText: copyText
 	};
 })();
