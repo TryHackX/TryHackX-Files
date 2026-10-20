@@ -1574,23 +1574,41 @@ def _truncate_utf8(filename: str, limit: int) -> str:
     return name + ext
 
 
+# What Windows drops from the end of a name, and what browsers trim when they save a
+# download (Firefox strips trailing dots and any whitespace, Chrome replaces them): a file
+# stored as "invoice.exe." or "invoice.exe " ends up on the recipient's disk as "invoice.exe".
+_TRAILING_DOTS_AND_SPACES = re.compile(r"[\s.᠎﻿]+$")
+BLOCKED_SUFFIX = ".blocked"
+
+
 def sanitize_filename(filename: str, blocked_extensions) -> str:
-    """One safe path component: no separators or control characters, bounded in bytes."""
+    """One safe path component: no separators or control characters, bounded in bytes.
+
+    The blocked-extension check runs on the name exactly as it is stored, after every step
+    that can change its last extension. Truncation can expose an inner `.exe` once an
+    over-long last extension is cut off, so checking the name before truncating it let
+    `"A"*196 + ".exe" + "B"*150` through as `AAAA….exe`.
+    """
     filename = os.path.basename(filename)
     filename = re.sub(r'[<>:"/\\|?*\x00-\x1f\x7f]', '_', filename)
+    filename = _TRAILING_DOTS_AND_SPACES.sub("", filename)
     if filename in ("", ".", ".."):
+        return "file"
+
+    filename = _TRAILING_DOTS_AND_SPACES.sub("", _truncate_utf8(filename, FILENAME_MAX_BYTES))
+    if not filename:
         return "file"
 
     ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
     if ext in blocked_extensions:
-        filename = filename + '.blocked'
-
-    filename = _truncate_utf8(filename, FILENAME_MAX_BYTES)
+        filename = (
+            _truncate_utf8(filename, FILENAME_MAX_BYTES - len(BLOCKED_SUFFIX)) + BLOCKED_SUFFIX
+        )
 
     if filename == STORAGE_MANIFEST_NAME:
         filename += ".upload"
 
-    return filename or 'file'
+    return filename
 
 
 async def sanitize_filename_async(filename: str) -> str:

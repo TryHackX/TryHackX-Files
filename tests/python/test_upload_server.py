@@ -18,6 +18,8 @@ import time
 import zipfile
 from pathlib import Path
 
+import pytest
+
 # Import the server module from the project root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import upload_server as us  # noqa: E402
@@ -2258,6 +2260,36 @@ class TestStoredFilenames:
 
         assert name.endswith(".blocked")
         assert len(name.encode("utf-8")) <= us.FILENAME_MAX_BYTES
+
+    @pytest.mark.parametrize("ext", sorted(us.BLOCKED_EXTENSIONS))
+    def test_truncation_cannot_expose_a_blocked_extension(self, ext):
+        # The over-long last extension is cut away and leaves ".<ext>" at the end of the name.
+        raw = "A" * (us.FILENAME_MAX_BYTES - len(ext) - 1) + "." + ext + "B" * 150
+
+        name = us.sanitize_filename(raw, us.BLOCKED_EXTENSIONS)
+
+        assert not name.lower().endswith("." + ext)
+        assert name.endswith(us.BLOCKED_SUFFIX)
+        assert len(name.encode("utf-8")) <= us.FILENAME_MAX_BYTES
+        assert us._valid_storage_name(name)
+        assert us.mimetypes.guess_type(name)[0] is None
+
+    @pytest.mark.parametrize("raw", [
+        "invoice.exe.", "invoice.exe ", "invoice.exe. . ", "invoice.EXE　",
+        "invoice.exe ", "invoice.php﻿",
+    ])
+    def test_trailing_dots_and_spaces_cannot_hide_a_blocked_extension(self, raw):
+        name = us.sanitize_filename(raw, us.BLOCKED_EXTENSIONS)
+
+        assert name.endswith(us.BLOCKED_SUFFIX)
+        assert name.rsplit(".", 2)[-2].lower() in {"exe", "php"}
+
+    def test_the_check_uses_the_configured_list_on_the_final_name(self):
+        blocked = {"zip"}
+        raw = "A" * 196 + ".zip" + "B" * 150
+
+        assert us.sanitize_filename(raw, blocked).endswith(".zip" + us.BLOCKED_SUFFIX)
+        assert us.sanitize_filename("report.pdf. ", blocked) == "report.pdf"
 
     def test_control_characters_never_reach_the_manifest(self):
         name = us.sanitize_filename("a\x7fb\x01c.txt", us.BLOCKED_EXTENSIONS)
