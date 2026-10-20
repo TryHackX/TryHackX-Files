@@ -93,3 +93,7 @@ test('a long uploads path breaks inside the System box', () => {
 	assert.match(read('src/includes/panel/views_settings.php'), /<div class="sysinfo-box">/);
 	assert.match(css('panel-forms.css'), /\.sysinfo-box p\s*\{[^}]*overflow-wrap:\s*anywhere;/);
 });
+
+test('a long status in a queue row wraps beside the remove button instead of pushing it onto a line of its own', () => {
+	assert.match(mediaBlocks(css('index.css'), 'max-width: 480px'), /\.file-status\s*\{[^}]*flex:\s*1 1 0;/);
+});
