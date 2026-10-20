@@ -84,15 +84,23 @@ final class UtilityRegressionTest extends RepoTestCase
 		}
 	}
 
-	/** PHP 8.5 deprecates curl_close(); production runs 8.5, CI does not yet. */
+	/**
+	 * PHP 8.5 deprecates curl_close(). The 8.5 CI leg fails on any deprecation a test reaches
+	 * (phpunit.xml); this also covers the code paths no test executes, such as a live provider.
+	 */
 	public function testNoDeprecatedCurlCloseCalls(): void
 	{
 		$hits = [];
-		$files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PROJECT_ROOT . '/src'));
-		foreach ($files as $item) {
-			if ($item->isFile() && str_ends_with($item->getFilename(), '.php')
-				&& preg_match('/\bcurl_close\s*\(/', (string) file_get_contents($item->getPathname()))) {
-				$hits[] = $item->getPathname();
+		foreach (['src', 'public', 'scripts'] as $directory) {
+			$files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(
+				PROJECT_ROOT . '/' . $directory,
+				FilesystemIterator::SKIP_DOTS
+			));
+			foreach ($files as $item) {
+				if ($item->isFile() && str_ends_with($item->getFilename(), '.php')
+					&& preg_match('/\bcurl_close\s*\(/', (string) file_get_contents($item->getPathname()))) {
+					$hits[] = $item->getPathname();
+				}
 			}
 		}
 		$this->assertSame([], $hits);
