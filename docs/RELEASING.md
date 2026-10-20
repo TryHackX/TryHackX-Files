@@ -254,8 +254,8 @@ Operators deploy the tagged source archive
 the tag, never a copy made from a live working directory. Security-relevant configuration and
 migration steps belong in the changelog section and in [MIGRATION.md](MIGRATION.md).
 
-Keep private vulnerability reporting (**Settings → Advanced Security**; [SECURITY.md](../SECURITY.md)
-sends reporters there), Dependabot alerts and GitHub secret scanning enabled. `main` is not
-branch-protected, so the green run before tagging is checked by hand. A ruleset that requires the
-CI checks would enforce it; it has to name the job names in `.github/workflows/ci.yml`, which
-change whenever the test matrix does.
+Keep private vulnerability reporting (**Settings → Advanced Security**;
+[SECURITY.md](../SECURITY.md) sends reporters there), Dependabot alerts and GitHub secret scanning
+enabled. `main` is not branch-protected, so the green run before tagging is checked by hand. A
+ruleset that requires the CI checks would enforce it; it has to name the job names in
+`.github/workflows/ci.yml`, which change whenever the test matrix does.
