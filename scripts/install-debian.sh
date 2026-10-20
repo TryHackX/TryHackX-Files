@@ -101,11 +101,11 @@ prepare_directories() {
     done
 }
 
-# Renders both unit templates for the application directory and account into target_dir.
+# Renders the unit templates of template_dir for the application directory and account into
+# target_dir.
 render_units() {
-    local app_dir="$1" user="$2" group="$3" target_dir="$4"
-    local template_dir escaped_app_dir escaped_user escaped_group protect_home unit
-    template_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local app_dir="$1" user="$2" group="$3" target_dir="$4" template_dir="$5"
+    local escaped_app_dir escaped_user escaped_group protect_home unit
     escaped_app_dir="$(printf '%s' "$app_dir" | sed 's/[&|\\]/\\&/g')"
     escaped_user="$(printf '%s' "$user" | sed 's/[&|\\]/\\&/g')"
     escaped_group="$(printf '%s' "$group" | sed 's/[&|\\]/\\&/g')"
@@ -121,11 +121,17 @@ render_units() {
             ;;
     esac
     for unit in filehost-upload filehost-mail-worker; do
-        sed -e "s|__APP_DIR__|$escaped_app_dir|g" \
-            -e "s|__USER__|$escaped_user|g" \
-            -e "s|__GROUP__|$escaped_group|g" \
-            -e "s|^ProtectHome=true\$|ProtectHome=$protect_home|" \
-            "$template_dir/$unit.service" > "$target_dir/$unit.service"
+        # Rendered beside the target and then moved over it, so a failure keeps the old unit.
+        if ! sed -e "s|__APP_DIR__|$escaped_app_dir|g" \
+                -e "s|__USER__|$escaped_user|g" \
+                -e "s|__GROUP__|$escaped_group|g" \
+                -e "s|^ProtectHome=true\$|ProtectHome=$protect_home|" \
+                "$template_dir/$unit.service" > "$target_dir/$unit.service.new" \
+            || ! mv -f "$target_dir/$unit.service.new" "$target_dir/$unit.service"; then
+            rm -f "$target_dir/$unit.service.new"
+            warn "Could not render $unit.service from $template_dir; the installed unit is unchanged."
+            return 1
+        fi
     done
 }
 
@@ -250,7 +256,7 @@ main() {
     fi
 
     log "Installing systemd units..."
-    render_units "$app_dir" "$service_user" "$service_group" /etc/systemd/system
+    render_units "$app_dir" "$service_user" "$service_group" /etc/systemd/system "$app_dir/scripts"
     write_storage_dropin "$app_dir" /etc/systemd/system/filehost-upload.service.d
 
     if [[ "$units_only" != "1" && ! -e /etc/default/filehost ]]; then

@@ -93,15 +93,20 @@ check "FILEHOST_INSTALL_DB=1 installs it" yes "$(outcome want_local_database 1 1
 echo "# rendered units"
 read -r kept_user kept_group <<<"$(resolve_account "$dedicated" "" "" 0)"
 mkdir -p "$work/units"
-render_units /var/www/filehost "$kept_user" "$kept_group" "$work/units"
+render_units /var/www/filehost "$kept_user" "$kept_group" "$work/units" "$repo/scripts"
 check "the re-rendered upload unit keeps User=" filehost "$(unit_value "$work/units/filehost-upload.service" User)"
 check "the re-rendered mail unit keeps Group=" filehost "$(unit_value "$work/units/filehost-mail-worker.service" Group)"
 check "the application directory is filled in" /var/www/filehost \
     "$(unit_value "$work/units/filehost-upload.service" WorkingDirectory)"
 check "no placeholder is left" 0 "$(cat "$work"/units/*.service | grep -c '__[A-Z_]*__' || true)"
-render_units /home/alice/filehost filehost filehost "$work/units" 2>/dev/null
+render_units /home/alice/filehost filehost filehost "$work/units" "$repo/scripts" 2>/dev/null
 check "below /home the unit keeps the home directory readable" read-only \
     "$(unit_value "$work/units/filehost-upload.service" ProtectHome)"
+mkdir -p "$work/installed"
+printf 'old\n' > "$work/installed/filehost-upload.service"
+check "rendering without the templates fails" no \
+    "$(outcome render_units /var/www/filehost filehost filehost "$work/installed" "$work/no-templates")"
+check "and leaves the installed unit as it was" old "$(cat "$work/installed/filehost-upload.service")"
 
 echo "# storage drop-in"
 mkdir -p "$work/site/config"
