@@ -618,6 +618,9 @@ final class FileController
 		}
 
 		$filters = self::authorisedFilters();
+		if (self::refuseInactiveBeyondDetail($filters)) {
+			return;
+		}
 
 		$result = FileManager::browse([
 			'page' => $page,
@@ -654,6 +657,29 @@ final class FileController
 			'per_page' => $perPage,
 			'applied_filters' => array_keys($filters),
 		]);
+	}
+
+	/**
+	 * "Not downloaded for N days" reads the per-download log, which the cleanup job folds into
+	 * daily totals without file ids after `traffic_detail_days`. Further back, a file downloaded
+	 * since looks never downloaded and was listed as inactive — the list administrators pick
+	 * bulk deletions from. So the filter goes back at most that far: a longer period is refused
+	 * with the limit, not quietly shortened, since a shorter one lists more than was asked for.
+	 */
+	private static function refuseInactiveBeyondDetail(array $filters): bool
+	{
+		$max = TrafficRepository::detailDays();
+		if (!isset($filters['inactive_days']) || (int) $filters['inactive_days'] <= $max) {
+			return false;
+		}
+		http_response_code(422);
+		header('Content-Type: application/json');
+		echo json_encode([
+			'success' => false,
+			'error' => __('panel.flt.inactive_max', ['days' => $max]),
+			'inactive_days_max' => $max,
+		]);
+		return true;
 	}
 
 	/**
@@ -1099,6 +1125,9 @@ final class FileController
 		// whole (filtered) set: the tab pages, sorts and searches in the browser, and that is
 		// one account's uploads rather than the install's.
 		$filters = self::authorisedMyFilters();
+		if (self::refuseInactiveBeyondDetail($filters)) {
+			return;
+		}
 		$result = FileManager::browse([
 			'owner_id' => (int) $_SESSION['user_id'],
 			'owner_fields' => true,

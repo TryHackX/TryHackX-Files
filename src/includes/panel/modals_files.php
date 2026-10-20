@@ -92,8 +92,8 @@ if (!defined('APP_ROOT')) {
 				<h4><i class="fa-solid fa-hourglass-end"></i> <?= _h('panel.flt.inactive') ?></h4>
 				<div class="form-group">
 					<label><?= _h('panel.flt.inactive_days') ?></label>
-					<input type="number" id="fltInactive" class="input" min="1" placeholder="<?= _h('panel.flt.inactive_ph') ?>">
-					<small><?= _h('panel.flt.inactive_hint') ?></small>
+					<input type="number" id="fltInactive" class="input" min="1" max="<?= TrafficRepository::detailDays() ?>" placeholder="<?= _h('panel.flt.inactive_ph') ?>">
+					<small><?= _h('panel.flt.inactive_hint', ['days' => TrafficRepository::detailDays()]) ?></small>
 				</div>
 			</div>
 
@@ -407,8 +407,8 @@ if (!defined('APP_ROOT')) {
 				<h4><i class="fa-solid fa-hourglass-end"></i> <?= _h('panel.flt.inactive') ?></h4>
 				<div class="form-group">
 					<label><?= _h('panel.flt.inactive_days') ?></label>
-					<input type="number" id="mfltInactive" class="input" min="1" placeholder="<?= _h('panel.flt.inactive_ph') ?>">
-					<small><?= _h('panel.mflt.inactive_hint') ?></small>
+					<input type="number" id="mfltInactive" class="input" min="1" max="<?= TrafficRepository::detailDays() ?>" placeholder="<?= _h('panel.flt.inactive_ph') ?>">
+					<small><?= _h('panel.mflt.inactive_hint', ['days' => TrafficRepository::detailDays()]) ?></small>
 				</div>
 			</div>
 

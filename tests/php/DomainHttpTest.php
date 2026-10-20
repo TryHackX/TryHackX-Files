@@ -711,6 +711,33 @@ final class DomainHttpTest extends TestCase
 	}
 
 	/**
+	 * C-F12: "not downloaded for N days" reads the per-download log, which the cleanup job
+	 * folds into daily totals after traffic_detail_days. Further back, a file downloaded since
+	 * looked never downloaded and was listed as inactive. Both lists now refuse such a period
+	 * with the limit instead of answering wrongly; within it the filter is answered as before.
+	 */
+	public function testTheInactiveFilterGoesBackNoFurtherThanTheDetailedLog(): void
+	{
+		$max = TrafficRepository::detailDays();
+		self::freshSession();
+		$ip = '203.0.113.172';
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpboss', 'password' => 'HttpBoss1!x'], $ip);
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+		$beyond = rawurlencode(json_encode(['inactive_days' => $max + 1]));
+
+		$refused = self::json('GET', '/api.php?action=list&lang=en&filters=' . $beyond, null, $ip);
+		$this->assertSame(422, $refused['status']);
+		$this->assertSame($max, $refused['inactive_days_max'] ?? null);
+		$this->assertSame(str_replace(':days', (string) $max, self::english('panel.flt.inactive_max')), $refused['error'] ?? null);
+		$this->assertSame(422, self::json('GET', '/api.php?action=user_files&filters=' . $beyond, null, $ip)['status']);
+
+		$within = self::json('GET', '/api.php?action=list&filters=' . rawurlencode(json_encode(['inactive_days' => $max])), null, $ip);
+		$this->assertSame(200, $within['status']);
+		$this->assertTrue($within['success'] ?? false);
+		$this->assertContains('inactive_days', $within['applied_filters'] ?? []);
+	}
+
+	/**
 	 * C-F26: a plan an administrator granted or revoked is a ledger line, not a sale; it printed
 	 * a numbered receipt for "0,00 PLN, paid via ADMIN". A real purchase still prints.
 	 */

@@ -217,6 +217,29 @@ final class FileBrowseTest extends RepoTestCase
 		$this->assertNotContains('fbob', $inactive, 'uploaded yesterday');
 	}
 
+	/**
+	 * C-F12: the filter reads the per-download log, which the cleanup job folds into daily
+	 * totals without file ids after traffic_detail_days. Within that window its answer is the
+	 * same before and after the fold; beyond it a file downloaded since would look never
+	 * downloaded, which is why the list API refuses longer periods (DomainHttpTest).
+	 */
+	public function testInactiveFilterWithinTheDetailWindowSurvivesTheFold(): void
+	{
+		$this->truncate('traffic_daily');
+		$day = 86400;
+		$this->insertFile('fold20', null, ['uploaded_at' => time() - 100 * $day]);
+		$this->insertFile('fold40', null, ['uploaded_at' => time() - 100 * $day]);
+		$this->insertTraffic('198.51.100.9', 123, 'download', 'fold20', null, time() - 20 * $day);
+		$this->insertTraffic('198.51.100.9', 123, 'download', 'fold40', null, time() - 40 * $day);
+
+		$before = $this->ids(['inactive_days' => 30]);
+		TrafficRepository::aggregateAndPrune(30, 730);
+		$after = $this->ids(['inactive_days' => 30]);
+		$this->assertSame($before, $after);
+		$this->assertNotContains('fold20', $after, 'downloaded 20 days ago');
+		$this->assertContains('fold40', $after, 'last downloaded 40 days ago');
+	}
+
 	public function testPagingReportsFullTotal(): void
 	{
 		$res = FileManager::browse(['per_page' => 5, 'page' => 1]);
