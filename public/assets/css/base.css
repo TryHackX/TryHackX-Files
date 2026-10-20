@@ -44,6 +44,17 @@
 	--border: #e4e4e7;
 	--success: #15803d;
 	--warning: #b45309;
+	/* #ef4444 measured 3.4-3.8:1 as error text on white and #f4f4f5; this is 5.3:1 on white and
+	   4.8:1 on the field colour, and white text on a red button clears 4.5:1 as well. */
+	--danger: #d02626;
+}
+
+/* The `hidden` attribute means hidden. The browser's own [hidden] rule is the weakest there is,
+   so any class that sets `display` (.btn, .coll-download-wrap, a grid or a flex holder) used to
+   win, and "hidden" controls showed: "Download all" under a locked collection's password form,
+   "Grant to all" before its preview, a failed QR's empty card. */
+[hidden] {
+	display: none !important;
 }
 
 /* Checkboxes/radios: brand accent + dark rendering (A1) — light theme restores native look. */
@@ -115,12 +126,18 @@ body {
 
 /* iOS Safari zooms into any focused field whose text is smaller than 16px and does not zoom
    back out, so on phones every form control is at least 16px. Checkboxes, radios, ranges,
-   colour and file pickers have no text and are left alone. */
+   colour and file pickers have no text and are left alone. The input selector outweighs the
+   page stylesheets' class rules on its own; a bare `select`/`textarea` does not (base.css is
+   linked first, and .form-group select, .input, .auth-input, .pw-set-input kept about fifty of
+   them at 14-15px), hence the `!important` on those two. */
 @media (max-width: 768px) {
-	input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+	input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]) {
+		font-size: 16px;
+	}
+
 	select,
 	textarea {
-		font-size: 16px;
+		font-size: 16px !important;
 	}
 }
 
@@ -409,6 +426,11 @@ header {
 	background-color: #6366f1b3;
 }
 
+/* A red button keeps a red edge on hover instead of the accent border every .btn gets. */
+.btn.btn-danger:hover {
+	border-color: var(--danger);
+}
+
 .btn svg {
 	width: 16px;
 	height: 16px;
@@ -490,7 +512,9 @@ header {
 	   screen and stack a message into a tall narrow column. */
 	width: max-content;
 	max-width: min(calc(100vw - 32px), 640px);
-	z-index: 10001;
+	/* Above every dialog and backdrop (the collection page's member-password dialog sits at
+	   10020): a message about what happened in a dialog has to be readable over it. */
+	z-index: 20000;
 	pointer-events: none;
 }
 

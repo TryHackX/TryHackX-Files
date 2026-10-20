@@ -103,6 +103,9 @@
 
     async function startZip(event) {
         event.preventDefault();
+        // The button of a locked collection waits under the password form until it is
+        // unlocked; without the password token the ZIP server only answers "Password required".
+        if (event.currentTarget && event.currentTarget.closest && event.currentTarget.closest('[hidden]')) return;
         try {
             followZip(await fetchZipToken());
         } catch (error) {

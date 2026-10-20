@@ -122,8 +122,10 @@
             }
             if (statement === "this.parentNode.style.display='none'"
                 || statement === 'this.parentNode.style.display="none"') {
+                // Exactly what it says (a CSSOM write, which the CSP allows). The `hidden`
+                // attribute it used to set lost to any class giving the holder a display.
                 if (element.parentNode instanceof HTMLElement) {
-                    element.parentNode.hidden = true;
+                    element.parentNode.style.display = 'none';
                 }
                 continue;
             }

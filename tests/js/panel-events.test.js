@@ -16,6 +16,7 @@ class TestElement {
 		this.attributes = { ...attributes };
 		this.children = [];
 		this.parentNode = null;
+		this.style = {};
 		this.checked = false;
 		this.hidden = false;
 		this.selected = false;
@@ -206,6 +207,19 @@ test('keydown actions are delegated without inline JavaScript', () => {
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0][0], event);
 	assert.equal(calls[0][1], 'fileDownload');
+});
+
+test('a failed image hides its holder with an inline display, not the overridable hidden attribute', () => {
+	const holder = new TestElement({ class: 'qr-holder' });
+	const image = new TestElement({ 'data-fh-error': "this.parentNode.style.display='none'" });
+	holder.append(image);
+	const harness = createHarness([holder]);
+	harness.context.FHPanelActions = Object.freeze({});
+	harness.run();
+
+	dispatch(harness.listeners.error, image);
+	assert.equal(holder.style.display, 'none');
+	assert.deepEqual(harness.errors, []);
 });
 
 test('prototype functions and unsupported expressions are rejected', () => {
