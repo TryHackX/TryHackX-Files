@@ -124,8 +124,20 @@ if (($_POST['action'] ?? '') === 'panel_reauth') {
 		exit;
 	}
 }
-if (!panelAuthorizationValid($currentUser)) {
+// A refused confirmation answers with the gate again, whatever asked for it. The settings forms
+// ask while the panel window is still open, and this used to fall through to the panel: the
+// "wrong password" was never shown and the change being made was dropped without a word.
+$reauthRefused = $reauthError !== '';
+if ($reauthRefused || !panelAuthorizationValid($currentUser)) {
 	$reauthUsername = (string) ($currentUser['username'] ?? '');
+	if ($reauthRefused && panelAuthorizationValid($currentUser)) {
+		// Only the settings check can ask while the window is open: keep its explanation, and
+		// its status, on the repeated page.
+		http_response_code(403);
+		if (($_POST['reauth_reason'] ?? '') === 'settings') {
+			$reauthNotice = __('panel.reauth.settings_msg');
+		}
+	}
 	require __DIR__ . '/../src/includes/panel_reauth_page.php';
 	exit;
 }

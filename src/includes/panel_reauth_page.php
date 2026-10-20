@@ -116,6 +116,10 @@ if ($reauthCaptchaConfig === false) {
 				<form method="post">
 					<input type="hidden" name="_csrf" value="<?= htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8') ?>">
 					<input type="hidden" name="action" value="panel_reauth">
+					<?php if ($reauthNotice !== ''): ?>
+						<?php /* A wrong password brings this page back; the notice comes back with it. */ ?>
+						<input type="hidden" name="reauth_reason" value="settings">
+					<?php endif; ?>
 					<?php /* Not submitted for anything: it tells a phone's password manager which
 					         saved account the password below belongs to, so it can offer it. */ ?>
 					<input type="text" name="username" value="<?= htmlspecialchars($reauthUsername, ENT_QUOTES, 'UTF-8') ?>"

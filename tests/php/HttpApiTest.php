@@ -1834,6 +1834,7 @@ final class HttpApiTest extends TestCase
 			$this->assertSame(403, $mail['status']);
 			$this->assertStringContainsString('value="panel_reauth"', $mail['body']);
 			$this->assertStringContainsString('class="reauth-notice"', $mail['body']);
+			$this->assertStringContainsString('name="reauth_reason" value="settings"', $mail['body']);
 			$gateOff = self::postPanelForm('/panel.php?tab=settings&stab=security', [
 				'action' => 'save_settings',
 				'setting_group' => 'security',
@@ -1850,6 +1851,25 @@ final class HttpApiTest extends TestCase
 			$this->assertSame('smtp.example.test', (string) Database::getSetting('smtp_host'));
 			$this->assertSame('30', (string) Database::getSetting('panel_reauth_minutes'));
 			$this->assertSame('', (string) Database::getSetting('cron_php_binary', ''));
+
+			// A wrong password keeps the administrator on the gate, with the error and the reason
+			// it asks — the panel window is still open, which used to show the settings page as
+			// if the password had been accepted.
+			$wrong = self::postPanelForm('/panel.php?tab=settings&stab=email', [
+				'action' => 'panel_reauth',
+				'reauth_reason' => 'settings',
+				'password' => 'NotThePassword1!',
+			]);
+			$this->assertSame(403, $wrong['status']);
+			$this->assertStringContainsString('value="panel_reauth"', $wrong['body']);
+			$this->assertStringContainsString('class="auth-message error show"', $wrong['body']);
+			$this->assertStringContainsString('class="reauth-notice"', $wrong['body']);
+			$this->assertStringNotContainsString('id="emailMethod"', $wrong['body']);
+			$stillStale = self::postPanelForm(
+				'/panel.php?tab=settings&stab=email',
+				$mailForm + ['smtp_host' => 'mail.attacker.example']
+			);
+			$this->assertSame(403, $stillStale['status'], 'a wrong password confirms nothing');
 
 			// Confirming the password returns to the same view, and the change then goes through.
 			$back = self::postPanelForm('/panel.php?tab=settings&stab=email', [
