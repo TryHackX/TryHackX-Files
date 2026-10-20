@@ -33,6 +33,7 @@ composer analyse
 python -m ruff check upload_server.py tests/python
 python -m compileall -q upload_server.py tests/python
 node --test tests/js/*.test.js
+bash tests/shell/install-debian-test.sh
 ```
 
 PHP lint on Linux:

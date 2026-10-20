@@ -1,0 +1,27 @@
+# The upload unit as the 2.80 installer rendered it for a dedicated account
+# (FILEHOST_SERVICE_USER=filehost FILEHOST_SERVICE_GROUP=filehost); used by install-debian-test.sh.
+[Unit]
+Description=TryHackX Files Python Upload Server
+After=network.target mysql.service mariadb.service
+
+[Service]
+Type=simple
+User=filehost
+Group=filehost
+WorkingDirectory=/var/www/filehost
+EnvironmentFile=-/etc/default/filehost
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/var/www/filehost/venv/bin/python /var/www/filehost/upload_server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/filehost/uploads /var/www/filehost/data
+UMask=0027
+# Commented-out keys must not count, even after the real ones:
+#User=www-data
+#Group=www-data
+
+[Install]
+WantedBy=multi-user.target

@@ -117,6 +117,17 @@ node --test tests/js/*.test.js
 These tests cover security-sensitive DOM renderers, declarative dispatch, modular panel behavior
 and regressions which do not require a browser process.
 
+## Shell
+
+```bash
+bash tests/shell/install-debian-test.sh
+```
+
+Checks what `scripts/install-debian.sh` keeps when it runs again (service account, PHP handler,
+local database, rendered units, storage drop-in, runtime directories) against a fixture unit, with
+the package and Apache queries stubbed. It installs nothing; the directory-mode checks run on
+Linux only. CI runs it after ShellCheck.
+
 ## Docker E2E
 
 The `docker-smoke` job builds empty volumes, creates a schema through the CI-only bootstrap,

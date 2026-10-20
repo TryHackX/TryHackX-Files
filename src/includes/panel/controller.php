@@ -273,7 +273,8 @@ if ($action === 'save_settings') {
 		if ($settingsToUpdate) {
 			Database::logAudit('settings_saved', 'group: ' . $group);
 		}
-		$success = __('panel.ctl.saved');
+		// A changed uploads directory leaves its own follow-up steps; keep them over "saved".
+		$success = $success !== '' ? $success : __('panel.ctl.saved');
 		if (!empty($blockedKept)) {
 			$success .= ' ' . __('panel.ctl.blocked_ext_kept', ['list' => implode(', ', $blockedKept)]);
 		}

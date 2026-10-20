@@ -114,7 +114,9 @@ sudo bash scripts/install-debian.sh
 ```
 
 Then configure the Apache virtual host, complete the web installer and start the systemd units.
-The full procedure is in [docs/DEBIAN.md](docs/DEBIAN.md).
+The full procedure is in [docs/DEBIAN.md](docs/DEBIAN.md). A later release that changes the units
+is applied with `sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`, which keeps the
+installation's service account and touches nothing but the units.
 
 ### Web installer
 

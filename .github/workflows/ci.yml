@@ -72,6 +72,11 @@ jobs:
           find . -type f -name '*.sh' -not -path './venv/*' -not -path './vendor/*' -print0 \
             | xargs -0 -r shellcheck --severity=warning --exclude=SC2154
 
+      # What a re-run of the Debian installer keeps (account, PHP handler, database, directories),
+      # against fixture units; nothing is installed.
+      - name: Test the Debian installer's re-run decisions
+        run: bash tests/shell/install-debian-test.sh
+
       - name: Validate Compose model
         env:
           MYSQL_ROOT_PASSWORD: ci-root-password

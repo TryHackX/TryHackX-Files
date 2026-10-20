@@ -89,11 +89,15 @@ leave the old ones behind. After the swap, `venv/bin/python -c "import uvloop"` 
 event loop is present.
 
 A release that changes `scripts/*.service` (the systemd sandbox, resource limits and restart
-policy have changed) is applied on Debian by re-running `sudo bash scripts/install-debian.sh`: it
-renders both units again, writes the storage drop-in when `UPLOADS_PATH`, `DATA_PATH` or
+policy have changed) is applied on Debian with
+`sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`. It renders both units again for the
+account they already run as, writes the storage drop-in when `UPLOADS_PATH`, `DATA_PATH` or
 `FILE_QUARANTINE_PATH` point outside the application directory, reloads systemd and restarts the
-services when the installation is already configured. It also runs `pip install` into the
-existing `venv/`, so use it on a stopped service or after the `venv.new` swap. Compare
+services when the installation is already configured. It installs no packages, leaves `venv/`
+alone and changes no ownership. Because it restarts the services, run it at step 5 of the
+migration order below, in place of starting them by hand. A full run without the switch also
+installs missing packages (never upgrading installed ones) and runs `pip install` into the
+existing `venv/`; use that only on a stopped service or after the `venv.new` swap. Compare
 `systemctl cat filehost-upload` with the template if the units were edited by hand.
 
 ## 5. Permissions and Apache
@@ -127,7 +131,9 @@ The virtual host serves `/var/www/filehost/public`, never the project root.
    ready, journals each step, repairs safe partially applied structures, verifies contracts
    2–64 and publishes `schema_ready=1` only after success.
 4. Verify schema 64 and readiness.
-5. Promote `venv.new` to `venv`, then start the Python and mail services.
+5. Promote `venv.new` to `venv`, then start the Python and mail services (on Debian, when the
+   release changes the units, with `sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`,
+   which starts them itself).
 
 An unsupported newer schema is rejected and never downgraded automatically. Do not manually
 change `schema_version` after a failure; fix the journaled cause or restore the backup.

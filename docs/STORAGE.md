@@ -56,10 +56,12 @@ Migration procedure:
 2. copy the entire contents while preserving ID directories and manifests;
 3. set `UPLOADS_PATH`;
 4. grant PHP and Python read/write access; on Debian the upload service is sandboxed with
-   `ProtectSystem=strict`, so re-run `sudo bash scripts/install-debian.sh` after changing
-   `UPLOADS_PATH`, `DATA_PATH` or `FILE_QUARANTINE_PATH`: it derives the writable paths from
-   `config/config.local.php` and writes the systemd drop-in that opens them;
-5. restart services and test an old download plus a new upload;
+   `ProtectSystem=strict`, so run `sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`
+   after changing `UPLOADS_PATH`, `DATA_PATH` or `FILE_QUARANTINE_PATH`, also when the change was
+   made in **Settings → Storage**: it derives the writable paths from `config/config.local.php`,
+   writes the systemd drop-in that opens them and restarts the services. A plain restart is not
+   enough there: uploads would fail with "read-only file system" while downloads still work;
+5. restart the services where step 4 did not, and test an old download plus a new upload;
 6. run integrity checks;
 7. delete the old copy only after successful verification.
 

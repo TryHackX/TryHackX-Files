@@ -27,13 +27,34 @@ The script:
 - creates `/etc/default/filehost` with the logging switch.
 
 Review the script before running it on an existing server. It does not create a database or
-overwrite `config/config.local.php`. It is idempotent: running it again re-renders both units
-from `scripts/*.service`, which is how a release that changes the units is applied.
+overwrite `config/config.local.php`.
 
-Two switches change what it installs: `FILEHOST_INSTALL_DB=0` skips `mariadb-server` (MySQL or a
-remote database), and `FILEHOST_PHP_SAPI=fpm` installs `php-fpm`, `proxy_fcgi` and `setenvif`
-instead of `libapache2-mod-php`. The FPM pool and the `SetHandler` for the virtual host are then
-configured by hand (see Service account below).
+Two switches change what a new installation gets: `FILEHOST_INSTALL_DB=0` skips `mariadb-server`
+(MySQL or a remote database), and `FILEHOST_PHP_SAPI=fpm` installs `php-fpm`, `proxy_fcgi` and
+`setenvif` instead of `libapache2-mod-php`. The FPM pool and the `SetHandler` for the virtual host
+are then configured by hand (see Service account below).
+
+### Running it again
+
+A release that changes `scripts/*.service`, and a move of the storage paths, are applied with:
+
+```bash
+sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh
+```
+
+That renders both units and the storage drop-in again for the account they already use, reloads
+systemd and restarts the services, and does nothing else: no packages, no Python environment, no
+ownership changes. A full run without the switch keeps what the installation already uses instead
+of going back to the defaults:
+
+- the account of the installed `filehost-upload.service`; another `FILEHOST_SERVICE_USER` is
+  refused unless `FILEHOST_CHANGE_ACCOUNT=1` is set as well;
+- PHP-FPM when `php-fpm` is installed and no PHP module is enabled in Apache, so a re-run never
+  adds `libapache2-mod-php`, which would move the whole server, every other site included, to
+  prefork and mod_php;
+- no `mariadb-server` when `config/config.local.php` exists and MariaDB is not installed;
+- installed packages are not upgraded (`apt-get install --no-upgrade`), and existing `config/`,
+  `uploads/` and `data/` keep their owner and mode.
 
 ### Service account
 
@@ -52,9 +73,10 @@ sudo FILEHOST_SERVICE_USER=filehost FILEHOST_SERVICE_GROUP=filehost \
 ```
 
 `FILEHOST_SERVICE_USER` and `FILEHOST_SERVICE_GROUP` set `User=` and `Group=` of both units and
-the owner of `config/`, `uploads/` and `data/`; Apache itself only needs to reach `public/`.
-Changing the account of an existing installation additionally needs
-`sudo chown -R filehost:filehost uploads data config` before the services are restarted.
+the owner of `config/`, `uploads/` and `data/`; Apache itself only needs to reach `public/`. Later
+runs read the account back from the installed unit, so the variables are needed only the first
+time. Moving an existing installation to another account needs `FILEHOST_CHANGE_ACCOUNT=1` as
+well, and `sudo chown -R filehost:filehost uploads data config` before the services are restarted.
 
 ### Service sandbox
 
@@ -71,8 +93,10 @@ If the application directory is below `/home` or `/root`, the installer uses
 application directory (`UPLOADS_PATH`, `DATA_PATH`, `FILE_QUARANTINE_PATH` in
 `config/config.local.php`, see [STORAGE.md](STORAGE.md)), the installer writes a drop-in
 `/etc/systemd/system/filehost-upload.service.d/10-storage.conf` that opens exactly those paths for
-writing; re-run it after changing them. Without the drop-in the service would stop with
-"read-only file system" errors.
+writing. Run `sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh` after changing them,
+including through **Settings → Storage** in the panel: a restart alone keeps the old drop-in, and
+every upload to the new directory then fails with "read-only file system" while downloads still
+work.
 
 ## 2. Configure Apache
 
