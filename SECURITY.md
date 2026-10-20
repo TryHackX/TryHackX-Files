@@ -8,8 +8,9 @@ upgrade using [docs/MIGRATION.md](docs/MIGRATION.md).
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a suspected vulnerability. Use GitHub's private
-**Security → Report a vulnerability** form for this repository and include:
+Do not open a public issue for a suspected vulnerability. Report it privately, either through
+GitHub's **Security → Report a vulnerability** form for this repository or, when that form is
+not available, by e-mail to **contact@tryhackx.org** with "Security" in the subject. Include:
 
 - affected revision and deployment environment;
 - a minimal reproduction;
@@ -18,7 +19,7 @@ Do not open a public issue for a suspected vulnerability. Use GitHub's private
 
 Please do not test against installations you do not own or have explicit permission to assess.
 Secrets, personal data and uploaded files must not be included in the report. Acknowledgement,
-triage and disclosure timing will be coordinated in the private advisory.
+triage and disclosure timing will be coordinated in the private advisory or the e-mail thread.
 
 ## Operational scope
 
