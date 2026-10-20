@@ -195,7 +195,10 @@
 	function renderPager(el, totalPages, total, page, cb, label = null) {
 		if (!el) return;
 		if (label === null) label = t('panel.files.pager_label');
-		if (totalPages <= 1) { el.innerHTML = `<span class="page-info">${total} ${label}</span>`; return; }
+		// The label carries its own ":n" ("Plików: :n"): a bare noun after the number cannot be
+		// right in Polish for 1, 2-4 and 5+ at once ("3 plików").
+		const count = esc(label.indexOf(':n') >= 0 ? label.split(':n').join(String(total)) : total + ' ' + label);
+		if (totalPages <= 1) { el.innerHTML = `<span class="page-info">${count}</span>`; return; }
 		let html = `<button ${page === 1 ? 'disabled' : ''} data-fh-click="${cb}(${page - 1})">←</button>`;
 		for (let i = 1; i <= totalPages; i++) {
 			if (i === 1 || i === totalPages || (i >= page - 2 && i <= page + 2)) {
@@ -205,7 +208,7 @@
 			}
 		}
 		html += `<button ${page === totalPages ? 'disabled' : ''} data-fh-click="${cb}(${page + 1})">→</button>`;
-		html += `<span class="page-info">${total} ${label}</span>`;
+		html += `<span class="page-info">${count}</span>`;
 		el.innerHTML = html;
 	}
 

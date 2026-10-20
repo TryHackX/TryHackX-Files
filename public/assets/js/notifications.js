@@ -31,13 +31,41 @@
 		btn.classList.toggle('has-unread', !!n);
 	}
 
+	/**
+	 * The browser's own relative-time wording for the page language: it has the plural forms a
+	 * single ":n dni temu" string cannot ("1 dni temu"), and says "wczoraj" / "yesterday".
+	 * A language the browser does not know falls back to the dictionary strings.
+	 */
+	var relativeFormats = {};
+	function relativeFormat() {
+		var lang = window.LANG || document.documentElement.getAttribute('lang') || '';
+		if (!lang || typeof Intl === 'undefined' || typeof Intl.RelativeTimeFormat !== 'function') return null;
+		if (!Object.prototype.hasOwnProperty.call(relativeFormats, lang)) {
+			try {
+				relativeFormats[lang] = Intl.RelativeTimeFormat.supportedLocalesOf([lang]).length
+					? new Intl.RelativeTimeFormat(lang, { numeric: 'auto', style: 'short' })
+					: null;
+			} catch (error) {
+				relativeFormats[lang] = null;
+			}
+		}
+		return relativeFormats[lang];
+	}
+
 	/** "3 min temu" — relative for the recent stuff, a date once that stops being useful. */
 	function ago(ts) {
 		var s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
 		if (s < 60) return t('notif.ago_now');
-		if (s < 3600) return t('notif.ago_min', { n: Math.floor(s / 60) });
-		if (s < 86400) return t('notif.ago_hour', { n: Math.floor(s / 3600) });
-		if (s < 7 * 86400) return t('notif.ago_day', { n: Math.floor(s / 86400) });
+		var relative = relativeFormat();
+		if (s < 3600) {
+			return relative ? relative.format(-Math.floor(s / 60), 'minute') : t('notif.ago_min', { n: Math.floor(s / 60) });
+		}
+		if (s < 86400) {
+			return relative ? relative.format(-Math.floor(s / 3600), 'hour') : t('notif.ago_hour', { n: Math.floor(s / 3600) });
+		}
+		if (s < 7 * 86400) {
+			return relative ? relative.format(-Math.floor(s / 86400), 'day') : t('notif.ago_day', { n: Math.floor(s / 86400) });
+		}
 		return new Date(ts * 1000).toLocaleDateString();
 	}
 

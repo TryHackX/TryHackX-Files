@@ -82,6 +82,8 @@
         holder.replaceChildren();
         if (totalPages <= 1) return;
 
+        // "Page 2 of 5 (87 notifications)". The string used to be the bare noun, so the pager
+        // read "< notifications >" and both arrows had that noun as their name.
         const label = document.createElement('span');
         label.className = 'pager-label';
         label.textContent = t('notif.pager_label', {
@@ -93,14 +95,14 @@
         previous.type = 'button';
         previous.className = 'btn btn-sm';
         previous.disabled = currentPage <= 1;
-        previous.setAttribute('aria-label', t('notif.pager_label'));
+        previous.setAttribute('aria-label', t('collection.previous_page'));
         previous.textContent = '\u2039';
         previous.addEventListener('click', () => loadNotifications(currentPage - 1));
         const next = document.createElement('button');
         next.type = 'button';
         next.className = 'btn btn-sm';
         next.disabled = currentPage >= totalPages;
-        next.setAttribute('aria-label', t('notif.pager_label'));
+        next.setAttribute('aria-label', t('collection.next_page'));
         next.textContent = '\u203a';
         next.addEventListener('click', () => loadNotifications(currentPage + 1));
         holder.append(previous, label, next);
