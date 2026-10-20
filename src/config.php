@@ -12,6 +12,10 @@ define('APP_ROOT', dirname(__FILE__));
 define('PROJECT_ROOT', dirname(APP_ROOT));
 
 require_once APP_ROOT . '/brand.php';
+require_once APP_ROOT . '/includes/InputLimits.php';
+
+// Before anything reads the request: a `name[]=` field is not a value this application has.
+InputLimits::discardStructuredRequestInput();
 
 $configLocalPath = PROJECT_ROOT . '/config/config.local.php';
 $hasLocalConfig = file_exists($configLocalPath);

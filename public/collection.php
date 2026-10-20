@@ -7,7 +7,7 @@ require_once __DIR__ . '/../src/includes/file_icons.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 
 $appUrl = APP_URL;
-$collectionId = $_GET['id'] ?? '';
+$collectionId = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
 $collection = null;
 $error = null;
 $collectionPage = max(1, (int) ($_GET['page'] ?? 1));

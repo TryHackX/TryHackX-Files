@@ -74,8 +74,8 @@ class Lang
 		$lang = null;
 
 		// An explicit ?lang= wins and is remembered for next time.
-		if (isset($_GET['lang']) && self::supported((string) $_GET['lang'])) {
-			$lang = (string) $_GET['lang'];
+		if (is_string($_GET['lang'] ?? null) && self::supported($_GET['lang'])) {
+			$lang = $_GET['lang'];
 			if (!headers_sent()) {
 				setcookie(self::COOKIE, $lang, [
 					'expires' => time() + 31536000,
@@ -94,8 +94,8 @@ class Lang
 			$lang = (string) $_SESSION['user_language'];
 		}
 
-		if (!$lang && isset($_COOKIE[self::COOKIE]) && self::supported((string) $_COOKIE[self::COOKIE])) {
-			$lang = (string) $_COOKIE[self::COOKIE];
+		if (!$lang && is_string($_COOKIE[self::COOKIE] ?? null) && self::supported($_COOKIE[self::COOKIE])) {
+			$lang = $_COOKIE[self::COOKIE];
 		}
 		if (!$lang && $configured && self::supported($configured)) {
 			$lang = $configured;

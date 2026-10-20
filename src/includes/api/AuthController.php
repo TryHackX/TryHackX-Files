@@ -760,7 +760,7 @@ final class AuthController
 	{
 		header('Content-Type: application/json');
 
-		$username = trim($_GET['username'] ?? '');
+		$username = trim(is_string($_GET['username'] ?? null) ? $_GET['username'] : '');
 
 		if (strlen($username) < InputLimits::usernameMin()) {
 			echo json_encode(['available' => false, 'error' => __('api.name_too_short')]);
@@ -779,7 +779,7 @@ final class AuthController
 	{
 		header('Content-Type: application/json');
 
-		$email = trim($_GET['email'] ?? '');
+		$email = trim(is_string($_GET['email'] ?? null) ? $_GET['email'] : '');
 
 		if (!InputLimits::validEmail($email)) {
 			echo json_encode(['available' => false, 'error' => __('api.bad_email2')]);

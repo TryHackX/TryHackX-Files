@@ -133,4 +133,30 @@ final class InputLimits
 		$value = trim(preg_replace('/\s+/u', ' ', $value) ?? '');
 		return rtrim(mb_substr($value, 0, self::APP_NAME_MAX, 'UTF-8'));
 	}
+
+	/**
+	 * Every query, form and cookie field this application reads is a single string. PHP turns
+	 * `name[]=x` into an array instead, which string functions refuse with a TypeError (an
+	 * uncaught 500 on a public page) and a cast turns into "Array" with a warning — either way
+	 * a line in the error log for anyone with a crawler. Such values are dropped before
+	 * anything reads them, so every reader sees the field as absent.
+	 */
+	public static function discardStructuredRequestInput(): void
+	{
+		foreach ($_GET as $key => $value) {
+			if (!is_string($value)) {
+				unset($_GET[$key]);
+			}
+		}
+		foreach ($_POST as $key => $value) {
+			if (!is_string($value)) {
+				unset($_POST[$key]);
+			}
+		}
+		foreach ($_COOKIE as $key => $value) {
+			if (!is_string($value)) {
+				unset($_COOKIE[$key]);
+			}
+		}
+	}
 }

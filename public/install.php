@@ -26,6 +26,7 @@ require_once INSTALLER_ROOT . '/src/includes/CanonicalUrl.php';
 require_once INSTALLER_ROOT . '/src/includes/DatabaseServerVersion.php';
 require_once INSTALLER_ROOT . '/src/includes/InstallerSecurity.php';
 require_once INSTALLER_ROOT . '/src/includes/InputLimits.php';
+InputLimits::discardStructuredRequestInput();
 
 // Configuration is authoritative. Missing/restored lock state can never reopen an installed
 // application, and a lock without configuration is an offline-recovery state.

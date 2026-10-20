@@ -17,7 +17,7 @@ if (isset($_SESSION['user_id'])) {
 }
 
 $appUrl = APP_URL;
-$fileId = $_GET['id'] ?? '';
+$fileId = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
 $file = null;
 $error = null;
 $isProtected = false;

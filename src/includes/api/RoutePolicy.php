@@ -198,11 +198,8 @@ final class ApiRoutePolicy
 			return true;
 		}
 
-		$key = trim((string) (
-			$_SERVER['HTTP_IDEMPOTENCY_KEY']
-			?? $_POST['_idempotency_key']
-			?? ''
-		));
+		$key = $_SERVER['HTTP_IDEMPOTENCY_KEY'] ?? $_POST['_idempotency_key'] ?? '';
+		$key = is_string($key) ? trim($key) : '';
 		if (!preg_match('/^[A-Za-z0-9._:-]{16,128}$/', $key)) {
 			return false;
 		}

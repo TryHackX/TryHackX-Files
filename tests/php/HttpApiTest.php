@@ -1367,6 +1367,57 @@ final class HttpApiTest extends TestCase
 	}
 
 	/**
+	 * `name[]=x` turns a parameter into an array. The public pages and the availability checks
+	 * used to answer that with an uncaught TypeError (500 and a "PHP Fatal error" line), and the
+	 * language parameter or cookie with a warning on every page. Such a field now reads as absent.
+	 */
+	public function testArrayShapedParametersReadAsMissing(): void
+	{
+		$errLog = PROJECT_ROOT . '/tests/php/.tmp-data-http/server.err.log';
+		$logBefore = is_file($errLog) ? (int) filesize($errLog) : 0;
+		self::$cookies = [];
+
+		foreach (['check_username&username%5B%5D=x', 'check_email&email%5B%5D=x'] as $query) {
+			$check = self::getJson('/api.php?action=' . $query);
+			$this->assertSame(200, $check['status'], $query);
+			$this->assertFalse($check['available'] ?? true, $query . ' is answered as an empty value');
+		}
+		$phpError = '/TypeError|Array to string conversion|\b(?:Warning|Fatal error|Deprecated|Notice)\b(?:<\/b>)?:\s/';
+		foreach ([
+			'/download.php?id%5B%5D=x',
+			'/collection.php?id%5B%5D=x',
+			'/index.php?lang%5B%5D=x',
+			'/premium.php?err%5B%5D=x&order%5B%5D=y',
+			'/api.php?action=health&lang%5B%5D=x',
+		] as $path) {
+			$page = self::rawRequest('GET', $path);
+			$this->assertLessThan(500, $page['status'], $path);
+			$this->assertDoesNotMatchRegularExpression($phpError, $page['body'], $path);
+		}
+		// A cookie can carry the same shape.
+		self::$cookies = ['lang[]' => 'x'];
+		$home = self::rawRequest('GET', '/index.php');
+		$this->assertSame(200, $home['status']);
+		$this->assertDoesNotMatchRegularExpression($phpError, $home['body']);
+		self::$cookies = [];
+		// ...and so can every other reader, whoever wrote it: a file id, the panel's sub-tab and
+		// the account tab's outcome code.
+		$this->assertLessThan(500, self::rawRequest('GET', '/api.php?action=preview&id%5B%5D=x')['status']);
+		$this->assertTrue(self::signIn('httpuser', 'HttpUser1!')['success'] ?? false);
+		foreach (['/panel.php?tab=moderate&mstab%5B%5D=x', '/panel.php?tab=user&msg%5B%5D=x&err%5B%5D=y'] as $path) {
+			$panel = self::rawRequest('GET', $path);
+			$this->assertSame(200, $panel['status'], $path);
+			$this->assertDoesNotMatchRegularExpression($phpError, $panel['body'], $path);
+		}
+
+		clearstatcache();
+		$logged = is_file($errLog) ? (string) file_get_contents($errLog, false, null, $logBefore) : '';
+		foreach (['TypeError', 'Array to string conversion'] as $symptom) {
+			$this->assertStringNotContainsString($symptom, $logged);
+		}
+	}
+
+	/**
 	 * The site name is plain text in every page head and header — whether it was stored before
 	 * this check existed or is saved from Settings -> General now.
 	 */
