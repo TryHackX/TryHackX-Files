@@ -339,42 +339,44 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			<h3><?= _h('report.title') ?></h3>
 			<p><?= _h('report.subtitle') ?></p>
 
+			<?php /* `required` here is the server's list (ReportController: name, email, entity, org,
+			   title, info), so the form never accepts what the server then refuses. The star is
+			   markup, not part of the translated label; screen readers get `required` instead. */ ?>
 			<form id="reportForm">
 				<div class="form-group">
-					<label for="reportName"><?= _h('report.name') ?></label>
+					<label for="reportName"><?= _h('report.name') ?> <span class="req-mark" aria-hidden="true">*</span></label>
 					<input type="text" name="reporter_name" id="reportName" class="auth-input" required maxlength="100" placeholder="<?= _h('report.name_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label for="reporterEmail"><?= _h('report.email') ?></label>
+					<label for="reporterEmail"><?= _h('report.email') ?> <span class="req-mark" aria-hidden="true">*</span></label>
 					<input type="email" name="reporter_email" id="reporterEmail" class="auth-input" required maxlength="254"
-						placeholder="jan@example.com">
+						placeholder="<?= _h('report.email_ph') ?>">
 					<div class="field-status" id="reportEmailStatus"></div>
 				</div>
 				<div class="form-group">
-					<label for="reportEntity"><?= _h('report.entity') ?></label>
-					<input type="text" name="reporter_entity" id="reportEntity" class="auth-input" maxlength="255" placeholder="<?= _h('report.entity_ph') ?>">
+					<label for="reportEntity"><?= _h('report.entity') ?> <span class="req-mark" aria-hidden="true">*</span></label>
+					<input type="text" name="reporter_entity" id="reportEntity" class="auth-input" required maxlength="255" placeholder="<?= _h('report.entity_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label for="reportOrg"><?= _h('report.org') ?></label>
-					<input type="text" name="reporter_org" id="reportOrg" class="auth-input" maxlength="255" placeholder="<?= _h('report.org_ph') ?>">
+					<label for="reportOrg"><?= _h('report.org') ?> <span class="req-mark" aria-hidden="true">*</span></label>
+					<input type="text" name="reporter_org" id="reportOrg" class="auth-input" required maxlength="255" placeholder="<?= _h('report.org_ph') ?>">
 				</div>
 				<div class="form-group">
-					<label for="reportTitle"><?= _h('report.obj_title') ?></label>
+					<label for="reportTitle"><?= _h('report.obj_title') ?> <span class="req-mark" aria-hidden="true">*</span></label>
 					<input type="text" name="report_title" id="reportTitle" class="auth-input" required readonly maxlength="255"
-						value="<?= htmlspecialchars($file['name'] ?? '') ?>"
-						style="background: var(--bg-hover) !important; color: var(--text-muted); cursor: not-allowed; opacity: 1;">
+						value="<?= htmlspecialchars($file['name'] ?? '') ?>">
 				</div>
 				<div class="form-group">
 					<label for="reportLink"><?= _h('report.link') ?></label>
 					<input type="url" name="report_link" id="reportLink" class="auth-input" maxlength="255" placeholder="https://...">
 				</div>
 				<div class="form-group">
-					<label for="reportInfo"><?= _h('report.info') ?></label>
-					<textarea name="additional_info" id="reportInfo" class="auth-input" rows="4" maxlength="20000"
+					<label for="reportInfo"><?= _h('report.info') ?> <span class="req-mark" aria-hidden="true">*</span></label>
+					<textarea name="additional_info" id="reportInfo" class="auth-input" rows="4" required maxlength="5000"
 						placeholder="<?= _h('report.info_ph') ?>"></textarea>
 				</div>
 
-				<div id="reportMessage" class="report-message"></div>
+				<div id="reportMessage" class="report-message" role="status"></div>
 
 				<div class="report-actions-wrap">
 					<div class="report-actions-inner">

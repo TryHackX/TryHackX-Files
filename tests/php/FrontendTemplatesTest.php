@@ -230,6 +230,57 @@ final class FrontendTemplatesTest extends TestCase
 		$this->assertDoesNotMatchRegularExpression('/<label>\s*<\?= _h\(\'report\./', $source);
 	}
 
+	/**
+	 * The report form marks exactly the fields ReportController refuses to go without (it used to
+	 * star three of six, and a reporter was sent back for fields shown as optional), and the text
+	 * area stops at or below what the server keeps.
+	 */
+	public function testReportFormRequiresWhatTheServerRequires(): void
+	{
+		$controller = $this->source('src/includes/api/ReportController.php');
+		$this->assertSame(1, preg_match('/foreach \(\[([^\]]+)\] as \$field\)/', $controller, $list));
+		preg_match_all("/'([a-z]+)'/", $list[1], $required);
+		$this->assertNotEmpty($required[1]);
+
+		// Payload key -> form field name, as download.js builds the request.
+		preg_match_all("/(\w+): fields\.get\('(\w+)'\)/", $this->source('public/assets/js/download.js'), $pairs);
+		$formName = array_combine($pairs[1], $pairs[2]);
+
+		$page = $this->source('public/download.php');
+		preg_match('/<form id="reportForm">(.*?)<\/form>/s', $page, $form);
+		$this->assertNotEmpty($form);
+		preg_match_all('/<(?:input|textarea)\b[^>]*>/', $form[1], $controls);
+		$requiredInForm = [];
+		foreach ($controls[0] as $control) {
+			if (preg_match('/\bname="(\w+)"/', $control, $name) && preg_match('/\srequired\b/', $control)) {
+				$requiredInForm[] = $name[1];
+			}
+		}
+		$expected = array_map(fn (string $field): string => $formName[$field], $required[1]);
+		sort($expected);
+		sort($requiredInForm);
+		$this->assertSame($expected, $requiredInForm);
+		// Each required field's label carries the star; the optional link's does not.
+		$this->assertSame(count($expected), substr_count($form[1], '<span class="req-mark" aria-hidden="true">*</span></label>'));
+
+		// The cap is a number or a class constant (`self::INFO_MAX`).
+		$this->assertSame(1, preg_match("/'info' => self::text\(\\\$input\['info'\] \?\? '', ([^)]+)\)/", $controller, $cap));
+		$limit = trim($cap[1]);
+		if (preg_match('/^self::(\w+)$/', $limit, $constant)) {
+			$this->assertSame(1, preg_match('/const ' . $constant[1] . ' = (\d+);/', $controller, $value));
+			$limit = $value[1];
+		}
+		$this->assertMatchesRegularExpression('/^\d+$/', $limit);
+		$this->assertSame(1, preg_match('/<textarea name="additional_info"[^>]*maxlength="(\d+)"/', $form[1], $max));
+		$this->assertLessThanOrEqual((int) $limit, (int) $max[1]);
+		foreach (['en', 'pl', 'es', 'zh'] as $code) {
+			$strings = require PROJECT_ROOT . "/src/lang/$code.php";
+			foreach (['report.name', 'report.email', 'report.obj_title'] as $key) {
+				$this->assertStringNotContainsString('*', $strings[$key], "$code $key: the star is markup now");
+			}
+		}
+	}
+
 	public function testTwoFactorEnableAndDisableBlocksHaveTheirOwnPasswordLabel(): void
 	{
 		$source = $this->source('src/includes/panel/views_account.php');

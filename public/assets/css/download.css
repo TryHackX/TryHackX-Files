@@ -478,6 +478,17 @@
 	z-index: 2000;
 }
 
+.req-mark {
+	color: var(--danger);
+}
+
+/* The reported item's title is filled in from the file and cannot be edited. */
+#reportTitle {
+	background: var(--bg-hover);
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+
 .report-actions-wrap {
 	display: flex;
 	align-items: center;
