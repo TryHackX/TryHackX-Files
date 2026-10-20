@@ -49,7 +49,7 @@ class FakeXhr {
 }
 FakeXhr.instances = [];
 
-function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 } = {}) {
+function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, seedToken = null, captchaStub = null } = {}) {
 	FakeXhr.instances = [];
 	const document = createMiniDocument();
 	const config = {
@@ -61,7 +61,7 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 	const dropZone = document.add('div', 'dropZone');
 	const fileInput = document.add('input', 'fileInput');
 	document.add('span', 'browseBtn');
-	for (const id of ['fileList', 'sessionInfo', 'captchaOverlay', 'captchaLoading', 'captchaWidget', 'captchaError', 'results', 'resultList', 'copyAll']) {
+	for (const id of ['fileList', 'sessionInfo', 'captchaOverlay', 'captchaLoading', 'captchaWidget', 'captchaError', 'results', 'resultList', 'copyAll', 'limitSize', 'limitFiles', 'limitCount']) {
 		document.add('div', id);
 	}
 
@@ -69,12 +69,17 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 	let timerId = 0;
 	const listeners = {};
 	const storageBacking = new Map();
+	if (seedToken) {
+		storageBacking.set('uploadToken', seedToken);
+		storageBacking.set('uploadTokenExpiry', String(Date.now() + 3600000));
+	}
 	const sessionStore = {
 		getItem: key => (storageBacking.has(key) ? storageBacking.get(key) : null),
 		setItem: (key, value) => storageBacking.set(key, String(value)),
 		removeItem: key => storageBacking.delete(key)
 	};
 	const calls = { get: [], post: [], postForm: [] };
+	const toasts = [];
 	const verify = api.verify_captcha || (async () => ({ success: true, token: 'TOK' }));
 	const window = {
 		innerWidth: 1000, innerHeight: 800,
@@ -82,8 +87,8 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 		sessionStorage: sessionStore,
 		localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
 		addEventListener: (type, handler) => { (listeners[type] ||= []).push(handler); },
-		FHCaptcha: { configure() {}, isReady: () => false, load() {}, render: () => 1, reset() {} },
-		FHUi: { toast() {}, singleFlight: (_key, task) => task() },
+		FHCaptcha: captchaStub || { configure() {}, isReady: () => false, load() {}, render: () => 1, reset() {} },
+		FHUi: { toast: (message, options) => { toasts.push({ message, options }); }, singleFlight: (_key, task) => task() },
 		FHApi: {
 			get: async (action, params) => {
 				calls.get.push({ action, params });
@@ -97,7 +102,7 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 			},
 			postForm: async (action, form) => {
 				calls.postForm.push({ action, form });
-				return { success: true };
+				return api.postForm ? api.postForm(action, form) : { success: true };
 			}
 		},
 		t: (key, params) => (params ? key + ' ' + JSON.stringify(params) : key),
@@ -126,8 +131,16 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 	window.t = context.t;
 	vm.runInContext(read('index.js'), context, { filename: 'index.js' });
 
+	let picked = 0;
 	const pickFiles = (...names) => {
-		fileInput.files = names.map((name, index) => ({ name, size: 10 + index, lastModified: 1000 + index }));
+		fileInput.files = names.map(name => {
+			picked += 1;
+			return { name, size: 10 + picked, lastModified: 1000 + picked };
+		});
+		fileInput.dispatchEvent({ type: 'change' });
+	};
+	const pickFile = file => {
+		fileInput.files = [file];
 		fileInput.dispatchEvent({ type: 'change' });
 	};
 	const pendingTimers = () => timers.filter(t => !t.done);
@@ -138,8 +151,21 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15 }
 		await next.fn();
 		await flush();
 	};
-	return { window, document, calls, pickFiles, listeners, pendingTimers, runNextTimer, sessionStore, dropZone };
+	const rows = () => document.getElementById('fileList').children;
+	return { window, document, calls, toasts, pickFiles, pickFile, rows, listeners, pendingTimers, runNextTimer, sessionStore, dropZone };
 }
+
+/** The visible text of a file row: main status, sub status, and whether it offers Retry. */
+function rowState(row) {
+	return {
+		main: row.querySelector('.file-status-main').textContent,
+		sub: row.querySelector('.file-status-sub').textContent,
+		retry: Boolean(row.querySelector('.retry')),
+		error: row.className.includes('error')
+	};
+}
+
+const validSession = (extra = {}) => () => Object.assign({ success: true, valid: true, expires_at: 4102444800 }, extra);
 
 test('files picked before the upload session is ready wait for it instead of going out anonymously', async () => {
 	const verify = deferred();
@@ -342,4 +368,185 @@ test('signing out or in switches the upload session the next upload uses', async
 	await flush();
 	assert.equal(FakeXhr.instances[2].headers['X-Upload-Token'], 'HANDED');
 	assert.equal(page.sessionStore.getItem('uploadToken'), 'HANDED');
+});
+
+test('refusals are explained in the page language, and Retry is offered only where it can help', async () => {
+	const page = loadIndex({ api: { token_info: validSession() } });
+	await flush();
+	const refuse = async (status, body) => {
+		page.pickFiles('f' + status + '.bin');
+		await flush();
+		await FakeXhr.instances[FakeXhr.instances.length - 1].finish(status, body);
+		await flush();
+		return rowState(page.rows()[page.rows().length - 1]);
+	};
+
+	assert.deepEqual(await refuse(507, '{"detail":"Storage quota exceeded"}'),
+		{ main: 'up.no_space', sub: 'up.quota_full', retry: false, error: true });
+	assert.deepEqual(await refuse(507, '{"detail":"Server storage limit reached"}'),
+		{ main: 'up.no_space', sub: 'up.storage_full', retry: false, error: true });
+	assert.deepEqual(await refuse(413, '{"detail":"File too large (Max 100 MiB)"}'),
+		{ main: 'up.too_big', sub: 'up.max_size {"size":"100.00 MiB"}', retry: false, error: true });
+	assert.deepEqual(await refuse(400, '{"detail":"Empty file"}'),
+		{ main: 'up.empty_file', sub: 'up.empty_file_sub', retry: false, error: true });
+	assert.deepEqual(await refuse(403, '{"detail":"User is inactive"}'),
+		{ main: 'up.refused', sub: 'up.account_inactive', retry: false, error: true });
+	assert.deepEqual(await refuse(403, '{"detail":"IP banned"}'),
+		{ main: 'up.refused', sub: 'up.banned', retry: false, error: true });
+	assert.deepEqual(await refuse(503, '{"detail":"Upload settings unavailable"}'),
+		{ main: 'up.error', sub: 'up.try_again', retry: true, error: true });
+	assert.deepEqual(await refuse(502, '<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN"><html>Bad Gateway</html>'),
+		{ main: 'up.error', sub: 'up.try_again', retry: true, error: true });
+
+	for (const row of page.rows()) assert.doesNotMatch(row.textContent, /detail|DOCTYPE/, 'no raw server body in a row');
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false,
+		'an inactive or banned account is not sent round the captcha');
+});
+
+test('an empty file is refused on the page instead of being sent', async () => {
+	const page = loadIndex({ api: { token_info: validSession() } });
+	await flush();
+	page.pickFile({ name: 'empty.txt', size: 0, lastModified: 5 });
+	await flush();
+	assert.equal(FakeXhr.instances.length, 0);
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.empty_file', sub: 'up.empty_file_sub', retry: false, error: true });
+});
+
+test('without a captcha a spent session is renewed instead of locking the page behind the verification dialog', async () => {
+	const tokens = ['FIRST', 'SECOND', 'THIRD'];
+	let uploaded = 0;
+	const page = loadIndex({
+		api: {
+			verify_captcha: async () => ({ success: true, token: tokens.shift() }),
+			token_info: () => ({ success: true, valid: true, expires_at: 4102444800, files_uploaded: uploaded, files_limit: 2 })
+		}
+	});
+	await flush();
+	page.pickFiles('a.txt', 'b.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'FIRST');
+
+	const sessionChecks = () => page.calls.get.filter(call => call.action === 'token_info').length;
+	const before = sessionChecks();
+	uploaded = 1;
+	await FakeXhr.instances[0].finish(200, 'id1:tok1');
+	await flush();
+	assert.equal(sessionChecks(), before + 1, 'the session line is refreshed after an upload, captcha or not');
+	assert.match(page.document.getElementById('sessionInfo').textContent, /1\/2/);
+
+	uploaded = 2;
+	await FakeXhr.instances[1].finish(200, 'id2:tok2');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false,
+		'no empty "verification" dialog without a captcha');
+
+	uploaded = 0;
+	page.pickFiles('c.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[2].headers['X-Upload-Token'], 'SECOND', 'the next upload simply starts a new session');
+});
+
+test('without a captcha a "session file limit" refusal is retried once with a new session', async () => {
+	const tokens = ['FIRST', 'SECOND', 'THIRD'];
+	const page = loadIndex({
+		api: { verify_captcha: async () => ({ success: true, token: tokens.shift() }), token_info: validSession() }
+	});
+	await flush();
+	page.pickFiles('a.txt');
+	await flush();
+	await FakeXhr.instances[0].finish(429, '{"detail":"Upload session file limit reached"}');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2, 'sent again');
+	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'SECOND');
+
+	await FakeXhr.instances[1].finish(429, '{"detail":"Upload session file limit reached"}');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2, 'but only once');
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.session_failed', sub: 'up.click_retry', retry: true, error: true });
+});
+
+test('with a captcha a refused session waits for the verification and then resumes by itself', async () => {
+	const captured = {};
+	const captchaStub = {
+		configure() {}, isReady: () => false, reset() {},
+		load: callback => callback(),
+		render: (_id, handlers) => { captured.handlers = handlers; return 1; }
+	};
+	const page = loadIndex({
+		captcha: true,
+		seedToken: 'SEEDED',
+		captchaStub,
+		api: { token_info: validSession({ files_limit: 0 }), verify_captcha: async () => ({ success: true, token: 'SOLVED' }) }
+	});
+	await flush();
+	page.pickFiles('a.txt');
+	await flush();
+	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'SEEDED');
+
+	await FakeXhr.instances[0].finish(403, '{"detail":"Invalid or missing upload token. Please verify reCAPTCHA."}');
+	await flush();
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.verify_expired', sub: 'up.verify_resume', retry: false, error: true });
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true);
+	assert.equal(FakeXhr.instances.length, 1);
+
+	await captured.handlers.callback('captcha-response');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false);
+	assert.equal(FakeXhr.instances.length, 2, 'the file went again after the captcha');
+	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'SOLVED');
+});
+
+test('a failed delete keeps the row, says so, and lets the user try again', async () => {
+	let answer = { success: false, error: 'Too many requests' };
+	const page = loadIndex({ api: { token_info: validSession(), postForm: () => answer } });
+	await flush();
+	page.pickFiles('keep.txt');
+	await flush();
+	await FakeXhr.instances[0].finish(200, 'fileid1:deletetoken1');
+	await flush();
+
+	const remove = page.rows()[0].querySelector('.remove');
+	remove.click();
+	remove.click();
+	await flush();
+	assert.equal(page.calls.postForm.length, 1);
+	assert.equal(page.rows().length, 1, 'the row stays while the file is still online');
+	assert.equal(page.toasts.at(-1).message, 'up.delete_failed — Too many requests');
+	assert.equal(page.toasts.at(-1).options.type, 'error');
+	assert.equal(remove.disabled, false);
+
+	answer = { success: true };
+	remove.click();
+	await flush();
+	assert.equal(page.calls.postForm.length, 2);
+	assert.ok(page.rows()[0].className.includes('removing'), 'gone once the server confirmed');
+});
+
+test('a files-per-session cap of 0 means no cap, and the card shows the cap the server applies', async () => {
+	const page = loadIndex({ maxFiles: 0, api: { token_info: validSession({ files_limit: 0 }) } });
+	await flush();
+	assert.equal(page.document.getElementById('limitFiles').hidden, true, 'no "/ 0 files" on the card');
+	page.pickFiles(...Array.from({ length: 20 }, (_, i) => 'f' + i + '.txt'));
+	await flush();
+	assert.equal(FakeXhr.instances.length, 20);
+
+	const capped = loadIndex({ maxFiles: 15, api: { token_info: validSession({ files_limit: 3 }) } });
+	await flush();
+	assert.equal(capped.document.getElementById('limitCount').textContent, '3');
+	assert.equal(capped.document.getElementById('limitFiles').hidden, false);
+});
+
+test('the "at once" cap counts uploads still running, not finished rows', async () => {
+	const page = loadIndex({ maxFiles: 2, api: { token_info: validSession({ files_limit: 2 }) } });
+	await flush();
+	page.pickFiles('a.txt', 'b.txt', 'c.txt');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2);
+	assert.equal(page.toasts.at(-1).message, 'up.max_files {"n":2}');
+
+	await FakeXhr.instances[0].finish(200, 'id1:tok1');
+	await flush();
+	page.pickFiles('d.txt');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 3, 'a finished upload frees its place');
 });

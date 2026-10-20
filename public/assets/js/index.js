@@ -139,12 +139,18 @@
 	 * also what ties an upload to the signed-in account, so an upload must never start without one.
 	 * Returns whether a valid token is available afterwards.
 	 */
+	let trackingTokenRequest = null;
 	async function ensureTrackingToken() {
 		if (captchaEnabled || isTokenValid()) return Boolean(isTokenValid());
-		try {
-			const tData = await FHApi.post('verify_captcha', {});
-			if (tData && tData.success && tData.token) persistToken(tData.token);
-		} catch (e) { console.error('Auto-token fetch failed', e); }
+		// Several uploads can find the token gone at once (a spent session refused them all);
+		// they share one request instead of each opening a session of its own.
+		if (!trackingTokenRequest) {
+			trackingTokenRequest = FHApi.post('verify_captcha', {})
+				.then(tData => { if (tData && tData.success && tData.token) persistToken(tData.token); })
+				.catch(e => { console.error('Auto-token fetch failed', e); })
+				.finally(() => { trackingTokenRequest = null; });
+		}
+		await trackingTokenRequest;
 		return Boolean(isTokenValid());
 	}
 
@@ -243,6 +249,8 @@
 			if (data.success && data.valid) {
 				filesUploaded = data.files_uploaded || 0;
 				filesLimit = data.files_limit || 0;
+				// The cap the upload server applies to this session (0 = none) is the one to show.
+				if (typeof data.files_limit === 'number') showFilesCap(data.files_limit);
 				const remaining = Math.max(0, Math.floor((data.expires_at * 1000 - Date.now()) / 60000));
 				const parts = [
 					document.createTextNode(t('up.session') + ' '),
@@ -271,6 +279,10 @@
 
 	function showCaptchaRequired() {
 		clearToken();
+		// Without a captcha there is nothing to solve: the next upload fetches a fresh tracking
+		// token (ensureTrackingToken), which is all a reload did. The overlay has no close button
+		// and no widget in that mode, so showing it locked the page until a second reload.
+		if (!captchaEnabled) return;
 		const loading = document.getElementById('captchaLoading');
 		if (loading) loading.style.display = 'none';
 		document.getElementById('captchaError').style.display = 'none';
@@ -292,13 +304,33 @@
 	function updateLimits(user) {
 		maxFileSizeMB = user ? userLimitMB : guestLimitMB;
 		maxFileSize = maxFileSizeMB * 1024 * 1024;
-		maxFiles = user ? userLimitFiles : guestLimitFiles;
 		window.maxFileSize = maxFileSize;
-		window.maxFiles = maxFiles;
 
 		const sizeText = maxFileSizeMB >= 1024 ? (maxFileSizeMB / 1024).toFixed(2) + ' GiB' : maxFileSizeMB + ' MiB';
 		document.querySelectorAll('#limitSize').forEach(el => el.textContent = sizeText);
-		document.querySelectorAll('#limitCount').forEach(el => el.textContent = maxFiles);
+		showFilesCap(user ? userLimitFiles : guestLimitFiles);
+	}
+
+	/**
+	 * The files-per-session cap on the card, and the page's own "at once" check. 0 means no cap
+	 * (the server's convention too), so the card then shows the size limit alone. The upload
+	 * session reports the cap the upload server will actually apply (token_info), and that is
+	 * the number shown from then on — signing in or out, or a group change, moves it.
+	 */
+	function showFilesCap(cap) {
+		maxFiles = Math.max(0, Number(cap) || 0);
+		window.maxFiles = maxFiles;
+		document.querySelectorAll('#limitCount').forEach(el => { el.textContent = String(maxFiles); });
+		document.querySelectorAll('#limitFiles').forEach(el => { el.hidden = maxFiles === 0; });
+	}
+
+	/** Files picked on this page that have not finished (or failed) yet. */
+	function activeUploads() {
+		let n = 0;
+		uploadQueue.forEach(entry => {
+			if (entry.status === 'pending' || entry.status === 'uploading' || entry.status === 'waiting') n += 1;
+		});
+		return n;
 	}
 
 	/* ---------- drag & drop ---------- */
@@ -362,11 +394,17 @@
 				addFileItem(id, file.name, file.size, 'error', t('up.blocked'), t('up.blocked_sub'));
 				return;
 			}
+			// The upload server refuses an empty body; say so here instead of sending it.
+			if (file.size === 0) {
+				addFileItem(id, file.name, 0, 'error', t('up.empty_file'), t('up.empty_file_sub'));
+				return;
+			}
 			if (file.size > maxFileSize) {
 				addFileItem(id, file.name, file.size, 'error', t('up.too_big'), t('up.max_size', { size: formatSize(maxFileSize) }));
 				return;
 			}
-			if (uploadQueue.size >= maxFiles) {
+			// "At once": finished and failed rows stay on the page and must not use up the cap.
+			if (maxFiles > 0 && activeUploads() >= maxFiles) {
 				showToast(t('up.max_files', { n: maxFiles }));
 				return;
 			}
@@ -416,7 +454,7 @@
 			return;
 		}
 		if (button.dataset.armed === '1') {
-			removeFile(id);
+			removeFile(id, button);
 			return;
 		}
 		button.dataset.armed = '1';
@@ -489,29 +527,45 @@
 		}
 	}
 
-	function removeFile(id) {
+	function removeFile(id, button = null) {
 		const item = document.getElementById(id);
 		if (!item) return;
 		const queueItem = uploadQueue.get(id);
 		if (queueItem && queueItem.xhr) queueItem.xhr.abort();
 
 		if (queueItem && queueItem.status === 'success' && queueItem.serverId && queueItem.deleteToken) {
+			// The row goes only once the server confirms: a failed delete (network, rate limit)
+			// used to drop it anyway while the file stayed online with a live link.
+			if (button) button.disabled = true;
 			const formData = new FormData();
 			formData.append('id', queueItem.serverId);
 			formData.append('token', queueItem.deleteToken);
+			const failed = error => {
+				if (button) button.disabled = false;
+				window.FHUi.toast(error ? t('up.delete_failed') + ' — ' + error : t('up.delete_failed'), { type: 'error' });
+			};
 			FHApi.postForm('delete', formData)
 				.then(d => {
-					if (d.success) {
-						resultFiles.delete(queueItem.serverId);
-						document.getElementById('r-' + queueItem.serverId)?.remove();
-						if (resultFiles.size === 0) document.getElementById('results').classList.remove('show');
-						if (resultFiles.size <= 1) document.getElementById('copyAll').style.display = 'none';
-						updateCollectionButton();
+					if (!d || !d.success) {
+						failed(d && d.error);
+						return;
 					}
+					resultFiles.delete(queueItem.serverId);
+					document.getElementById('r-' + queueItem.serverId)?.remove();
+					if (resultFiles.size === 0) document.getElementById('results').classList.remove('show');
+					if (resultFiles.size <= 1) document.getElementById('copyAll').style.display = 'none';
+					updateCollectionButton();
+					dropRow(id, item);
 				})
-				.catch(() => { });
+				.catch(() => failed(t('common.connection_error')));
+			return;
 		}
+		dropRow(id, item);
+	}
+
+	function dropRow(id, item) {
 		uploadQueue.delete(id);
+		waitingForCaptcha.splice(0, waitingForCaptcha.length, ...waitingForCaptcha.filter(entry => entry.id !== id));
 		item.classList.add('removing');
 		setTimeout(() => item.remove(), 300);
 	}
@@ -519,6 +573,7 @@
 	function retryUpload(id) {
 		const queueItem = uploadQueue.get(id);
 		if (!queueItem || !queueItem.file) return;
+		queueItem.status = 'pending';
 		updateFileItem(id, 'pending', t('up.pending'), '', 0);
 		uploadFile(id, queueItem.file);
 	}
@@ -613,6 +668,78 @@
 		sendUpload(id, file);
 	}
 
+	/**
+	 * What a refused upload means, in the page's language: { main, sub, retry } for the row, or
+	 * { session: true } when the upload session itself is the problem.
+	 *
+	 * The upload server answers FastAPI's `{"detail": "…"}` in English, and the row used to print
+	 * that body verbatim — with a Retry button even where retrying could never help (an empty
+	 * file, a full quota). Every 403 also read as "verification expired", which sent a
+	 * deactivated or banned account round a captcha loop.
+	 */
+	function describeUploadFailure(status, body) {
+		let detail = '';
+		try {
+			const parsed = JSON.parse(body || '');
+			detail = String((parsed && (parsed.detail || parsed.error)) || '');
+		} catch (e) { /* not JSON: a proxy's HTML page, or nothing at all */ }
+
+		if (status === 413) {
+			// The server names the limit it applied (the account's group may allow less than
+			// the page assumed); fall back to the page's own number.
+			const max = detail.match(/max\s+(\d+(?:\.\d+)?)\s*MiB/i);
+			const limit = max ? Number(max[1]) * 1024 * 1024 : maxFileSize;
+			return { main: t('up.too_big'), sub: t('up.max_size', { size: formatSize(limit) }), retry: false };
+		}
+		if (status === 400 && /empty/i.test(detail)) {
+			return { main: t('up.empty_file'), sub: t('up.empty_file_sub'), retry: false };
+		}
+		if (status === 507) {
+			return { main: t('up.no_space'), sub: t(/quota/i.test(detail) ? 'up.quota_full' : 'up.storage_full'), retry: false };
+		}
+		if (status === 429 && /session/i.test(detail)) return { session: true };
+		if (status === 429) return { main: t('up.error'), sub: t('up.too_many'), retry: true };
+		if (status === 403) {
+			if (/inactive/i.test(detail)) return { main: t('up.refused'), sub: t('up.account_inactive'), retry: false };
+			if (/banned/i.test(detail)) return { main: t('up.refused'), sub: t('up.banned'), retry: false };
+			// The token was missing or no longer valid; an empty body is what a proxy in front
+			// of the upload server says about it.
+			if (detail === '' || /token|captcha/i.test(detail)) return { session: true };
+			return { main: t('up.refused'), sub: '', retry: false };
+		}
+		if (status >= 500 || status === 0) return { main: t('up.error'), sub: t('up.try_again'), retry: true };
+		return { main: t('up.refused'), sub: '', retry: false };
+	}
+
+	/** Uploads that already went round once with a fresh tracking token (no captcha mode). */
+	const renewedOnce = new Set();
+
+	/**
+	 * The upload session refused the file (token gone, or its file cap reached). With a captcha
+	 * the file waits for it and resumes once it is solved; without one a new tracking token is
+	 * fetched and the file goes again, once.
+	 */
+	function retryWithNewSession(id, file, reason) {
+		const entry = uploadQueue.get(id);
+		clearToken();
+		if (captchaEnabled) {
+			if (entry) entry.status = 'waiting';
+			updateFileItem(id, 'error', t(reason === 403 ? 'up.verify_expired' : 'up.session_limit'), t('up.verify_resume'), 0);
+			if (!waitingForCaptcha.some(waiting => waiting.id === id)) waitingForCaptcha.push({ id, file });
+			showCaptchaRequired();
+			return;
+		}
+		if (!renewedOnce.has(id)) {
+			renewedOnce.add(id);
+			if (entry) entry.status = 'pending';
+			updateFileItem(id, 'pending', t('up.pending'), '', 0);
+			uploadFile(id, file);
+			return;
+		}
+		if (entry) entry.status = 'error';
+		updateFileItem(id, 'error-network', t('up.session_failed'), t('up.click_retry'), 0);
+	}
+
 	function sendUpload(id, file) {
 		const xhr = new XMLHttpRequest();
 		const random = new Uint8Array(16);
@@ -658,29 +785,28 @@
 					queueItem.deleteToken = deleteToken;
 				}
 				updateFileItem(id, 'success', t('up.done'), t('up.uploaded'), 100);
+				renewedOnce.delete(id);
 				const removeButton = document.getElementById(id)?.querySelector('.remove');
 				if (removeButton && deletesServerFile(id)) removeButton.title = t('up.remove_delete');
-				if (captchaEnabled && uploadToken) {
+				// The session line ("Pliki: 3/5") moves with every upload, captcha or not; with a
+				// spent session the next upload then starts a new one instead of being refused.
+				if (uploadToken) {
 					try { await updateSessionInfo(); } catch (e) { }
 				}
 				addResult({ id: fileId, name: file.name, url: appUrl + '/download.php?id=' + fileId, token: deleteToken });
-			} else if (xhr.status === 403) {
-				updateFileItem(id, 'error', t('up.verify_expired'), t('up.try_again'), 0);
-				uploadQueue.delete(id);
-				showCaptchaRequired();
 			} else if (xhr.status === 409 && (xhr.responseText || '').indexOf('"cancelled"') >= 0) {
 				// An administrator cut this transfer from the dashboard. Said plainly, because
 				// "network error" would send the uploader off to check their connection.
 				updateFileItem(id, 'error', t('up.cancelled_admin'), t('up.cancelled_admin_sub'), 0);
-				uploadQueue.get(id).status = 'error';
+				queueEntry.status = 'error';
 			} else {
-				// The server's own errors are short strings worth showing. A proxy error is a
-				// whole HTML page — printing it verbatim put "<!DOCTYPE HTML PUBLIC…" in the
-				// file row, which tells the uploader nothing.
-				const body = (xhr.responseText || '').trim();
-				const detail = (body === '' || body.charAt(0) === '<') ? t('up.try_again') : body;
-				updateFileItem(id, 'error-network', t('up.error'), detail, 0);
-				uploadQueue.get(id).status = 'error';
+				const failure = describeUploadFailure(xhr.status, xhr.responseText);
+				if (failure.session) {
+					retryWithNewSession(id, file, xhr.status);
+					return;
+				}
+				queueEntry.status = 'error';
+				updateFileItem(id, failure.retry ? 'error-network' : 'error', failure.main, failure.sub, 0);
 			}
 		};
 

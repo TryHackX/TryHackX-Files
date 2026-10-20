@@ -115,10 +115,11 @@ $homeNotice = [
 					</svg>
 					<?= _h('home.upload_title') ?>
 				</h2>
+				<?php /* A files-per-session cap of 0 means none: the card then names the size alone. */ ?>
 				<span><?= _h('home.limit_prefix') ?>
 					<span
-						id="limitSize"><?= $maxSizeMB >= 1024 ? round($maxSizeMB / 1024, 2) . ' GiB' : $maxSizeMB . ' MiB' ?></span>
-					/ <span id="limitCount"><?= $maxFiles ?></span> <?= _h('home.limit_files_suffix') ?></span>
+						id="limitSize"><?= $maxSizeMB >= 1024 ? round($maxSizeMB / 1024, 2) . ' GiB' : $maxSizeMB . ' MiB' ?></span><span
+						id="limitFiles"<?= (int) $maxFiles > 0 ? '' : ' hidden' ?>> / <span id="limitCount"><?= (int) $maxFiles ?></span> <?= _h('home.limit_files_suffix') ?></span></span>
 			</div>
 			<div class="upload-body">
 				<div class="drop-zone" id="dropZone" role="group" aria-label="<?= _h('home.upload_title') ?>">
