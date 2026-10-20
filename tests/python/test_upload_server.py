@@ -1114,47 +1114,44 @@ class TestThrottledZip:
 
 
 class TestDownloadRanges:
-    def test_unchanged_heartbeat_does_not_look_like_admin_kill(self, monkeypatch):
-        class Cursor:
-            def __init__(self):
-                self.rowcount = 0
-                self.queries = []
-
-            async def execute(self, query, params):
-                self.queries.append((query, params))
-
-            async def fetchone(self):
-                return (1,)
-
-        class AsyncContext:
-            def __init__(self, value):
-                self.value = value
-
-            async def __aenter__(self):
-                return self.value
-
-            async def __aexit__(self, exc_type, exc, tb):
-                return False
-
-        cursor = Cursor()
-
-        class Connection:
-            def cursor(self):
-                return AsyncContext(cursor)
-
-        class Pool:
-            def acquire(self):
-                return AsyncContext(Connection())
+    def test_the_kill_check_is_a_single_read(self, monkeypatch):
+        cursor = _ScriptedCursor([("FROM `fh_active_downloads`", (1,))])
 
         async def fake_get_db_pool():
-            return Pool()
+            return _OneConnectionPool(cursor)
 
         monkeypatch.setattr(us, "get_db_pool", fake_get_db_pool)
         monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
 
         assert asyncio.run(us.download_was_killed(7)) is False
-        assert len(cursor.queries) == 2
-        assert cursor.queries[1][0].startswith("SELECT 1")
+        assert len(cursor.queries) == 1
+        assert cursor.queries[0][0].startswith("SELECT 1")
+
+        cursor.answers = [("FROM `fh_active_downloads`", None)]  # the row was deleted
+        assert asyncio.run(us.download_was_killed(7)) is True
+
+    def test_a_running_stream_writes_nothing_to_check_for_a_kill(self, monkeypatch, tmp_path):
+        # 200 concurrent downloads used to commit ~200 heartbeat UPDATEs a second this way.
+        source = tmp_path / "slow.bin"
+        source.write_bytes(b"s" * 64 * 1024)
+        cursor = _ScriptedCursor([("FROM `fh_active_downloads`", (1,))])
+
+        async def fake_get_db_pool():
+            return _OneConnectionPool(cursor)
+
+        monkeypatch.setattr(us, "get_db_pool", fake_get_db_pool)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        monkeypatch.setattr(us, "KILL_CHECK_SECONDS", 0.05)
+
+        async def collect():
+            # 64 KiB at 160 KiB/s: about 0.4 s of streaming, with the kill check every 50 ms.
+            return b"".join([
+                chunk async for chunk in us.throttled_file_reader(source, 160 * 1024, active_id=7)
+            ])
+
+        assert asyncio.run(collect()) == source.read_bytes()
+        assert not [query for query, _ in cursor.queries if query.lstrip().upper().startswith("UPDATE")]
+        assert len(cursor.queries) >= 3
 
     def test_heartbeat_accepts_an_existing_row_when_timestamp_is_unchanged(self, monkeypatch):
         class Cursor:

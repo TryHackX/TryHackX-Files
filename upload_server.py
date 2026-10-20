@@ -133,6 +133,8 @@ except (TypeError, ValueError):
 # A live transfer renews its lease several times per lease period, so a short configured
 # lease (the CI smoke uses 5 s) cannot expire under a healthy download between two renewals.
 DOWNLOAD_HEARTBEAT_SECONDS = max(1.0, min(15.0, DOWNLOAD_LEASE_SECONDS / 3))
+# How often a running download looks for an administrator's kill (one indexed read).
+KILL_CHECK_SECONDS = 1.0
 try:
     CI_PREBODY_DELAY_SECONDS = (
         max(
@@ -1205,7 +1207,11 @@ async def throttled_iterator(iterator, limit_Bps: int):
             window_start = time.monotonic()
 
 async def download_was_killed(active_id: int) -> bool:
-    """Faza 2.1: has an admin severed this download? (its active_downloads row deleted)"""
+    """Has an administrator severed this download? (its active_downloads row deleted)
+
+    A read only. It used to refresh `heartbeat_at` as well, about one committed UPDATE per
+    second per transfer, which the middleware's lease timer (heartbeat_download) already does.
+    """
     if not active_id:
         return False
     pool = await get_db_pool()
@@ -1216,17 +1222,6 @@ async def download_was_killed(active_id: int) -> bool:
         table = f"{prefix}active_downloads"
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(
-                    f"UPDATE `{table}` SET `heartbeat_at` = %s "
-                    f"WHERE `id` = %s AND `instance_id` = %s",
-                    (int(time.time()), active_id, INSTANCE_ID),
-                )
-                if cur.rowcount == 1:
-                    return False
-
-                # MySQL reports changed rows by default. An UPDATE that writes
-                # the same second-level timestamp therefore has rowcount == 0
-                # even though the live transfer still exists.
                 await cur.execute(
                     f"SELECT 1 FROM `{table}` "
                     f"WHERE `id` = %s AND `instance_id` = %s LIMIT 1",
@@ -1688,7 +1683,7 @@ async def throttled_file_reader(
         remaining = None if end is None else end - start + 1
         while True:
             start_time = time.monotonic()
-            if active_id and start_time - last_kill_check >= 0.5:
+            if active_id and start_time - last_kill_check >= KILL_CHECK_SECONDS:
                 last_kill_check = start_time
                 if await download_was_killed(active_id):
                     if transfer_state is not None:
@@ -4397,7 +4392,7 @@ async def _throttled_sync_iterator(
     try:
         async for chunk in stream:
             now = time.monotonic()
-            if active_id and now - last_kill_check >= 0.5:
+            if active_id and now - last_kill_check >= KILL_CHECK_SECONDS:
                 last_kill_check = now
                 if await download_was_killed(active_id):
                     if transfer_state is not None:
