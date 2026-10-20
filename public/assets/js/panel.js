@@ -74,16 +74,18 @@
 	// `useEtag` is only set for silent background polls: they may get a cheap 304 and skip the
 	// re-render. Explicit user loads pass useEtag=false so they always get a fresh 200 and render
 	// (never leaving a loading skeleton stuck because nothing changed since the last poll).
+	// A refusal (maintenance 503, rate limit, an ended session) comes back as JSON with
+	// `success: false` and its own `error`; callers render that instead of leaving "Loading…".
 	async function fetchLive(url, key, useEtag = true) {
 		const headers = {};
 		if (useEtag && key && liveEtags[key]) headers['If-None-Match'] = liveEtags[key];
 		const res = await fetch(url, { headers, cache: 'no-store' });
-		if (res.status === 304) return { notModified: true };
+		if (res.status === 304) return { notModified: true, status: 304 };
 		if (key) {
 			const et = res.headers.get('ETag');
 			if (et) liveEtags[key] = et;
 		}
-		return { data: await res.json() };
+		return { status: res.status, data: await res.json() };
 	}
 
 	// Initial table loader. The old implementation put placeholder cells inside the real

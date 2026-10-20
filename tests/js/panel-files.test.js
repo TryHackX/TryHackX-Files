@@ -100,6 +100,64 @@ test('file templates and sort selectors use declarative actions', () => {
 	assert.match(source, /querySelectorAll\('#adminCollectionsBody \.coll-check'\)/);
 });
 
+/** "My files" with a forgiving DOM and a scripted fetchLive. */
+function loadMyFilesTab(answers) {
+	const { createLooseDocument } = require('./support/loose-dom');
+	const bootstrap = { dataset: { config: JSON.stringify({ apiUrl: '/api.php', appUrl: '/pon', perms: [] }) } };
+	const document = createLooseDocument({ panelBootstrap: bootstrap });
+	const calls = [];
+	const window = {
+		FHUtil: {
+			esc: value => String(value ?? ''), jsArg: value => "'" + value + "'",
+			safeHttpUrl: value => String(value || ''), formatSize: value => String(value), formatDate: value => String(value)
+		},
+		FHPanelCore: {
+			fetchLive: async (url, key, useEtag) => { calls.push({ url, key, useEtag }); return answers.shift(); },
+			showSkeleton() {}, finishSkeleton() {}
+		},
+		t: key => key,
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, {
+		clearTimeout() {}, console, document, FormData: class {},
+		sessionStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
+		setTimeout() { return 1; }, window
+	}, { filename: 'panel-files.js' });
+	return { files: window.FHPanelFiles, document, calls };
+}
+
+const someFiles = n => Array.from({ length: n }, (_, i) => ({
+	id: 'f' + i, name: 'file' + i + '.txt', size: 10, downloads: 0, uploadedAt: 1000 + i, mime: 'text/plain'
+}));
+
+test('the silent refresh of "My files" keeps the page being read; an explicit load starts at page 1', async () => {
+	const ok = { status: 200, data: { success: true, files: someFiles(70) } };
+	const { files, document } = loadMyFilesTab([ok, ok, ok]);
+	await files.loadMyFiles();
+	files.goMyPage(3);
+	const pager = () => document.getElementById('myFilesPagination').innerHTML;
+	assert.match(pager(), /class="active" data-fh-click="goMyPage\(3\)"/);
+
+	await files.refreshMy(true);
+	assert.match(pager(), /class="active" data-fh-click="goMyPage\(3\)"/, 'a download elsewhere does not throw the reader back');
+
+	await files.loadMyFiles();
+	assert.match(pager(), /class="active" data-fh-click="goMyPage\(1\)"/);
+});
+
+test('a refused list says why instead of "Loading…" forever; a silent poll stays quiet', async () => {
+	const refused = { status: 503, data: { success: false, error: 'Maintenance in progress' } };
+	const { files, document } = loadMyFilesTab([refused, refused]);
+	const body = document.getElementById('myFilesBody');
+	body.innerHTML = '<tr><td colspan="6" class="empty">common.loading</td></tr>';
+	await files.refreshMy(true);
+	assert.match(body.innerHTML, /common\.loading/, 'a background poll does not replace the table');
+	await files.loadMyFiles();
+	assert.match(body.innerHTML, /Maintenance in progress/);
+	assert.doesNotMatch(body.innerHTML, /common\.loading/);
+});
+
 test('shared panel surface publishes the inline modal message helper', () => {
 	const panelSource = fs.readFileSync(
 		path.join(__dirname, '../../public/assets/js/panel.js'),

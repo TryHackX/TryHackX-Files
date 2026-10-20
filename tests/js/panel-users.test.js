@@ -117,6 +117,31 @@ test('the search box narrows the list on the server, debounced, and takes ?searc
 	assert.equal(sent.get('page'), '1');
 });
 
+test('a refused user list shows the server\'s reason instead of "Loading…"', async () => {
+	const tbody = { innerHTML: 'common.loading' };
+	const bootstrap = { dataset: { config: JSON.stringify({ apiUrl: '/api.php' }) } };
+	const document = {
+		getElementById: id => ({ panelBootstrap: bootstrap, usersBody: tbody })[id] || null,
+		querySelectorAll() { return []; }
+	};
+	const window = {
+		FHUtil: { esc: v => String(v ?? ''), jsArg: v => "'" + v + "'", formatSize: v => String(v), formatDate: v => String(v) },
+		FHPanelCore: {
+			fetchLive: async () => ({ status: 429, data: { success: false, error: 'Too many requests, wait a minute' } }),
+			showSkeleton() {}, finishSkeleton() {}
+		},
+		t: key => key,
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, { console, document, window, URLSearchParams, setTimeout() { return 1; }, clearTimeout() {} }, { filename: 'panel-users.js' });
+
+	await window.FHPanelUsers.loadUsers(1, true);
+	assert.equal(tbody.innerHTML, 'common.loading', 'a background refresh stays quiet');
+	await window.FHPanelUsers.loadUsers(1);
+	assert.match(tbody.innerHTML, /Too many requests, wait a minute/);
+});
+
 test('user templates and sort selectors use declarative actions', () => {
 	assert.match(source, /data-fh-click="userAction\(/);
 	assert.match(source, /th\[data-fh-click\^="sortUsers"\]/);

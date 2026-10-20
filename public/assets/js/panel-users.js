@@ -72,6 +72,9 @@
 				rootAdminId = r.data.rootId || 0;
 				renderUsers();
 				renderUserPagination();
+			} else if (!silent && r.data) {
+				// Refused (maintenance, rate limit, an ended session): say so instead of "Loading…".
+				tbody.innerHTML = `<tr><td colspan="9" class="empty">${esc(r.data.error || t('panel.users.load_error'))}</td></tr>`;
 			}
 		} catch (e) {
 			if (!silent) tbody.innerHTML = `<tr><td colspan="9" class="empty">${esc(t('panel.users.load_error'))}</td></tr>`;

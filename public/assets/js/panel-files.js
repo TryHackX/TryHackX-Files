@@ -136,6 +136,9 @@
 				}));
 				filesTotal = r.data.total || 0;
 				renderFiles();
+			} else if (!silent && r.data) {
+				// Refused (maintenance, rate limit, an ended session): say so instead of "Loading…".
+				tbody.innerHTML = `<tr><td colspan="${cols}" class="empty">${esc(r.data.error || t('panel.files.load_error'))}</td></tr>`;
 			}
 		} catch (e) {
 			if (!silent) tbody.innerHTML = `<tr><td colspan="${cols}" class="empty">${esc(t('panel.files.load_error'))}</td></tr>`;
@@ -937,9 +940,15 @@
 			if (!r.notModified && r.data && r.data.success) {
 				myFiles = r.data.files;
 				myRetention = r.data.retention || { days: 0, since: 0, warnDays: 3 };
-				// A filtered list can drop the page we were on out of existence.
-				myCurrentPage = 1;
+				// An explicit load (a new filter, Refresh) starts from the first page. The silent
+				// 20-second refresh keeps the page being read: any download or expiry changes the
+				// list, and it used to throw the reader back to page 1. renderMyFiles() clamps a
+				// page the list no longer has.
+				if (!silent) myCurrentPage = 1;
 				renderMyFiles();
+			} else if (!silent && r.data) {
+				// Refused (maintenance, rate limit, an ended session): say so instead of "Loading…".
+				document.getElementById('myFilesBody').innerHTML = `<tr><td colspan="6" class="empty">${esc(r.data.error || t('panel.files.load_error'))}</td></tr>`;
 			}
 		} catch (e) {
 			if (!silent) document.getElementById('myFilesBody').innerHTML = `<tr><td colspan="6" class="empty">${esc(t('panel.files.load_error'))}</td></tr>`;

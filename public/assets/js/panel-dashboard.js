@@ -103,6 +103,11 @@
 	async function loadDashboard(silent = false) {
 		try {
 			const r = await fetchLive(`${apiUrl}?action=admin_dashboard`, 'dashboard', silent);
+			if (!r.notModified && !silent && r.data && !r.data.success) {
+				// Refused (rate limit, an ended session): the tiles would keep their dashes.
+				showNotification(r.data.error || t('common.error'), 'error');
+				return;
+			}
 			if (r.notModified || !r.data || !r.data.success) return;
 			const d = r.data;
 			const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };

@@ -466,6 +466,9 @@
 				</tr>`).join('');
 				const totalPages = Math.ceil((d.total || 0) / 30);
 				renderPager(document.getElementById('auditPagination'), totalPages, d.total, page, 'loadAuditLog', t('panel.files.pager_events'));
+			} else if (!silent && r.data && !r.data.success) {
+				// Refused (maintenance, rate limit, an ended session): say so instead of "Loading…".
+				tbody.innerHTML = `<tr><td colspan="5" class="empty">${esc(r.data.error || t('common.error'))}</td></tr>`;
 			}
 		} catch (e) {
 			if (!silent) tbody.innerHTML = `<tr><td colspan="5" class="empty">${esc(t('common.connection_error'))}</td></tr>`;
