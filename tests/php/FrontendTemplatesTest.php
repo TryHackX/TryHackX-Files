@@ -68,7 +68,7 @@ final class FrontendTemplatesTest extends TestCase
 
 	public function testCallersPassIconNamesNotMarkup(): void
 	{
-		foreach (['public/index.php', 'public/premium.php'] as $file) {
+		foreach (['public/index.php', 'public/premium.php', 'src/includes/MaintenanceMode.php'] as $file) {
 			$source = $this->source($file);
 			$this->assertDoesNotMatchRegularExpression('/\$pageIcon\s*=\s*\'<i /', $source, $file);
 			$this->assertMatchesRegularExpression('/\$pageIcon\s*=\s*\'fa-[a-z0-9-]+\';/', $source, $file);

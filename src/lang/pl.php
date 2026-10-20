@@ -71,6 +71,7 @@ return [
 	'error.maintenance_title' => 'Przerwa techniczna',
 	'error.maintenance_heading' => 'Trwają prace serwisowe',
 	'error.maintenance_message' => 'Trwają prace serwisowe. Zapraszamy później.',
+	'error.admin_sign_in' => 'Logowanie administratora',
 	'error.denied_title' => 'Odmowa dostępu',
 	'error.banned_heading' => 'Dostęp zablokowany',
 	'error.banned_message' => 'Twój adres IP został zablokowany w tym serwisie.',
@@ -780,7 +781,7 @@ return [
 	'panel.set.language_hint' => 'Język dla nowych odwiedzających. Własny wybór (przełącznik w nagłówku) i język przeglądarki mają pierwszeństwo.',
 	'panel.set.maintenance' => 'Tryb konserwacji',
 	'panel.set.maintenance_on' => 'Włącz tryb konserwacji',
-	'panel.set.maintenance_hint' => 'Dostęp tylko dla adminów. API zwraca 503.',
+	'panel.set.maintenance_hint' => 'Ze strony, panelu i API korzystają tylko administratorzy; pozostali widzą komunikat o przerwie technicznej (HTTP 503). Logowanie i powiadomienia o płatnościach działają dalej. Przesyłanie plików kluczem API (ShareX) nie jest wstrzymywane.',
 	'panel.set.maintenance_msg' => 'Komunikat konserwacji',
 	'panel.set.maintenance_msg_ph' => 'np. Zaraz wracamy…',
 

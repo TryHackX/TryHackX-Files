@@ -109,25 +109,16 @@ if (!ApiRoutePolicy::reserveIdempotencyKey($route)) {
 }
 
 // Maintenance mode admits only an already validated administrator, plus everything signing in
-// takes: the password step, the 2FA step, the configuration the sign-in form loads (captcha
-// provider) and signing out. Without the 2FA step an administrator using it could not get back
-// in to switch maintenance off again.
-$maintenanceMode = Database::getSetting('maintenance_mode', '0') === '1';
-$maintenanceOpenActions = [
-	'user_login',
-	'user_2fa_login',
-	'user_logout',
-	'config',
-	'captcha_config',
-	'health',
-];
-if ($maintenanceMode && empty($_SESSION['is_admin']) && !in_array($action, $maintenanceOpenActions, true)) {
+// takes (password and 2FA steps, the sign-in form's configuration, signing out) and the machine
+// callers that must not wait: the health probe and the payment notifications. See
+// MaintenanceMode::OPEN_API_ACTIONS.
+if (MaintenanceMode::active() && empty($_SESSION['is_admin'])
+	&& !in_array($action, MaintenanceMode::OPEN_API_ACTIONS, true)) {
 	http_response_code(503);
-	$maintMsg = trim((string) Database::getSetting('maintenance_message', ''));
 	header('Content-Type: application/json; charset=utf-8');
 	echo json_encode([
 		'success' => false,
-		'error' => $maintMsg !== '' ? $maintMsg : __('error.maintenance_message'),
+		'error' => MaintenanceMode::message(),
 	]);
 	exit;
 }

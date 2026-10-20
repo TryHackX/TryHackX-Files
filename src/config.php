@@ -148,6 +148,7 @@ if (defined('FILEHOST_STATELESS_REQUEST') && FILEHOST_STATELESS_REQUEST === true
 
 require_once APP_ROOT . '/includes/Database.php';
 require_once APP_ROOT . '/includes/SessionAuth.php';
+require_once APP_ROOT . '/includes/MaintenanceMode.php';
 
 emitStrictTransportSecurity();
 

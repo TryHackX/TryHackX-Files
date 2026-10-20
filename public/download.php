@@ -7,6 +7,10 @@ require_once __DIR__ . '/../src/includes/Database.php';
 require_once __DIR__ . '/../src/includes/file_icons.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 
+// During maintenance nothing on this page works (no download token is issued), so it shows
+// the maintenance notice like every other page.
+MaintenanceMode::guardPage();
+
 $currentUser = null;
 if (isset($_SESSION['user_id'])) {
 	$currentUser = [

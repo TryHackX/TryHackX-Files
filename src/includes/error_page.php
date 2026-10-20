@@ -3,7 +3,10 @@
  * Minimal, self-contained error/notice page (ban, maintenance, premium switched off).
  * Expects: $pageTitle, $pageIcon, $pageHeading, $pageMessage (all plain text; $pageIcon is a
  * Font Awesome icon NAME such as "fa-ban", not markup), optional $pageMeta (array of
- * [label => value], values shown as text).
+ * [label => value], values shown as text), optional $pageLink (['href', 'label', 'icon']: one
+ * way onward, such as back to the home page — never on a page that IS the home page) and
+ * optional $pageSignIn (true: the maintenance notice with the sign-in dialog, which then also
+ * needs $appUrl and $currentUser, like every page that includes auth_modal.php).
  * Sends no external requests (the icon font is the self-hosted copy); follows the visitor's
  * theme cookie like every other page.
  */
@@ -14,6 +17,16 @@ $metaRows = $pageMeta ?? [];
 // A bare icon name: letters, digits and dashes only, whatever a caller passes.
 $pageIconName = preg_replace('/[^a-z0-9-]/i', '', (string) ($pageIcon ?? '')) ?: 'fa-circle-info';
 $pageTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
+$pageLinkRow = isset($pageLink) && is_array($pageLink) && is_string($pageLink['href'] ?? null)
+	? [
+		'href' => (string) $pageLink['href'],
+		'label' => (string) ($pageLink['label'] ?? ''),
+		'icon' => preg_replace('/[^a-z0-9-]/i', '', (string) ($pageLink['icon'] ?? '')) ?: 'fa-arrow-left',
+	]
+	: null;
+$pageSignIn = !empty($pageSignIn);
+$pageAssetVersion = defined('APP_VERSION') ? htmlspecialchars(APP_VERSION) : '';
+$pageBaseUrl = htmlspecialchars(defined('APP_URL') ? APP_URL : '');
 ?>
 <!DOCTYPE html>
 <html lang="<?= class_exists('Lang') ? Lang::current() : 'pl' ?>">
@@ -23,7 +36,15 @@ $pageTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta name="robots" content="noindex, nofollow">
 	<title><?= htmlspecialchars($pageTitle) ?> - <?= htmlspecialchars(defined('APP_NAME') ? APP_NAME : (defined('PRODUCT_NAME') ? PRODUCT_NAME : 'TryHackX Files')) ?></title>
-	<link rel="stylesheet" href="<?= htmlspecialchars(defined('APP_URL') ? APP_URL : '') ?>/assets/fontawesome/css/all.min.css?v=<?= defined('APP_VERSION') ? htmlspecialchars(APP_VERSION) : '' ?>">
+	<link rel="stylesheet" href="<?= $pageBaseUrl ?>/assets/fontawesome/css/all.min.css?v=<?= $pageAssetVersion ?>">
+	<?php if ($pageSignIn): ?>
+		<?php /* The sign-in dialog is the site's own, so it brings the site's stylesheet, token
+		         and dictionary; the notice card below keeps its own look (the rules after this
+		         link win). */ ?>
+		<link rel="stylesheet" href="<?= $pageBaseUrl ?>/assets/css/base.css?v=<?= $pageAssetVersion ?>">
+		<?php require __DIR__ . '/csrf_head.php'; ?>
+		<?php require __DIR__ . '/i18n_head.php'; ?>
+	<?php endif; ?>
 	<style>
 		:root {
 			color-scheme: dark;
@@ -85,6 +106,17 @@ $pageTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
 		.meta div + div { border-top: 1px solid var(--row-line); }
 		.meta span { color: var(--muted); }
 		.meta b { color: var(--text); font-weight: 600; }
+		.onward {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			margin-top: 22px;
+			color: var(--text);
+			font-size: 15px;
+			text-decoration: none;
+			border-bottom: 1px solid var(--card-line);
+		}
+		.onward:hover, .onward:focus-visible { border-bottom-color: currentColor; }
 	</style>
 </head>
 
@@ -100,7 +132,15 @@ $pageTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
 				<?php endforeach; ?>
 			</div>
 		<?php endif; ?>
+		<?php if ($pageLinkRow !== null): ?>
+			<a class="onward" href="<?= htmlspecialchars($pageLinkRow['href']) ?>"><i class="fa-solid <?= htmlspecialchars($pageLinkRow['icon']) ?>" aria-hidden="true"></i><?= htmlspecialchars($pageLinkRow['label']) ?></a>
+		<?php endif; ?>
 	</div>
+	<?php if ($pageSignIn): ?>
+		<?php require __DIR__ . '/auth_modal.php'; ?>
+		<script src="<?= $pageBaseUrl ?>/assets/js/api.js?v=<?= $pageAssetVersion ?>"></script>
+		<?php require __DIR__ . '/auth_scripts.php'; ?>
+	<?php endif; ?>
 </body>
 
 </html>

@@ -41,6 +41,11 @@ if (!$loggedIn) {
 	exit;
 }
 
+// Maintenance closes the panel to everyone but administrators, like the rest of the site. The
+// panel used to open its shell anyway and leave every table on "Loading…" while each API call
+// answered 503.
+MaintenanceMode::guardPage();
+
 // Signing out is `POST api.php?action=user_logout` (CSRF-protected; the account menu uses it).
 // The old `panel.php?logout` GET could be triggered by any page linking to it.
 

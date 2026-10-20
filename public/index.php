@@ -6,22 +6,9 @@ require_once __DIR__ . '/../src/config.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 $appUrl = APP_URL;
 
-// Maintenance Mode Check
-$maintenanceMode = Database::getSetting('maintenance_mode', '0') === '1';
-if ($maintenanceMode) {
-	$currentUser = getCurrentUser();
-	if (!$currentUser || !$currentUser['is_admin']) {
-		http_response_code(503);
-		$pageTitle = __('error.maintenance_title');
-		$pageIcon = 'fa-screwdriver-wrench';
-		$pageHeading = __('error.maintenance_heading');
-		// B8: an empty custom message falls back to the visitor's-language default.
-			$maintMsg = trim((string) Database::getSetting('maintenance_message', ''));
-			$pageMessage = $maintMsg !== '' ? $maintMsg : __('error.maintenance_message');
-		require __DIR__ . '/../src/includes/error_page.php';
-		exit;
-	}
-}
+// Maintenance: anyone but an administrator gets the notice, with the sign-in dialog at
+// ?action=login (where the panel sends a signed-out visitor).
+MaintenanceMode::guardPage();
 
 // Ban Logic
 if (Database::getInstance()) {

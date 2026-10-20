@@ -14,6 +14,8 @@ require_once __DIR__ . '/../src/includes/Markdown.php';
 require_once __DIR__ . '/../src/includes/api/PremiumController.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 
+MaintenanceMode::guardPage();
+
 $appUrl = APP_URL;
 
 // Needed by the shared account modal (header person icon), exactly as index.php, download.php
@@ -34,6 +36,8 @@ if (!PremiumController::isEnabled()) {
 	$pageIcon = 'fa-circle-question';
 	$pageHeading = __('premium.disabled_heading');
 	$pageMessage = __('premium.disabled');
+	// An old link to the plans page should not be a dead end.
+	$pageLink = ['href' => $appUrl . '/', 'label' => __('common.back_home'), 'icon' => 'fa-house'];
 	require __DIR__ . '/../src/includes/error_page.php';
 	exit;
 }

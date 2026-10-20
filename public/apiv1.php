@@ -75,6 +75,15 @@ if (!$identity || !$userId) {
 	apiv1_error('Invalid or missing API key', 401);
 }
 
+// Maintenance closes the REST API like the rest of the site: only an administrator's key is
+// answered, as only an administrator's session is in the browser API.
+if (MaintenanceMode::active()) {
+	$keyOwner = Database::getUserById($userId);
+	if (($keyOwner['role'] ?? '') !== 'admin') {
+		apiv1_error(MaintenanceMode::message(), 503);
+	}
+}
+
 // IP ban still applies to programmatic access.
 try {
 	if (Database::isBlacklisted('ip', getClientIP())) {

@@ -6,6 +6,8 @@ require_once __DIR__ . '/../src/includes/Database.php';
 require_once __DIR__ . '/../src/includes/file_icons.php';
 require_once __DIR__ . '/../src/includes/AdRenderer.php';
 
+MaintenanceMode::guardPage();
+
 $appUrl = APP_URL;
 $collectionId = is_string($_GET['id'] ?? null) ? $_GET['id'] : '';
 $collection = null;

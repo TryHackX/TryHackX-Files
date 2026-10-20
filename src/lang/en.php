@@ -69,6 +69,7 @@ return [
 	'error.maintenance_title' => 'Maintenance',
 	'error.maintenance_heading' => 'Maintenance in progress',
 	'error.maintenance_message' => 'We are doing maintenance. Please come back later.',
+	'error.admin_sign_in' => 'Administrator sign-in',
 	'error.denied_title' => 'Access denied',
 	'error.banned_heading' => 'Access blocked',
 	'error.banned_message' => 'Your IP address has been blocked on this site.',
@@ -778,7 +779,7 @@ return [
 	'panel.set.language_hint' => 'Language for new visitors. An explicit choice (header switcher) and the browser language take precedence.',
 	'panel.set.maintenance' => 'Maintenance Mode',
 	'panel.set.maintenance_on' => 'Enable Maintenance Mode',
-	'panel.set.maintenance_hint' => 'Only admins can access the site. API returns 503.',
+	'panel.set.maintenance_hint' => 'Only administrators can use the site, the panel and the API; everyone else sees the maintenance notice (HTTP 503). Signing in and payment notifications stay open. Uploads with an API key (ShareX) are not paused.',
 	'panel.set.maintenance_msg' => 'Maintenance Message',
 	'panel.set.maintenance_msg_ph' => 'e.g., We will be back soon…',
 

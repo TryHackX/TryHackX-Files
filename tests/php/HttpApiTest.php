@@ -1208,6 +1208,86 @@ final class HttpApiTest extends TestCase
 		}
 	}
 
+	/** Sign in from the maintenance notice's own sign-in page (the home page is closed then). */
+	private static function signInDuringMaintenance(string $username, string $password): array
+	{
+		self::$cookies = [];
+		self::$csrf = '';
+		$page = self::rawRequest('GET', '/?action=login');
+		self::assertMatchesRegularExpression('/name="csrf-token" content="([a-f0-9]{64})"/', $page['body']);
+		preg_match('/name="csrf-token" content="([a-f0-9]{64})"/', $page['body'], $m);
+		self::$csrf = $m[1];
+		return self::postJson('/api.php?action=user_login', ['username' => $username, 'password' => $password]);
+	}
+
+	/**
+	 * Maintenance closes every page, the panel and both APIs to anyone but an administrator,
+	 * and leaves a way in: the notice links to `?action=login`, which shows it with the sign-in
+	 * dialog. Payment notifications are still answered.
+	 */
+	public function testMaintenanceClosesTheSiteButLeavesAWayIn(): void
+	{
+		$keys = [];
+		foreach (['admin' => (int) Database::getUserByEmailOrUsername('httpadmin')['id'],
+			'user' => self::freshUser('httpmaintuser', 'MaintUser1!')] as $who => $ownerId) {
+			$keys[$who] = 'fh_' . bin2hex(random_bytes(24));
+			Database::createApiKey($ownerId, hash('sha256', $keys[$who]), substr($keys[$who], 0, 11), 'HTTP ' . $who . ' key');
+		}
+		Database::setSetting('maintenance_mode', '1');
+		self::serverSettingsChanged();
+		try {
+			self::$cookies = [];
+			$home = self::rawRequest('GET', '/');
+			$this->assertSame(503, $home['status']);
+			$this->assertStringContainsString('href="' . self::$base . '/?action=login"', $home['body']);
+			$this->assertStringNotContainsString('href="' . self::$base . '/"', $home['body'], 'no link back to itself');
+			$this->assertStringNotContainsString('id="loginForm"', $home['body']);
+
+			$signInPage = self::rawRequest('GET', '/?action=login');
+			$this->assertSame(503, $signInPage['status']);
+			$this->assertStringContainsString('id="loginForm"', $signInPage['body']);
+			foreach (['/assets/js/api.js', '/assets/js/auth.js', '/assets/css/base.css'] as $asset) {
+				$this->assertStringContainsString($asset, $signInPage['body']);
+			}
+
+			foreach (['/download.php?id=doesnotexist1', '/collection.php?id=doesnotexist1', '/premium.php'] as $page) {
+				$this->assertSame(503, self::rawRequest('GET', $page)['status'], $page);
+			}
+			// Payment notifications are answered (refused here for lacking a signature), not 503.
+			$notify = self::rawRequest('POST', '/api.php?action=payu_notify', '{}', ['Content-Type: application/json']);
+			$this->assertNotSame(503, $notify['status']);
+			// The key-authenticated API answers only an administrator's key.
+			$this->assertSame(503, self::rawRequest('GET', '/api/v1/whoami', null, ['Authorization: Bearer ' . $keys['user']])['status']);
+			$this->assertSame(200, self::rawRequest('GET', '/api/v1/whoami', null, ['Authorization: Bearer ' . $keys['admin']])['status']);
+
+			// An ordinary account may sign in, but the panel is closed to it as well.
+			$this->assertTrue(self::signInDuringMaintenance('httpmaintuser', 'MaintUser1!')['success'] ?? false);
+			$panel = self::rawRequest('GET', '/panel.php?tab=myfiles');
+			$this->assertSame(503, $panel['status']);
+			$this->assertStringNotContainsString('id="myFilesBody"', $panel['body']);
+
+			// The administrator signs in from the notice and works as usual.
+			$this->assertTrue(self::signInDuringMaintenance('httpadmin', 'HttpAdmin1!')['success'] ?? false);
+			$this->assertSame(200, self::rawRequest('GET', '/')['status']);
+			$adminPanel = self::rawRequest('GET', '/panel.php?tab=dashboard');
+			$this->assertSame(200, $adminPanel['status']);
+			$this->assertStringContainsString('id="dashFiles"', $adminPanel['body']);
+		} finally {
+			Database::setSetting('maintenance_mode', '0');
+			self::serverSettingsChanged();
+			self::$cookies = [];
+		}
+	}
+
+	/** A notice page is not a dead end: the switched-off plans page links back home. */
+	public function testTheSwitchedOffPlansPageLinksBackHome(): void
+	{
+		self::$cookies = [];
+		$page = self::rawRequest('GET', '/premium.php');
+		$this->assertSame(404, $page['status']);
+		$this->assertStringContainsString('class="onward" href="' . self::$base . '/"', $page['body']);
+	}
+
 	/** Pages print outcome messages they own, chosen by code; never the query string itself. */
 	public function testOutcomeMessagesComeFromCodesNotFromTheQueryString(): void
 	{
