@@ -1137,6 +1137,10 @@
 	 * Renewal configuration (runda 6): the base placement is fixed, each add-on can be
 	 * unchecked — maybe the extra zones did not earn their surcharge. The dropped ids ride
 	 * the checkout URL and are applied at fulfilment.
+	 *
+	 * Only placements the server will renew are offered (and priced): one still waiting for its
+	 * top-up payment, or one that was rejected, is listed without a box or a price. The total
+	 * used to add every add-on, so it did not match what the checkout then charged.
 	 */
 	function openMyAdRenew(adId) {
 		const ad = myAdsList.find(a => a.id === adId);
@@ -1153,8 +1157,19 @@
 			</label>
 			<strong class="myad-addon-price">${esc(formatMoney(baseMinor, currency))}</strong>
 		</div>`];
+		// An older server sends no `renewable` flag; it renewed every add-on, so treat them so.
+		const renewable = (ad.children || []).filter(c => c.renewable !== false);
+		const prices = new Map(renewable.map(c => [String(c.id), Number((ad.addonPrices || {})[c.zone]) || 0]));
 		(ad.children || []).forEach(c => {
-			const price = (ad.addonPrices || {})[c.zone] || 0;
+			if (c.renewable === false) {
+				const note = c.status === 'draft' ? 'panel.myads.renew_topup'
+					: c.status === 'rejected' ? 'panel.myads.renew_rejected' : 'panel.myads.renew_skipped';
+				rows.push(`<div class="myad-addon-row is-skipped">
+					<span class="form-check"><span>${esc(c.zoneLabel)} <small style="color:var(--text-muted)">${esc(t(note))}</small></span></span>
+				</div>`);
+				return;
+			}
+			const price = prices.get(String(c.id));
 			rows.push(`<div class="myad-addon-row">
 				<label class="form-check">
 					<input type="checkbox" class="myad-renew-check" value="${c.id}" data-price="${price}" checked>
@@ -1165,12 +1180,18 @@
 		});
 		const holder = document.getElementById('myAdRenewList');
 		holder.innerHTML = rows.join('');
+		const dropped = new Set();
 		const updateTotal = () => {
 			let total = baseMinor;
-			holder.querySelectorAll('.myad-renew-check:checked').forEach(c => { total += parseInt(c.dataset.price, 10) || 0; });
+			prices.forEach((price, id) => { if (!dropped.has(id)) total += price; });
 			document.getElementById('myAdRenewTotal').textContent = t('panel.myads.total', { price: formatMoney(total, currency) });
 		};
-		holder.onchange = updateTotal;
+		holder.onchange = event => {
+			const box = event && event.target;
+			if (!box || !box.classList || !box.classList.contains('myad-renew-check')) return;
+			if (box.checked) dropped.delete(String(box.value)); else dropped.add(String(box.value));
+			updateTotal();
+		};
 		updateTotal();
 		openModal('myAdRenewModal');
 	}

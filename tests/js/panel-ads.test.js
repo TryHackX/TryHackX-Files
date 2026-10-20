@@ -119,6 +119,47 @@ test('a dismissed banner crop lets go of its image, and the same file can be pic
 	assert.deepEqual(closed, ['adCropModal']);
 });
 
+test('the renewal total counts only the placements the server renews', async () => {
+	const { createLooseDocument } = require('./support/loose-dom');
+	const document = createLooseDocument();
+	const holder = document.getElementById('myAdRenewList');
+	const ad = {
+		id: 9, name: 'Spring', packageId: 1, zone: 'home_top', zoneLabel: 'Home · Top', currency: 'PLN', amountMinor: 10000,
+		addonPrices: { dl_top: 500, coll_top: 700, home_bottom: 900 },
+		children: [
+			{ id: 21, zone: 'dl_top', zoneLabel: 'Download · Top', status: 'active', renewable: true },
+			{ id: 22, zone: 'coll_top', zoneLabel: 'Collection · Top', status: 'draft', renewable: false },
+			{ id: 23, zone: 'home_bottom', zoneLabel: 'Home · Bottom', status: 'rejected', renewable: false }
+		]
+	};
+	const context = {
+		document,
+		t: (key, params) => (params ? key + ' ' + JSON.stringify(params) : key),
+		LANG: 'en',
+		FHUtil: { esc: v => String(v ?? ''), jsArg: v => "'" + v + "'", safeHttpUrl: v => String(v || ''), formatDate: v => String(v) },
+		FHApi: { get: async action => (action === 'my_ads' ? { success: true, ads: [ad] } : { success: true, packages: [] }) },
+		openModal() {},
+		setTimeout,
+		clearTimeout
+	};
+	context.window = context;
+	vm.createContext(context);
+	vm.runInContext(source, context, { filename: 'panel-ads.js' });
+
+	await context.FHPanelAds.loadMyAds();
+	context.FHPanelAds.openMyAdRenew(9);
+	const total = () => document.getElementById('myAdRenewTotal').textContent;
+	assert.match(total(), /"price":"105\.00 PLN"/, 'base 100.00 + the one renewable add-on 5.00');
+	assert.match(holder.innerHTML, /class="myad-renew-check" value="21"/);
+	assert.doesNotMatch(holder.innerHTML, /value="22"|value="23"/, 'no box for a placement that is not renewed');
+	assert.match(holder.innerHTML, /panel\.myads\.renew_topup/);
+	assert.match(holder.innerHTML, /panel\.myads\.renew_rejected/);
+	assert.doesNotMatch(holder.innerHTML, /7\.00|9\.00/, 'and no price for it either');
+
+	holder.onchange({ target: { value: '21', checked: false, classList: { contains: name => name === 'myad-renew-check' } } });
+	assert.match(total(), /"price":"100\.00 PLN"/, 'dropping the add-on leaves the base');
+});
+
 test('advertising templates use declarative event attributes', () => {
 	assert.doesNotMatch(
 		source,
