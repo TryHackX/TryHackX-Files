@@ -205,30 +205,67 @@ final class FileQuarantineTest extends RepoTestCase
 		$this->assertSame(0, (int) $row->fetchColumn());
 	}
 
-	public function testAccountDeletionBypassesQuarantine(): void
+	/** @return array{0: int, 1: int, 2: string} [owner account id, account id, its file id] */
+	private function accountWithAFile(string $suffix): array
 	{
-		$ownerName = 'q-owner-' . bin2hex(random_bytes(4));
-		$this->assertTrue(Database::registerUser(
-			$ownerName,
-			$ownerName . '@example.test',
-			'Str0ng!pass'
-		)['success']);
-		$name = 'q-user-' . bin2hex(random_bytes(4));
-		$registered = Database::registerUser($name, $name . '@example.test', 'Str0ng!pass');
-		$this->assertTrue($registered['success']);
-		$userQuery = Database::getInstance()->prepare(
-			"SELECT `id` FROM `" . Database::table('users') . "` WHERE `username` = ?"
-		);
-		$userQuery->execute([$name]);
-		$userId = (int) $userQuery->fetchColumn();
-		$id = $this->fixture('account');
+		$ids = [];
+		foreach (['q-owner-', 'q-user-'] as $prefix) {
+			$name = $prefix . bin2hex(random_bytes(4));
+			$this->assertTrue(Database::registerUser($name, $name . '@example.test', 'Str0ng!pass')['success']);
+			$userQuery = Database::getInstance()->prepare(
+				"SELECT `id` FROM `" . Database::table('users') . "` WHERE `username` = ?"
+			);
+			$userQuery->execute([$name]);
+			$ids[] = (int) $userQuery->fetchColumn();
+		}
+		$id = $this->fixture($suffix);
 		Database::getInstance()->prepare(
 			"UPDATE `" . Database::table('files') . "` SET `user_id` = ? WHERE `id` = ?"
-		)->execute([$userId, $id]);
+		)->execute([$ids[1], $id]);
+		return [$ids[0], $ids[1], $id];
+	}
 
-		$this->assertTrue(UserRepository::delete($userId));
+	/** Deleting one's own account is an erasure request: no recoverable copy is kept. */
+	public function testDeletingOnesOwnAccountBypassesQuarantine(): void
+	{
+		[, $userId, $id] = $this->accountWithAFile('self');
+		$_SESSION['user_id'] = $userId;
+		try {
+			$this->assertTrue(UserRepository::delete($userId));
+		} finally {
+			unset($_SESSION['user_id']);
+		}
 		FileManager::processDeletionQueue(10);
 		$this->assertNull(FileQuarantine::find($id));
 		$this->assertDirectoryDoesNotExist(UPLOADS_DIR . '/' . $id);
+	}
+
+	/**
+	 * An account an administrator deletes is moderation: its files are quarantined like every
+	 * other administrative delete, and come back (without an owner) on restore. Before, they
+	 * were purged for good whatever the quarantine setting.
+	 */
+	public function testAccountDeletedByAnAdministratorIsQuarantined(): void
+	{
+		[$adminId, $userId, $id] = $this->accountWithAFile('admin');
+		$_SESSION['user_id'] = $adminId;
+		try {
+			$this->assertTrue(UserRepository::delete($userId));
+		} finally {
+			unset($_SESSION['user_id']);
+		}
+		$result = FileManager::processDeletionQueue(10);
+		$this->assertSame(1, $result['quarantined']);
+		$this->assertSame(0, $result['deleted']);
+		$row = FileQuarantine::find($id);
+		$this->assertSame('quarantined', $row['state'] ?? null);
+		$this->assertSame('account_delete', $row['reason']);
+		$this->assertSame((string) $adminId, (string) $row['actor_id']);
+		$this->assertDirectoryDoesNotExist(UPLOADS_DIR . '/' . $id);
+
+		$this->assertTrue(FileQuarantine::restore($id));
+		$file = FileManager::getFile($id);
+		$this->assertNotNull($file);
+		$this->assertSame('recoverable-bytes', file_get_contents($file['path']));
 	}
 }

@@ -334,6 +334,21 @@ class FileManager
 			&& !file_exists($thumbCandidate) && !is_link($thumbCandidate);
 	}
 
+	/**
+	 * Queue the bytes of a file row the caller has locked and is about to delete, inside the
+	 * caller's transaction: the quarantine bundle's metadata (when the quarantine is on) and
+	 * the durable deletion job. For deletions that remove rows in bulk outside this class.
+	 */
+	public static function queueLockedFileRemoval(
+		PDO $pdo,
+		string $id,
+		string $reason,
+		string $actorType,
+		?string $actorId = null
+	): void {
+		self::enqueuePhysicalDeletion($pdo, $id, $reason, $actorType, $actorId);
+	}
+
 	/** Add one idempotent physical deletion job inside the caller's transaction. */
 	private static function enqueuePhysicalDeletion(
 		PDO $pdo,

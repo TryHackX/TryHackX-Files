@@ -685,7 +685,14 @@ final class UserRepository
 		return in_array($userId, $ids, true) && count($ids) <= 1;
 	}
 
-	/** Delete a user and all authentication artefacts. The owner account is protected. */
+	/**
+	 * Delete a user and all authentication artefacts. The owner account is protected.
+	 *
+	 * Deleting one's own account is an erasure request, so its files leave no recoverable copy.
+	 * An account deleted by somebody else — an administrator removing a spammer — is moderation:
+	 * its files go through the quarantine like every other administrative delete, when the
+	 * quarantine is on, so they can still be looked at or restored within its retention.
+	 */
 	public static function delete(int $userId): bool
 	{
 		$pdo = Database::getInstance();
@@ -695,6 +702,11 @@ final class UserRepository
 
 		if (self::isRootAdmin($userId)) {
 			return false; // last line of defence; callers refuse earlier, before touching files
+		}
+		$actorId = (int) ($_SESSION['user_id'] ?? 0);
+		$quarantine = $actorId > 0 && $actorId !== $userId;
+		if ($quarantine && !class_exists('FileManager')) {
+			require_once __DIR__ . '/../FileManager.php';
 		}
 
 		$usersTable = Database::table('users');
@@ -735,7 +747,18 @@ final class UserRepository
 					  `next_attempt_at` = LEAST(`next_attempt_at`, VALUES(`next_attempt_at`))"
 				);
 				foreach ($fileIds as $fileId) {
-					$queue->execute([(string) $fileId, time()]);
+					if ($quarantine) {
+						// Captured while the row and its memberships still exist.
+						FileManager::queueLockedFileRemoval(
+							$pdo,
+							(string) $fileId,
+							'account_delete',
+							'admin',
+							(string) $actorId
+						);
+					} else {
+						$queue->execute([(string) $fileId, time()]);
+					}
 				}
 				foreach (array_chunk($fileIds, 500) as $chunk) {
 					$in = implode(',', array_fill(0, count($chunk), '?'));
