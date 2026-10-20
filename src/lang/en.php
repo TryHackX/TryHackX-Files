@@ -199,6 +199,7 @@ return [
 	/* ---- auth modal ---- */
 	'auth.greeting' => 'Welcome!',
 	'auth.greeting_sub' => 'Sign in to manage your files, or create a new account.',
+	'auth.greeting_sub_maintenance' => 'Maintenance is in progress. Only administrators can use the site right now.',
 	'auth.tab_login' => 'Sign in',
 	'auth.tab_register' => 'Register',
 	'auth.username' => 'Username',

@@ -179,6 +179,7 @@ return array (
   'report.email_ph' => 'zhangwei@example.com',
   'auth.greeting' => '欢迎！',
   'auth.greeting_sub' => '登录后即可管理文件，或注册一个新账号。',
+  'auth.greeting_sub_maintenance' => '网站正在维护，目前仅管理员可以使用。',
   'auth.tab_login' => '登录',
   'auth.tab_register' => '注册',
   'auth.username' => '用户名',

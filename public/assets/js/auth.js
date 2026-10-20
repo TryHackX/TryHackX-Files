@@ -123,7 +123,13 @@
                 showAuthMessage(t('js.reg_disabled'), 'error');
                 return;
             }
-            document.querySelectorAll('.auth-tab')[1].classList.add('active');
+            const registerTab = document.querySelectorAll('.auth-tab')[1];
+            if (!registerTab) {
+                // The maintenance notice's dialog offers no sign-up.
+                showAuthTab('login');
+                return;
+            }
+            registerTab.classList.add('active');
             document.getElementById('registerForm').classList.add('active');
 
             // Check if registration captcha needed

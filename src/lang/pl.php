@@ -201,6 +201,7 @@ return [
 	/* ---- auth modal ---- */
 	'auth.greeting' => 'Witaj!',
 	'auth.greeting_sub' => 'Zaloguj się, aby zarządzać swoimi plikami, lub zarejestruj nowe konto.',
+	'auth.greeting_sub_maintenance' => 'Trwa przerwa techniczna. Z serwisu mogą teraz korzystać tylko administratorzy.',
 	'auth.tab_login' => 'Logowanie',
 	'auth.tab_register' => 'Rejestracja',
 	'auth.username' => 'Nazwa użytkownika',

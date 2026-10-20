@@ -74,6 +74,9 @@ final class MaintenanceMode
 			'label' => __('error.admin_sign_in'),
 			'icon' => 'fa-right-to-bracket',
 		];
+		// The sign-in dialog here offers only what maintenance leaves open: no sign-up, no
+		// password recovery and no account statistics (all three would answer 503).
+		$authModalMaintenance = true;
 		require __DIR__ . '/error_page.php';
 		exit;
 	}

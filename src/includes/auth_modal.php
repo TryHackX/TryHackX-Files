@@ -1,3 +1,8 @@
+<?php
+// On the maintenance notice (MaintenanceMode::guardPage) only signing in is open: the dialog
+// leaves out sign-up, password recovery and the account statistics, which would answer 503.
+$authModalMaintenance = !empty($authModalMaintenance);
+?>
 <div class="auth-modal" id="authModal">
     <div class="auth-box">
         <button class="auth-close" type="button" data-auth-action="close" aria-label="<?= _h('common.close') ?>">
@@ -11,11 +16,13 @@
 
         <div id="authGuest" style="<?= isset($currentUser) ? 'display:none;' : 'display:block;' ?>">
             <h3><?= _h('auth.greeting') ?></h3>
-            <p><?= _h('auth.greeting_sub') ?></p>
+            <p><?= _h($authModalMaintenance ? 'auth.greeting_sub_maintenance' : 'auth.greeting_sub') ?></p>
 
-            <div class="auth-tabs">
+            <div class="auth-tabs"<?= $authModalMaintenance ? ' hidden' : '' ?>>
                 <button class="auth-tab active" type="button" data-auth-tab="login"><?= _h('auth.tab_login') ?></button>
-                <button class="auth-tab" type="button" data-auth-tab="register"><?= _h('auth.tab_register') ?></button>
+                <?php if (!$authModalMaintenance): ?>
+                    <button class="auth-tab" type="button" data-auth-tab="register"><?= _h('auth.tab_register') ?></button>
+                <?php endif; ?>
             </div>
 
             <form class="auth-form active" id="loginForm">
@@ -57,10 +64,12 @@
                         </select>
                     </div>
                 <?php endif; ?>
-                <div style="display:flex; justify-content:flex-end; margin-top:-10px; margin-bottom:15px;">
-                    <a href="#" style="font-size:0.85rem; color:var(--text-secondary); text-decoration:none;"
-                        data-auth-action="recovery"><?= _h('auth.forgot') ?></a>
-                </div>
+                <?php if (!$authModalMaintenance): ?>
+                    <div style="display:flex; justify-content:flex-end; margin-top:-10px; margin-bottom:15px;">
+                        <a href="#" style="font-size:0.85rem; color:var(--text-secondary); text-decoration:none;"
+                            data-auth-action="recovery"><?= _h('auth.forgot') ?></a>
+                    </div>
+                <?php endif; ?>
                 <!-- Recaptcha Container -->
                 <div id="recaptchaContainer" class="form-group" style="display:none; justify-content:center;">
                     <div id="authCaptchaWidget"></div>
@@ -187,20 +196,22 @@
                 </div>
             </div>
 
-            <div class="user-stats-grid" id="userStats" style="display:none;">
-                <div class="user-stat-card">
-                    <span><?= _h('auth.stat_files') ?></span>
-                    <strong id="statFiles">0</strong>
+            <?php if (!$authModalMaintenance): ?>
+                <div class="user-stats-grid" id="userStats" style="display:none;">
+                    <div class="user-stat-card">
+                        <span><?= _h('auth.stat_files') ?></span>
+                        <strong id="statFiles">0</strong>
+                    </div>
+                    <div class="user-stat-card">
+                        <span><?= _h('auth.stat_size') ?></span>
+                        <strong id="statSize">0 MB</strong>
+                    </div>
+                    <div class="user-stat-card">
+                        <span><?= _h('auth.stat_downloads') ?></span>
+                        <strong id="statDownloads">0</strong>
+                    </div>
                 </div>
-                <div class="user-stat-card">
-                    <span><?= _h('auth.stat_size') ?></span>
-                    <strong id="statSize">0 MB</strong>
-                </div>
-                <div class="user-stat-card">
-                    <span><?= _h('auth.stat_downloads') ?></span>
-                    <strong id="statDownloads">0</strong>
-                </div>
-            </div>
+            <?php endif; ?>
 
             <div class="auth-links">
                 <?php if (basename($_SERVER['PHP_SELF']) !== 'index.php'): ?>

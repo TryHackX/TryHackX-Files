@@ -1240,6 +1240,10 @@ final class HttpApiTest extends TestCase
 			$keys[$who] = 'fh_' . bin2hex(random_bytes(24));
 			Database::createApiKey($ownerId, hash('sha256', $keys[$who]), substr($keys[$who], 0, 11), 'HTTP ' . $who . ' key');
 		}
+		self::$cookies = [];
+		$open = self::rawRequest('GET', '/?action=login')['body'];
+		$this->assertStringContainsString('data-auth-tab="register"', $open, 'outside maintenance sign-up is offered');
+		$this->assertStringContainsString('id="userStats"', $open);
 		Database::setSetting('maintenance_mode', '1');
 		self::serverSettingsChanged();
 		try {
@@ -1256,6 +1260,11 @@ final class HttpApiTest extends TestCase
 			foreach (['/assets/js/api.js', '/assets/js/auth.js', '/assets/css/base.css'] as $asset) {
 				$this->assertStringContainsString($asset, $signInPage['body']);
 			}
+			// Only signing in works now: no sign-up tab, no password recovery, and no account
+			// statistics for the dialog to fetch (each would answer 503).
+			$this->assertStringNotContainsString('data-auth-tab="register"', $signInPage['body']);
+			$this->assertStringNotContainsString('data-auth-action="recovery"', $signInPage['body']);
+			$this->assertStringNotContainsString('id="userStats"', $signInPage['body']);
 
 			foreach (['/download.php?id=doesnotexist1', '/collection.php?id=doesnotexist1', '/premium.php'] as $page) {
 				$this->assertSame(503, self::rawRequest('GET', $page)['status'], $page);

@@ -179,6 +179,7 @@ return array (
   'report.email_ph' => 'juan.perez@example.com',
   'auth.greeting' => '¡Bienvenido!',
   'auth.greeting_sub' => 'Inicia sesión para gestionar tus archivos o crea una cuenta nueva.',
+  'auth.greeting_sub_maintenance' => 'Estamos en mantenimiento. Ahora solo los administradores pueden usar el sitio.',
   'auth.tab_login' => 'Iniciar sesión',
   'auth.tab_register' => 'Registrarse',
   'auth.username' => 'Nombre de usuario',
