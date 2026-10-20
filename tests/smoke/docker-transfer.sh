@@ -236,6 +236,43 @@ fi
 cmp "${gzip_payload}" "${gzip_download}" \
   || fail "a text download offered gzip" "the downloaded bytes differ from the upload"
 
+# Only the upload server limits uploads. A declared size above Apache's 1 GiB default body
+# limit must reach it and be refused with its own JSON 413 (this stack allows 32 MB a file).
+oversize="$(python3 -c '
+import json, socket, sys, urllib.parse
+base = urllib.parse.urlsplit(sys.argv[1])
+sock = socket.create_connection((base.hostname, base.port or 80), timeout=20)
+sock.sendall((
+    "POST " + base.path.rstrip("/") + "/api/upload HTTP/1.1\r\nHost: " + base.netloc + "\r\n"
+    "X-Filename: oversize.bin\r\nX-Upload-Token: " + sys.argv[2] + "\r\n"
+    "Content-Type: application/octet-stream\r\nContent-Length: 1100000000\r\n"
+    "Expect: 100-continue\r\n\r\n").encode())
+data = b""
+while True:
+    head, sep, body = data.partition(b"\r\n\r\n")
+    if sep and head.startswith(b"HTTP/1.1 100"):
+        data = body
+        continue
+    if sep:
+        length = next((int(line.split(b":", 1)[1]) for line in head.split(b"\r\n")
+                       if line.lower().startswith(b"content-length:")), 0)
+        if len(body) >= length:
+            break
+    part = sock.recv(65536)
+    if not part:
+        break
+    data += part
+status = head.split(b" ", 2)[1].decode() if sep else "no answer"
+try:
+    detail = json.loads(body.decode())["detail"]
+except (ValueError, KeyError, TypeError):
+    detail = "not the upload server: " + body[:160].decode("latin-1")
+print(status + "|" + detail)
+' "${FILEHOST_CANONICAL_URL}" "${upload_token}")"
+expect "an upload declared over 1 GiB is judged by the upload server" "413" "${oversize%%|*}"
+[[ "${oversize#*|}" == "File too large"* ]] \
+  || fail "an upload declared over 1 GiB is judged by the upload server" "got: ${oversize#*|}"
+
 # Slow downloads make concurrency and disconnect states observable without a race against
 # the unthrottled streaming path. Five seconds is used only by this isolated stack, never as a
 # production default.

@@ -51,6 +51,17 @@ Options -Indexes -MultiViews
 	RewriteRule ^ads\.txt$ adstxt.php [L]
 </IfModule>
 
+# Only the Python upload server limits uploads: it enforces the per-file limit of the
+# uploader's group and the system-wide limit, and answers an oversized Content-Length with its
+# own 413. Apache 2.4 does not apply LimitRequestBody to the bodies it proxies with [P]
+# (checked on 2.4.65), so this states the rule rather than changing it: should a build or a
+# later version apply its 1 GiB default (2.4.54+) or a server-wide limit to these two routes,
+# uploads above it would fail with Apache's HTML 413 before the upload server saw them.
+# "0" = no limit; every other request keeps Apache's default.
+<If "%{REQUEST_URI} =~ m#/api/(?:upload|sharex)(?:/|$)#">
+	LimitRequestBody 0
+</If>
+
 <IfModule mod_headers.c>
 	Header always set X-Content-Type-Options "nosniff"
 	Header always set X-Frame-Options "SAMEORIGIN"

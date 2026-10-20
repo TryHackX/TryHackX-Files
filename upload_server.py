@@ -3128,8 +3128,8 @@ async def qr_code_post(request: Request):
 async def read_bounded_body(request: Request, limit: int) -> bytes:
     """Read a small request body, refusing anything larger before it is buffered.
 
-    Starlette's request.body()/json() keep every chunk in memory with no ceiling, and the
-    only limit in front of this public route is Apache's LimitRequestBody (1 GiB by default).
+    Starlette's request.body()/json() keep every chunk in memory with no ceiling, and Apache
+    applies no body limit to the requests it proxies here, so this is the only one.
     """
     declared = request.headers.get("content-length")
     if declared is not None:
