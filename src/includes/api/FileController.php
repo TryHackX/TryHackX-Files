@@ -323,7 +323,8 @@ final class FileController
 	// Embed / hotlink endpoint: serves an image inline (so `<img src>` renders) but,
 	// unlike `preview`, DOES count as a download. Used by the download page's embed codes,
 	// so views from other sites where the image is embedded increment the counter, while the
-	// on-page preview (action=preview) does not. Only for public (non-protected) images.
+	// on-page preview (action=preview) does not. Only for public (non-protected) images whose
+	// link is neither one-time nor download-capped.
 	public static function handleEmbed()
 	{
 		$id = $_GET['id'] ?? '';
@@ -348,6 +349,15 @@ final class FileController
 			header('Content-Type: application/json');
 			header('Cache-Control: no-store');
 			echo json_encode(['success' => false, 'error' => __('api.embed_unsupported')]);
+			return;
+		}
+		// One-time and download-capped links are delivered only through the upload server,
+		// which keeps their counts exact (see FileManager::authorizeFileRead).
+		if (FileManager::isCountLimited(Database::getFileSharingState($id))) {
+			http_response_code(403);
+			header('Content-Type: application/json');
+			header('Cache-Control: no-store');
+			echo json_encode(['success' => false, 'error' => __('api.embed_limited')]);
 			return;
 		}
 

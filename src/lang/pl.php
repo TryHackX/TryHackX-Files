@@ -464,6 +464,7 @@ return [
 	'api.preview_unsupported' => 'Ten typ pliku nie może być bezpiecznie wyświetlony w podglądzie.',
 	'api.preview_withheld' => 'Pełny podgląd tego pliku jest niedostępny. Pobierz go.',
 	'api.embed_unsupported' => 'Osadzanie jest dostępne tylko dla bezpiecznych obrazów rastrowych.',
+	'api.embed_limited' => 'Linków jednorazowych i z limitem pobrań nie można osadzać.',
 	'api.one_time_used' => 'Ten link jednorazowy został już wykorzystany.',
 	'api.save_failed' => 'Nie udało się zapisać (brak pliku lub brak uprawnień)',
 	'api.no_files_selected' => 'Nie wybrano plików',

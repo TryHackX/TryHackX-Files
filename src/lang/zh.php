@@ -436,6 +436,7 @@ return array (
   'api.preview_unsupported' => '此文件类型无法安全预览。',
   'api.preview_withheld' => '此文件无法完整预览，请直接下载。',
   'api.embed_unsupported' => '仅支持安全的光栅图像格式进行嵌入。',
+  'api.embed_limited' => '一次性链接和有下载次数限制的链接无法嵌入。',
   'api.one_time_used' => '该一次性链接已被使用。',
   'api.save_failed' => '无法保存（文件不存在或没有权限）',
   'api.no_files_selected' => '未选择任何文件',

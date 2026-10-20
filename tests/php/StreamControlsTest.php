@@ -23,6 +23,8 @@ final class StreamControlsTest extends RepoTestCase
 		$this->truncate('active_downloads', 'files', 'transfer_quota_usage');
 		Database::setSetting('php_stream_max_per_ip', '2');
 		Database::setSetting('php_stream_max_global', '4');
+		Database::setSetting('php_small_stream_max_per_ip', '6');
+		Database::setSetting('php_small_stream_max_global', '8');
 		$guest = GroupRepository::getBySlug('guest');
 		if ($guest) {
 			Database::getInstance()->prepare(
@@ -69,6 +71,34 @@ final class StreamControlsTest extends RepoTestCase
 		)->fetchColumn(), 'a preview slot is not a row the upload server would count as a download');
 	}
 
+	/**
+	 * Small answers (an image, a text file) hold a worker too: they take a slot in their own,
+	 * larger pool, counted per network so the addresses of one IPv6 /64 share one allowance.
+	 */
+	public function testSmallAnswersTakeSlotsOfTheirOwnPoolPerNetwork(): void
+	{
+		Database::setSetting('php_small_stream_max_per_ip', '1');
+		Database::setSetting('php_small_stream_max_global', '2');
+		Database::invalidateSettingsCache();
+
+		[$held, $slot] = $this->asWorker(fn() => FileManager::acquireStreamSlot('2001:db8:5:6::1', true));
+		$this->assertTrue($slot['ok']);
+		[, $sameNetwork] = $this->asWorker(fn() => FileManager::acquireStreamSlot('2001:db8:5:6:ffff::2', true));
+		$this->assertFalse($sameNetwork['ok'], 'another address of the same /64');
+		$this->assertSame(429, $sameNetwork['status']);
+
+		[$large, $largeSlot] = $this->asWorker(fn() => FileManager::acquireStreamSlot('2001:db8:5:6::1'));
+		$this->assertTrue($largeSlot['ok'], 'long streams have a pool of their own');
+
+		[$other, $otherNetwork] = $this->asWorker(fn() => FileManager::acquireStreamSlot('2001:db8:5:7::1', true));
+		$this->assertTrue($otherNetwork['ok']);
+		[, $full] = $this->asWorker(fn() => FileManager::acquireStreamSlot('198.51.100.40', true));
+		$this->assertFalse($full['ok'], 'site-wide cap of the small pool');
+		$this->assertNotNull($held);
+		$this->assertNotNull($large);
+		$this->assertNotNull($other);
+	}
+
 	public function testKillIsReportedOnlyWhenSomethingWasStoppedAndTheStreamNotices(): void
 	{
 		$id = (int) Database::addActiveDownload('198.51.100.4', 'f1');
@@ -99,6 +129,32 @@ final class StreamControlsTest extends RepoTestCase
 		fclose($handle);
 	}
 
+	/** The transfer allowance is asked before every chunk; a refusal ends the stream there. */
+	public function testPumpStopsWhenTheAllowanceRefusesTheNextChunk(): void
+	{
+		$handle = fopen('php://memory', 'w+b');
+		fwrite($handle, str_repeat('y', 200000));
+		rewind($handle);
+		$asked = [];
+		ob_start();
+		$sent = FileManager::pumpBytes(
+			$handle,
+			200000,
+			0,
+			null,
+			microtime(true) + 30,
+			static function (int $sent, int $next) use (&$asked): bool {
+				$asked[] = [$sent, $next];
+				return $sent + $next <= 131072;
+			}
+		);
+		$body = (string) ob_get_clean();
+		fclose($handle);
+		$this->assertSame(131072, $sent);
+		$this->assertSame(131072, strlen($body));
+		$this->assertSame([[0, 65536], [65536, 65536], [131072, 65536]], $asked);
+	}
+
 	public function testPreviewIsWithheldWhereCountingMatters(): void
 	{
 		$this->insertFile('plain1', null, ['size' => 10]);
@@ -110,6 +166,11 @@ final class StreamControlsTest extends RepoTestCase
 		$this->assertSame('one_time', FileManager::previewPolicy($file('once1'), null, '198.51.100.5')['reason']);
 		$this->assertSame('download_cap', FileManager::previewPolicy($file('capped1'), null, '198.51.100.5')['reason']);
 		$this->assertSame(403, FileManager::authorizeFileRead('once1', 'preview')['status']);
+		// Only the upload server keeps a one-time claim or a cap exact: no embeds of either.
+		$this->assertSame(403, FileManager::authorizeFileRead('once1', 'embed')['status']);
+		$this->assertSame(403, FileManager::authorizeFileRead('capped1', 'embed')['status']);
+		$this->assertTrue(FileManager::authorizeFileRead('plain1', 'embed')['allowed']);
+		$this->assertNull(Database::getFileSharingState('once1')['consumed_at'], 'a refused embed burns nothing');
 
 		// A guest whose transfer allowance cannot cover the file.
 		$guest = GroupRepository::getBySlug('guest');

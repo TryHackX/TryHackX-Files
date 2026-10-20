@@ -462,6 +462,7 @@ return [
 	'api.preview_unsupported' => 'This file type cannot be displayed safely in a preview.',
 	'api.preview_withheld' => 'A full preview of this file is not available. Download it instead.',
 	'api.embed_unsupported' => 'Embedding is available only for safe raster image formats.',
+	'api.embed_limited' => 'One-time and download-limited links cannot be embedded.',
 	'api.one_time_used' => 'This one-time link has already been used.',
 	'api.save_failed' => 'Could not save (file missing or no permission)',
 	'api.no_files_selected' => 'No files selected',

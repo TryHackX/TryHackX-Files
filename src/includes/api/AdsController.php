@@ -625,11 +625,25 @@ final class AdsController
 			http_response_code(404);
 			exit;
 		}
+		$size = (int) filesize($file);
+		// Bytes served by PHP hold a worker until the client has read them, so a banner takes a
+		// stream slot like a preview or an embed does (FileManager::streamLimits).
+		$slot = FileManager::acquireStreamSlot(getClientIP(), $size <= FileManager::SMALL_STREAM_BYTES);
+		if (!$slot['ok']) {
+			http_response_code($slot['status']);
+			header('Retry-After: 2');
+			header('Cache-Control: no-store');
+			exit;
+		}
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			session_write_close();
+		}
 		header('Content-Type: ' . ($ad['image_mime'] ?: 'application/octet-stream'));
-		header('Content-Length: ' . filesize($file));
+		header('Content-Length: ' . $size);
 		header('Cache-Control: ' . ($isPublic ? 'public, max-age=86400, immutable' : 'private, no-store'));
 		header('X-Content-Type-Options: nosniff');
 		readfile($file);
+		FileManager::releaseStreamSlot($slot['locks']);
 		exit;
 	}
 

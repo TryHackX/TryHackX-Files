@@ -436,6 +436,7 @@ return array (
   'api.preview_unsupported' => 'Este tipo de archivo no se puede mostrar de forma segura en la vista previa.',
   'api.preview_withheld' => 'La vista previa completa de este archivo no está disponible. Descárgalo.',
   'api.embed_unsupported' => 'La inserción solo está disponible para formatos de imagen ráster seguros.',
+  'api.embed_limited' => 'Los enlaces de un solo uso y los que tienen un límite de descargas no se pueden insertar.',
   'api.one_time_used' => 'Este enlace de un solo uso ya se ha utilizado.',
   'api.save_failed' => 'No se pudo guardar (archivo inexistente o sin permisos)',
   'api.no_files_selected' => 'No hay archivos seleccionados',

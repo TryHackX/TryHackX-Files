@@ -36,6 +36,7 @@ final class DomainHttpTest extends TestCase
 		Database::setSetting('recaptcha_enabled', '0');
 		Database::setSetting('ads_enabled', '1');
 		Database::setSetting('ads_zones_disabled', '');
+		Database::setSetting('concurrent_downloads_guest', '1');
 
 		Database::registerUser('httpowner', 'httpowner@example.pl', 'HttpOwner1!');
 		Database::registerUser('httpmod', 'httpmod@example.pl', 'HttpMod1!x');
@@ -64,6 +65,8 @@ final class DomainHttpTest extends TestCase
 		self::$ids['locked3'] = self::storeFile('locked3.png', 'image/png', 'locked3-bytes', [
 			'password_hash' => password_hash('third-password', PASSWORD_DEFAULT),
 		]);
+		self::$ids['capped'] = self::storeFile('capped.png', 'image/png', 'capped-bytes', ['max_downloads' => 5]);
+		self::$ids['quota'] = self::storeFile('quota.txt', 'text/plain', str_repeat('q', 600000));
 		Database::createAdmin('httpboss', 'HttpBoss1!x', 'httpboss@example.pl');
 		$pdo->exec("UPDATE `" . Database::table('users') . "` SET `is_active` = 1");
 		self::$ids['collection'] = 'c' . bin2hex(random_bytes(6));
@@ -456,5 +459,97 @@ final class DomainHttpTest extends TestCase
 			"SELECT `additional_info` FROM `" . Database::table('reports') . "` ORDER BY `id` DESC LIMIT 1"
 		)->fetchColumn();
 		$this->assertSame(ReportController::INFO_MAX, mb_strlen($info));
+	}
+
+	/** C-F16: one-time and capped links are not served as embeds, and nothing is burned. */
+	public function testOneTimeAndCappedLinksCannotBeEmbedded(): void
+	{
+		foreach (['once', 'capped'] as $key) {
+			$res = self::json('GET', '/api.php?action=embed&id=' . self::$ids[$key], null, '203.0.113.135');
+			$this->assertSame(403, $res['status'], $key);
+			$this->assertFalse($res['success'] ?? true, $key);
+		}
+		$state = Database::getFileSharingState(self::$ids['once']);
+		$this->assertNull($state['consumed_at']);
+		$this->assertSame(0, (int) Database::getFileSharingState(self::$ids['capped'])['downloads']);
+	}
+
+	/**
+	 * C-F17: a guest's browser fetching a picture while something else of theirs is still
+	 * running is not refused by the concurrent-download limit of 1 — small answers have a slot
+	 * pool of their own instead.
+	 */
+	public function testSmallEmbedsAreNotRefusedByTheConcurrentDownloadLimit(): void
+	{
+		$ip = '203.0.113.140';
+		$active = (int) Database::addActiveDownload($ip, self::$ids['big']);
+		try {
+			$res = self::request('GET', '/api.php?action=embed&id=' . self::$ids['plain'], null, ['X-Forwarded-For: ' . $ip]);
+			$this->assertSame(200, $res['status']);
+			$this->assertSame('plain-bytes', $res['body']);
+		} finally {
+			Database::removeActiveDownload($active);
+		}
+	}
+
+	/**
+	 * C-F7: small answers take a stream slot too. With every small slot of a network held by
+	 * other workers, the next small preview from that network is refused instead of pinning
+	 * yet another PHP worker.
+	 */
+	public function testSmallPreviewsAreCountedAgainstTheNetworkCap(): void
+	{
+		$ip = '2001:db8:66:1::1';
+		$held = [];
+		$limit = FileManager::streamLimits()['smallPerIp'];
+		for ($i = 0; $i < $limit; $i++) {
+			Database::resetInstance();
+			$held[] = Database::getInstance();
+			$this->assertTrue(FileManager::acquireStreamSlot('2001:db8:66:1::' . dechex($i + 10), true)['ok']);
+		}
+		Database::resetInstance();
+		try {
+			$refused = self::request('GET', '/api.php?action=preview&id=' . self::$ids['plain'], null, ['X-Forwarded-For: ' . $ip]);
+			$this->assertSame(429, $refused['status']);
+		} finally {
+			$held = [];
+			Database::resetInstance();
+		}
+		$served = self::request('GET', '/api.php?action=preview&id=' . self::$ids['plain'], null, ['X-Forwarded-For: ' . $ip]);
+		$this->assertSame(200, $served['status'], 'the slots come back with their workers');
+		$this->assertSame([], $held);
+	}
+
+	/**
+	 * C-F6: the bytes a preview sends are charged to the transfer allowance, so previews are no
+	 * way round it: the second preview of a file larger than half the allowance is withheld.
+	 */
+	public function testPreviewsAreChargedToTheTransferAllowance(): void
+	{
+		$guest = GroupRepository::getBySlug('guest');
+		$this->assertNotNull($guest);
+		$pdo = Database::getInstance();
+		$setQuota = $pdo->prepare(
+			"UPDATE `" . Database::table('groups') . "` SET `transfer_quota_bytes` = ?, `transfer_quota_period` = 'day' WHERE `id` = ?"
+		);
+		$setQuota->execute([1000000, (int) $guest['id']]);
+		$ip = '203.0.113.150';
+		try {
+			$first = self::request('GET', '/api.php?action=preview&id=' . self::$ids['quota'], null, ['X-Forwarded-For: ' . $ip]);
+			$this->assertSame(200, $first['status']);
+			$this->assertSame(600000, strlen($first['body']));
+			$used = $pdo->prepare(
+				"SELECT `used_bytes`, `reserved_bytes` FROM `" . Database::table('transfer_quota_usage') . "`
+				 WHERE `subject_type` = 'ip' AND `subject_key` = ?"
+			);
+			$used->execute([$ip]);
+			$this->assertSame(['used_bytes' => 600000, 'reserved_bytes' => 0], array_map('intval', $used->fetch(PDO::FETCH_ASSOC) ?: []));
+
+			$second = self::json('GET', '/api.php?action=preview&id=' . self::$ids['quota'], null, $ip);
+			$this->assertSame(403, $second['status']);
+			$this->assertSame('transfer_quota', $second['preview_withheld'] ?? null);
+		} finally {
+			$setQuota->execute([0, (int) $guest['id']]);
+		}
 	}
 }
