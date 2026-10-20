@@ -738,6 +738,32 @@ final class DomainHttpTest extends TestCase
 	}
 
 	/**
+	 * C-F14: right after signing in (a password typed moments ago) a key and a webhook are
+	 * created as before, and the owner is told about each — a planted one does not go unseen.
+	 */
+	public function testANewKeyOrWebhookIsAnnouncedToTheOwner(): void
+	{
+		self::freshSession();
+		$ip = '203.0.113.173';
+		$login = self::json('POST', '/api.php?action=user_login', ['username' => 'httpowner', 'password' => 'HttpOwner1!'], $ip);
+		$this->assertTrue($login['success'] ?? false, json_encode($login));
+		$owner = (int) Database::getUserByEmailOrUsername('httpowner')['id'];
+		$notices = Database::getInstance()->prepare(
+			"SELECT `subject` FROM `" . Database::table('notifications') . "` WHERE `user_id` = ? AND `type` = ?"
+		);
+
+		$key = self::json('POST', '/api.php?action=user_create_api_key', ['label' => 'Laptop'], $ip);
+		$this->assertTrue($key['success'] ?? false, json_encode($key));
+		$notices->execute([$owner, 'security.api_key']);
+		$this->assertSame(['Laptop'], $notices->fetchAll(PDO::FETCH_COLUMN));
+
+		$hook = self::json('POST', '/api.php?action=user_create_webhook', ['url' => 'https://1.1.1.1/hook', 'events' => ['upload']], $ip);
+		$this->assertTrue($hook['success'] ?? false, json_encode($hook));
+		$notices->execute([$owner, 'security.webhook']);
+		$this->assertSame(['1.1.1.1'], $notices->fetchAll(PDO::FETCH_COLUMN));
+	}
+
+	/**
 	 * C-F26: a plan an administrator granted or revoked is a ledger line, not a sale; it printed
 	 * a numbered receipt for "0,00 PLN, paid via ADMIN". A real purchase still prints.
 	 */

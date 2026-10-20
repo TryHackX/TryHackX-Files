@@ -81,6 +81,21 @@ final class WebhookRepository
 	}
 
 	/**
+	 * Remove every webhook of an account with its pending deliveries, inside the caller's
+	 * transaction. A password change does this: a webhook is standing access to the account's
+	 * upload events, and one planted from a hijacked session must not outlive the new password
+	 * (API keys are revoked for the same reason).
+	 */
+	public static function removeAllForUserInTransaction(PDO $pdo, int $userId): void
+	{
+		$table = Database::table('webhooks');
+		$pdo->prepare("DELETE FROM `" . Database::table('webhook_deliveries') . "`
+			WHERE `webhook_id` IN (SELECT `id` FROM `{$table}` WHERE `user_id` = ?)")
+			->execute([$userId]);
+		$pdo->prepare("DELETE FROM `{$table}` WHERE `user_id` = ?")->execute([$userId]);
+	}
+
+	/**
 	 * Enqueue a delivery for every active webhook of $userId subscribed to $event.
 	 * Cheap and non-blocking (one indexed lookup + inserts); the worker does the POSTs.
 	 * Returns the number of deliveries queued.

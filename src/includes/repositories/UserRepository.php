@@ -327,6 +327,8 @@ final class UserRepository
 
 	/**
 	 * Replace a password and revoke every active credential inside the caller's transaction.
+	 * The account's webhooks go too: like an API key they keep reporting the account's uploads
+	 * to whoever added them, and a password change is how an owner ends a hijack.
 	 */
 	public static function replacePasswordHashInTransaction(
 		PDO $pdo,
@@ -336,8 +338,11 @@ final class UserRepository
 		$table = Database::table('users');
 		$stmt = $pdo->prepare("UPDATE `{$table}` SET `password_hash` = ? WHERE `id` = ?");
 		$stmt->execute([$passwordHash, $userId]);
-		return $stmt->rowCount() === 1
-			&& self::invalidateAccessInTransaction($pdo, $userId);
+		if ($stmt->rowCount() !== 1 || !self::invalidateAccessInTransaction($pdo, $userId)) {
+			return false;
+		}
+		WebhookRepository::removeAllForUserInTransaction($pdo, $userId);
+		return true;
 	}
 
 	/** Start an email change: enforce uniqueness + a 2-week cooldown, then mail a confirm link. */
@@ -1554,6 +1559,10 @@ final class UserRepository
 			if ($securityChange && !self::invalidateAccessInTransaction($pdo, $id)) {
 				$pdo->rollBack();
 				return ['success' => false, 'error' => __('api.revoke_access_failed')];
+			}
+			if ($passwordReset) {
+				// As with the owner's own change (replacePasswordHashInTransaction).
+				WebhookRepository::removeAllForUserInTransaction($pdo, $id);
 			}
 			$pdo->commit();
 			if ($passwordReset && $actorId !== $id) {

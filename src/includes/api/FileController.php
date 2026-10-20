@@ -2238,6 +2238,11 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
 			return;
 		}
+		// A key uploads and deletes as the account without a session, so a session restored
+		// from a stolen cookie must not mint one: the password has to have been typed recently.
+		if (!requireRecentAuthentication()) {
+			return;
+		}
 
 		$maxKeys = 10; // per-user cap on active API keys
 		$userId = (int) $_SESSION['user_id'];
@@ -2262,6 +2267,11 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.key_failed')]);
 			return;
 		}
+		Notifications::send($userId, 'security.api_key', [
+			'subject' => $label !== '' ? $label : $prefix,
+			'data' => ['ip' => getClientIP()],
+			'link' => APP_URL . '/panel.php?tab=myfiles',
+		]);
 
 		echo json_encode([
 			'success' => true,
@@ -2325,6 +2335,12 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.not_logged_in')]);
 			return;
 		}
+		// A webhook reports every new upload of the account to its URL — a quiet way to follow
+		// someone's files from a hijacked session — so it needs a recently typed password, and
+		// the owner hears about each one.
+		if (!requireRecentAuthentication()) {
+			return;
+		}
 
 		$maxWebhooks = 10; // per-user cap
 		$allowedEvents = webhookAllowedEvents();
@@ -2360,6 +2376,11 @@ final class FileController
 			echo json_encode(['success' => false, 'error' => __('api.webhook_failed')]);
 			return;
 		}
+		Notifications::send($userId, 'security.webhook', [
+			'subject' => (string) (parse_url($url, PHP_URL_HOST) ?: $url),
+			'data' => ['ip' => getClientIP()],
+			'link' => APP_URL . '/panel.php?tab=myfiles',
+		]);
 
 		echo json_encode([
 			'success' => true,

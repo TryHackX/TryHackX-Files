@@ -54,6 +54,10 @@ final class Notifications
 		'payment.stuck'        => ['icon' => 'fa-triangle-exclamation', 'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true,  'staff' => true],
 		'security.password'    => ['icon' => 'fa-key',                  'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
 		'security.email'       => ['icon' => 'fa-envelope',             'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
+		// Standing access added to the account: an API key uploads as it, a webhook hears
+		// about every upload. Announced like a password change, so a planted one is noticed.
+		'security.api_key'     => ['icon' => 'fa-key',                  'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
+		'security.webhook'     => ['icon' => 'fa-satellite-dish',       'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
 		'report.new'           => ['icon' => 'fa-flag',                 'stacks' => true,  'mailable' => false, 'app' => true,  'mail' => false, 'staff' => true],
 		'system.announcement'  => ['icon' => 'fa-bullhorn',             'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => false],
 		// Advertising (Faza 8): a paid placement moving through its lifecycle. `ad.submitted`
