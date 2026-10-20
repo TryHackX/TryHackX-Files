@@ -58,19 +58,6 @@ validated JSON and will not gain an in-panel editor.
 
 ## Audit addendum — open items only
 
-### ⛔ AUD-OPEN-02 — first real Docker end-to-end run
-
-The `docker-smoke` job statically exists and covers a clean schema, Apache and `/ready`,
-database/storage integrity, upload/download, forwarded client IP, concurrent-download caps,
-aborted full and Range responses, process termination, lease recovery and an idempotent reaper.
-
-Docker is intentionally unavailable on the owner's Windows machine. No local Docker installation
-is requested, so image construction, volume permissions and the full container transfer path
-remain externally unverified.
-
-Close this item by running `docker-smoke` in GitHub Actions or on an isolated Docker host twice
-without weakening its assertions, then record the result in [DOCKER.md](DOCKER.md).
-
 ### Future scaling decisions
 
 Infrastructure scaling is not an open task for this release. Add Redis, additional workers or a

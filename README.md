@@ -48,7 +48,8 @@ into memory.
 - advertising zones, review queue, packages, statistics and image previews;
 - administration broadcast messages through in-app, standard HTML e-mail or sanitized custom HTML;
 - fail-closed English web installer;
-- Windows launchers, native Debian systemd services and an unverified Docker Compose option.
+- Windows launchers, native Debian systemd services and a Docker Compose option that CI installs
+  and exercises end to end.
 
 ## Architecture
 
@@ -186,16 +187,28 @@ or throughput improvement is expected to be small and should be measured.
 
 ### Other environment variables
 
-Operating-system environment variables, set in `/etc/default/filehost` on Debian, in
-`scripts\filehost-env.bat` on Windows or in `.env` for Docker:
+Operating-system environment variables. Where to set them depends on who reads them:
 
-| Variable | Default | Effect |
-|---|---|---|
-| `FILEHOST_DB_POOL_MAX` | `20` | Size of the upload server's database connection pool (5-100). |
-| `FILEHOST_THUMB_WORKERS`, `FILEHOST_THUMB_MAX_INPUT_BYTES`, `FILEHOST_THUMB_MAX_SOURCE_PIXELS` | see `.env.example` | Caps for the thumbnail workers that parse untrusted media. |
-| `FILEHOST_DOWNLOAD_LEASE_SECONDS` | `120` | Lease for interrupted-download recovery (5-600). |
-| `APP_ENV` / `FILEHOST_ENV` | `production` | Only `dev`, `development`, `local` or `test` allow the file fallback `data/.appkey` for `APP_SECRET_KEY`; keep the default on a real installation and supply the key explicitly. |
-| `FILEHOST_SERVICE_USER`, `FILEHOST_SERVICE_GROUP` | `www-data` | Account the Debian installer gives the systemd services (see [docs/DEBIAN.md](docs/DEBIAN.md)). |
+- on Debian, `/etc/default/filehost` reaches the two systemd services (the upload server, with the
+  cleanup it may run, and the mail worker); web PHP gets its environment from the Apache service
+  or, with PHP-FPM, from `env[...]` lines in the site's pool;
+- on Windows, `scripts\filehost-env.bat` reaches the two launchers, not WampServer's Apache;
+- in Docker, `.env` only fills in `docker-compose.yml`, which passes every variable below to the
+  whole container.
+
+| Variable | Default | Read by | Effect |
+|---|---|---|---|
+| `FILEHOST_DB_POOL_MAX` | `20` | upload server | Size of its database connection pool (5-100). |
+| `FILEHOST_DB_ACQUIRE_TIMEOUT` | `10` | upload server | Seconds a request waits for a free pooled connection before it is answered with 503 (1-120). |
+| `FILEHOST_IO_THREADS` | `64` | upload server | Threads for the file I/O of all transfers (8-256). |
+| `FILEHOST_THUMB_WORKERS`, `FILEHOST_THUMB_MAX_INPUT_BYTES`, `FILEHOST_THUMB_MAX_SOURCE_PIXELS` | see `.env.example` | upload server | Caps for the thumbnail workers that parse untrusted media. |
+| `FILEHOST_DOWNLOAD_LEASE_SECONDS` | `120` | upload server | Lease for interrupted-download recovery (5-600). |
+| `APP_ENV` / `FILEHOST_ENV` | `production` | PHP, web and CLI | Only `dev`, `development`, `local` or `test` allow the file fallback `data/.appkey` for `APP_SECRET_KEY`; keep the default on a real installation and supply the key explicitly. Set it for web PHP as well as for the services, or the two disagree about the key. |
+
+`FILEHOST_SERVICE_USER`, `FILEHOST_SERVICE_GROUP`, `FILEHOST_PHP_SAPI`, `FILEHOST_INSTALL_DB`,
+`FILEHOST_UNITS_ONLY` and `FILEHOST_CHANGE_ACCOUNT` are switches of the Debian installer, given on
+its command line (`sudo FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh`); in
+`/etc/default/filehost` they do nothing. See [docs/DEBIAN.md](docs/DEBIAN.md).
 
 ### E-mail outbox worker
 

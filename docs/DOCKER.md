@@ -1,11 +1,14 @@
 # TryHackX Files with Docker Compose
 
-> **Status: statically reviewed, not executed on the owner's machine.** Docker is intentionally
-> not installed on the Windows development host. The configuration and CI smoke test are present,
-> but the first real green container run remains an external validation item in
-> [ROADMAP.md](ROADMAP.md).
+> **Status: tested end to end in CI.** The `docker-smoke` job of
+> [the CI workflow](../.github/workflows/ci.yml) builds the image from scratch for every pull
+> request and every push to `main`, installs a fresh schema on empty volumes and runs uploads and
+> downloads through Apache, interrupted full and Range transfers, a killed upload server, lease
+> recovery and the integrity reports. A release is tagged only after it passes. The job runs on
+> x86-64 Linux, so treat the first start on another architecture, or on volumes from an older
+> release, as a deployment test.
 
-Static review confirms:
+The image and Compose model:
 
 - Apache serves only `/app/public`;
 - `.dockerignore` excludes host runtime data, configuration, secrets, Git and virtual
@@ -14,12 +17,7 @@ Static review confirms:
 - Supervisor runs Apache, upload server, mail worker and cleanup as appropriate;
 - configuration-dependent workers wait for web installation instead of restart-looping;
 - Python and cleanup run as `www-data`;
-- PHP/Python runtime dependencies are pinned or explicitly installed;
-- CI contains a clean-install transfer smoke path, including aborted transfers and lease recovery.
-
-Static inspection cannot prove package availability for a target architecture, first-start
-volume ownership, database readiness or real transfer behavior. Treat the first Compose launch
-as a deployment test.
+- PHP/Python runtime dependencies are pinned or explicitly installed.
 
 ## Services
 
