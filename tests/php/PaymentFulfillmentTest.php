@@ -149,7 +149,8 @@ final class PaymentFulfillmentTest extends RepoTestCase
 		$this->assertSame(PaymentRepository::NEW, $row['status']);
 		$this->assertNull($row['granted_at']);
 		$this->assertSame(0, (int) $row['fulfillment_attempts']);
-		$this->assertSame('amount_or_currency_mismatch', $row['fulfillment_last_error']);
+		// Parked for an operator: no later poll changes what the provider says was paid.
+		$this->assertSame('permanent:amount_or_currency_mismatch', $row['fulfillment_last_error']);
 		$this->assertSame($before['group_id'], $after['group_id']);
 		$this->assertSame($before['group_expires_at'], $after['group_expires_at']);
 	}

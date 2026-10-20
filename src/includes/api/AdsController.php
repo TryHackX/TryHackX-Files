@@ -49,6 +49,9 @@ final class AdsController
 		'ads_review_comp_days' => '3',
 	];
 
+	/** How long a started ad checkout blocks another one for the same ad, in seconds. */
+	private const OPEN_ORDER_HOLD = 900;
+
 	/** How long one session's view/click of one ad counts once, in seconds. */
 	private const IMPRESSION_TTL = 1800;
 	private const CLICK_TTL = 60;
@@ -906,7 +909,7 @@ final class AdsController
 		$grace = max(0, (int) Database::getSetting('ads_grace_days', 14));
 		$ads = array_map(function ($ad) use ($now, $grace) {
 			$addonPrices = json_decode((string) ($ad['addon_zones'] ?? ''), true) ?: [];
-			$children = array_map(function ($c) {
+			$children = array_map(function ($c) use ($ad) {
 				[$w, $h] = AdRenderer::zoneDims((string) $c['zone']);
 				return [
 					'id' => (int) $c['id'],
@@ -916,6 +919,10 @@ final class AdsController
 					'hasOwnBanner' => !empty($c['image_path']),
 					'imageUrl' => !empty($c['image_path'])
 						? APP_URL . '/api.php?action=ad_banner&id=' . (int) $c['id'] : '',
+					// A renewal prices and renews only these (AdRepository::priceCheckout):
+					// a draft placement still needs its top-up, a rejected one is not renewed.
+					'status' => (string) $c['status'],
+					'renewable' => AdRepository::renewableWith($c, (string) $ad['status']),
 				];
 			}, $ad['children'] ?? []);
 			return [
@@ -1169,15 +1176,22 @@ final class AdsController
 				));
 			}
 			// The price is the base plus each KEPT add-on zone's surcharge — priced from the
-			// package's CURRENT config, whether this is the first purchase or a renewal.
+			// package's CURRENT config, whether this is the first purchase or a renewal. Either
+			// way the order records the placements it paid for, and fulfilment touches only those.
 			$priced = AdRepository::priceCheckout((int) $ad['id'], $package, false, $dropIds);
 			$amount = $priced['amount'];
-			if (!$renewal) {
-				$paidChildren = $priced['children'];
-			}
+			$paidChildren = $priced['children'];
 		}
 		if ($amount <= 0) {
 			self::bounce($back, 'amount');
+		}
+		// One order at a time per ad: a second one paid for the same draft, renewal or top-up
+		// cannot be delivered (the first moves the ad on) and would only wait for a refund. A
+		// double click or a second tab is refused; once the hold has passed a new attempt may
+		// start (the provider's page offers its own retry meanwhile), and should both still get
+		// paid, the later one is parked for an operator to refund.
+		if (PaymentRepository::openOrderForAd((int) $ad['id'], self::OPEN_ORDER_HOLD) !== null) {
+			self::bounce($back, 'open_order');
 		}
 		$provider = PaymentPlugins::builtinProvider();
 		if (($provider === 'przelewy24' && !P24::isConfigured())

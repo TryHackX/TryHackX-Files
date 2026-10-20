@@ -161,14 +161,16 @@ final class PaymentReconciler
 		$orderId = (int) ($order['orderId'] ?? 0);
 		$amount = (int) ($order['amount'] ?? 0);
 		$currency = strtoupper((string) ($order['currency'] ?? ''));
+		// A paid transaction that does not match the order is not something a later poll can
+		// change: it is parked for an operator instead of being asked about every sweep.
 		if ($orderId < 1 || $amount !== (int) $payment['amount_minor']
 			|| $currency !== strtoupper((string) $payment['currency'])) {
-			PaymentRepository::noteGrantError($extOrderId, 'p24_poll_mismatch');
+			self::parkMismatch($payment, 'p24_poll_mismatch');
 			return $status;
 		}
 		$knownOrderId = (int) ($payment['provider_order_id'] ?? 0);
 		if ($knownOrderId > 0 && $knownOrderId !== $orderId) {
-			PaymentRepository::noteGrantError($extOrderId, 'p24_order_id_mismatch');
+			self::parkMismatch($payment, 'p24_order_id_mismatch');
 			return $status;
 		}
 		if ($knownOrderId < 1) {
@@ -194,18 +196,24 @@ final class PaymentReconciler
 	{
 		$extOrderId = (string) $payment['ext_order_id'];
 
-		// Paid for one thing, charged for another: refuse rather than grant on a mismatch.
+		// Paid for one thing, charged for another: refuse rather than grant on a mismatch. No
+		// retry changes what the provider says was paid, so the order is parked for an operator
+		// (it leaves the sweep, which used to log it again every quarter hour).
 		if ($paidMinor < (int) $payment['amount_minor'] || strtoupper($currency) !== strtoupper((string) $payment['currency'])) {
-			PaymentRepository::noteGrantError($extOrderId, 'amount_or_currency_mismatch');
-			Database::logAudit(
-				'payment_amount_mismatch',
-				$extOrderId . ': got ' . $paidMinor . ' ' . $currency
-					. ', expected ' . $payment['amount_minor'] . ' ' . $payment['currency'],
-				(int) $payment['user_id']
-			);
+			$alreadyParked = self::isPermanentError($payment['fulfillment_last_error'] ?? null);
+			PaymentRepository::noteGrantError($extOrderId, self::PERMANENT . 'amount_or_currency_mismatch');
+			if (!$alreadyParked) {
+				Database::logAudit(
+					'payment_amount_mismatch',
+					$extOrderId . ': got ' . $paidMinor . ' ' . $currency
+						. ', expected ' . $payment['amount_minor'] . ' ' . $payment['currency'],
+					(int) $payment['user_id']
+				);
+			}
 			// The buyer is owed an explanation here more than anywhere else in this flow: money
 			// moved and nothing was granted, and the audit log is not somewhere they can look.
 			self::notifyFailedOnce($payment);
+			self::notifyStaffOnce($payment);
 			return false;
 		}
 
@@ -251,31 +259,34 @@ final class PaymentReconciler
 		// children go to the review queue; the live parent is untouched.
 		if (($payment['kind'] ?? '') === PaymentRepository::KIND_AD_ADDON) {
 			$adId = (int) ($payment['ad_id'] ?? 0);
+			$detail = $payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId;
 			$ok = $adId > 0 && AdRepository::markAddonsPaid($adId, self::paidAdChildren($payment));
-			Database::logAudit(
-				$ok ? 'ad_addons_paid' : 'ad_payment_orphan',
-				$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,
-				(int) $payment['user_id']
-			);
-			$ad = $ok ? AdRepository::get($adId) : null;
-			$afterCommit = null;
-			if ($ok) {
-				$afterCommit = static function () use ($payment, $ad, $extOrderId, $adId): void {
-					Notifications::send((int) $payment['user_id'], 'ad.paid', [
-						'subject' => (string) ($ad['name'] ?? $extOrderId),
-						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
-					]);
-					Notifications::sendMany(Notifications::staffIds(), 'ad.submitted', [
-						'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
-						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=moderate&mstab=ads&astab=queue',
-					]);
-				};
+			if (!$ok) {
+				return self::finishGrant(
+					$pdo, $payment, $via, $token, false,
+					self::adFailureReason($adId, 'addons', self::paidAdChildren($payment), 'ad_addons_failed'),
+					null,
+					['ad_payment_orphan', $detail]
+				);
 			}
-			return self::finishGrant($pdo, $payment, $via, $token, $ok, 'ad_addons_failed', $afterCommit);
+			Database::logAudit('ad_addons_paid', $detail, (int) $payment['user_id']);
+			$ad = AdRepository::get($adId);
+			$afterCommit = static function () use ($payment, $ad, $extOrderId, $adId): void {
+				Notifications::send((int) $payment['user_id'], 'ad.paid', [
+					'subject' => (string) ($ad['name'] ?? $extOrderId),
+					'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
+				]);
+				Notifications::sendMany(Notifications::staffIds(), 'ad.submitted', [
+					'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
+					'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=moderate&mstab=ads&astab=queue',
+				]);
+			};
+			return self::finishGrant($pdo, $payment, $via, $token, true, '', $afterCommit);
 		}
 
 		if (($payment['kind'] ?? '') === PaymentRepository::KIND_AD) {
 			$adId = (int) ($payment['ad_id'] ?? 0);
+			$detail = $payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId;
 			$package = self::snapshottedProduct($payment, 'ad_package');
 			if (!$package && !empty($payment['package_id'])) {
 				// Compatibility only for orders created before schema v43.
@@ -284,23 +295,24 @@ final class PaymentReconciler
 
 			if ($package && ($package['kind'] ?? 'placement') === 'boost') {
 				$ok = $adId > 0 && AdRepository::applyBoost($adId, $package);
-				Database::logAudit(
-					$ok ? 'ad_boost_applied' : 'ad_payment_orphan',
-					$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,
-					(int) $payment['user_id']
-				);
-				$ad = $ok ? AdRepository::get($adId) : null;
-				$afterCommit = null;
-				if ($ok) {
-					$afterCommit = static function () use ($payment, $ad, $extOrderId): void {
-						Notifications::send((int) $payment['user_id'], 'ad.boosted', [
-							'subject' => (string) ($ad['name'] ?? $extOrderId),
-							'data' => ['until' => date('d.m.Y', (int) ($ad['boost_until'] ?? time()))],
-							'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
-						]);
-					};
+				if (!$ok) {
+					return self::finishGrant(
+						$pdo, $payment, $via, $token, false,
+						self::adFailureReason($adId, 'root', null, 'ad_boost_failed'),
+						null,
+						['ad_payment_orphan', $detail]
+					);
 				}
-				return self::finishGrant($pdo, $payment, $via, $token, $ok, 'ad_boost_failed', $afterCommit);
+				Database::logAudit('ad_boost_applied', $detail, (int) $payment['user_id']);
+				$ad = AdRepository::get($adId);
+				$afterCommit = static function () use ($payment, $ad, $extOrderId): void {
+					Notifications::send((int) $payment['user_id'], 'ad.boosted', [
+						'subject' => (string) ($ad['name'] ?? $extOrderId),
+						'data' => ['until' => date('d.m.Y', (int) ($ad['boost_until'] ?? time()))],
+						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
+					]);
+				};
+				return self::finishGrant($pdo, $payment, $via, $token, true, '', $afterCommit);
 			}
 
 			// Renewal (runda 4): the ad already ran once — the same creative needs no second
@@ -319,49 +331,55 @@ final class PaymentReconciler
 						AdRepository::delete((int) $dropId);
 					}
 				}
-				$ok = AdRepository::renew($adId, $package);
-				Database::logAudit(
-					$ok ? 'ad_renewed' : 'ad_payment_orphan',
-					$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,
-					(int) $payment['user_id']
-				);
-				$fresh = $ok ? AdRepository::get($adId) : null;
-				$afterCommit = null;
-				if ($ok) {
-					$afterCommit = static function () use ($payment, $adNow, $fresh, $extOrderId): void {
-						Notifications::send((int) $payment['user_id'], 'ad.renewed', [
-							'subject' => (string) ($adNow['name'] ?? $extOrderId),
-							'data' => ['until' => date('d.m.Y', (int) ($fresh['ends_at'] ?? time()))],
-							'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
-						]);
-					};
+				// Exactly the placements the renewal was priced with (a draft or rejected one is
+				// neither charged nor renewed); null for orders that predate recording them.
+				$ok = AdRepository::renew($adId, $package, self::paidAdChildren($payment));
+				if (!$ok) {
+					return self::finishGrant(
+						$pdo, $payment, $via, $token, false,
+						self::adFailureReason($adId, 'renewable', null, 'ad_renew_failed'),
+						null,
+						['ad_payment_orphan', $detail]
+					);
 				}
-				return self::finishGrant($pdo, $payment, $via, $token, $ok, 'ad_renew_failed', $afterCommit);
+				Database::logAudit('ad_renewed', $detail, (int) $payment['user_id']);
+				$fresh = AdRepository::get($adId);
+				$afterCommit = static function () use ($payment, $adNow, $fresh, $extOrderId): void {
+					Notifications::send((int) $payment['user_id'], 'ad.renewed', [
+						'subject' => (string) ($adNow['name'] ?? $extOrderId),
+						'data' => ['until' => date('d.m.Y', (int) ($fresh['ends_at'] ?? time()))],
+						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
+					]);
+				};
+				return self::finishGrant($pdo, $payment, $via, $token, true, '', $afterCommit);
 			}
 
 			$ok = $adId > 0 && AdRepository::markPaid($adId, $package ?: [], self::paidAdChildren($payment));
-			Database::logAudit(
-				$ok ? 'ad_payment_completed' : 'ad_payment_orphan',
-				$payment['provider'] . ' (' . $via . '), ad #' . $adId . ', order ' . $extOrderId,
-				(int) $payment['user_id']
-			);
-			$afterCommit = null;
-			if ($ok) {
-				// `ad.paid`, not the plan-flavoured `payment.completed`: the buyer's next step
-				// is a review queue, not an active subscription, and the copy must say so.
-				$ad = AdRepository::get($adId);
-				$afterCommit = static function () use ($payment, $ad, $adId): void {
-					Notifications::send((int) $payment['user_id'], 'ad.paid', [
-						'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
-						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
-					]);
-					Notifications::sendMany(Notifications::staffIds(), 'ad.submitted', [
-						'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
-						'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=ads&astab=queue',
-					]);
-				};
+			if (!$ok) {
+				// A second order for a draft the first already paid, a draft deleted after its
+				// unpaid order was cancelled and then paid late: nothing left to deliver into.
+				return self::finishGrant(
+					$pdo, $payment, $via, $token, false,
+					self::adFailureReason($adId, 'draft', null, 'ad_mark_paid_failed'),
+					null,
+					['ad_payment_orphan', $detail]
+				);
 			}
-			return self::finishGrant($pdo, $payment, $via, $token, $ok, 'ad_mark_paid_failed', $afterCommit);
+			Database::logAudit('ad_payment_completed', $detail, (int) $payment['user_id']);
+			// `ad.paid`, not the plan-flavoured `payment.completed`: the buyer's next step
+			// is a review queue, not an active subscription, and the copy must say so.
+			$ad = AdRepository::get($adId);
+			$afterCommit = static function () use ($payment, $ad, $adId): void {
+				Notifications::send((int) $payment['user_id'], 'ad.paid', [
+					'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
+					'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=myads',
+				]);
+				Notifications::sendMany(Notifications::staffIds(), 'ad.submitted', [
+					'subject' => (string) ($ad['name'] ?? ('#' . $adId)),
+					'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=ads&astab=queue',
+				]);
+			};
+			return self::finishGrant($pdo, $payment, $via, $token, true, '', $afterCommit);
 		}
 
 		$plan = self::snapshottedProduct($payment, 'plan');
@@ -370,8 +388,10 @@ final class PaymentReconciler
 			$plan = PlanRepository::get((int) $payment['plan_id']);
 		}
 		if (!$plan) {
-			Database::logAudit('payment_plan_missing', $extOrderId, (int) $payment['user_id']);
-			return self::finishGrant($pdo, $payment, $via, $token, false, self::PERMANENT . 'plan_missing');
+			return self::finishGrant(
+				$pdo, $payment, $via, $token, false, self::PERMANENT . 'plan_missing', null,
+				['payment_plan_missing', $extOrderId]
+			);
 		}
 		// The group the plan sold was deleted after checkout. No retry can bring it back, so
 		// this is recorded once for an operator to settle (grant by hand or refund) instead of
@@ -379,6 +399,11 @@ final class PaymentReconciler
 		$targetGroup = !empty($plan['group_id']) ? GroupRepository::getById((int) $plan['group_id']) : null;
 		if (!$targetGroup || ($targetGroup['slug'] ?? null) === 'moderator') {
 			return self::finishGrant($pdo, $payment, $via, $token, false, self::PERMANENT . 'plan_group_missing');
+		}
+		// The buyer deleted the account with the order open (the payment row keeps no user
+		// then): there is nobody to grant the plan to, now or on any later sweep.
+		if ((int) ($payment['user_id'] ?? 0) <= 0 || !Database::getUserById((int) $payment['user_id'])) {
+			return self::finishGrant($pdo, $payment, $via, $token, false, self::PERMANENT . 'buyer_gone');
 		}
 
 			$result = PlanRepository::grant(
@@ -401,12 +426,15 @@ final class PaymentReconciler
 				$result = ['success' => false, 'error' => 'promo_reservation_failed'];
 			}
 		}
-		Database::logAudit(
-			!empty($result['success']) ? 'payment_completed' : 'payment_grant_failed',
-			$payment['provider'] . ' (' . $via . '), plan #' . $plan['id'] . ', order ' . $extOrderId
-				. (!empty($meta['promo']) ? ', code ' . $meta['promo'] : ''),
-			(int) $payment['user_id']
-		);
+		$detail = $payment['provider'] . ' (' . $via . '), plan #' . $plan['id'] . ', order ' . $extOrderId
+			. (!empty($meta['promo']) ? ', code ' . $meta['promo'] : '');
+		if (empty($result['success'])) {
+			return self::finishGrant(
+				$pdo, $payment, $via, $token, false, 'plan_grant_failed', null,
+				['payment_grant_failed', $detail]
+			);
+		}
+		Database::logAudit('payment_completed', $detail, (int) $payment['user_id']);
 
 		$afterCommit = !empty($result['success'])
 			? static function () use ($payment, $plan, $result): void {
@@ -491,6 +519,10 @@ final class PaymentReconciler
 	/**
 	 * Commit a successful product mutation together with the terminal payment state, or roll
 	 * everything back and release this worker's lease for a retry.
+	 *
+	 * @param array{0: string, 1: string}|array{} $failAudit an audit line [action, details]
+	 *        describing a failure. Written after the rollback: inside the fulfilment
+	 *        transaction it was rolled back with everything else and never seen.
 	 */
 	private static function finishGrant(
 		PDO $pdo,
@@ -499,7 +531,8 @@ final class PaymentReconciler
 		string $token,
 		bool $success,
 		string $error,
-		?callable $afterCommit = null
+		?callable $afterCommit = null,
+		array $failAudit = []
 	): bool {
 		$extOrderId = (string) $payment['ext_order_id'];
 
@@ -553,13 +586,108 @@ final class PaymentReconciler
 			return false; // stale owner: another worker now controls the retry
 		}
 
+		if (count($failAudit) === 2) {
+			Database::logAudit((string) $failAudit[0], (string) $failAudit[1], (int) $payment['user_id']);
+		}
 		Database::logAudit(
 			self::isPermanentError($error) ? 'payment_fulfillment_stuck' : 'payment_fulfillment_failed',
 			$payment['provider'] . ' (' . $via . '), order ' . $extOrderId . ', reason ' . $error,
 			(int) $payment['user_id']
 		);
 		self::notifyFailedOnce($payment);
+		if (self::isPermanentError($error)) {
+			self::notifyStaffOnce($payment);
+		}
 		return false;
+	}
+
+	/**
+	 * Why an ad order could not be delivered. Permanent when the ad is gone or no longer in a
+	 * state the order can be delivered into — a second order for a draft the first already
+	 * paid, a renewal paid after the live ad was edited, a top-up whose placements are not
+	 * drafts any more: those used to be retried every quarter hour for ever. Otherwise (the
+	 * state still fits, the write failed) $transient, and the sweep tries again.
+	 *
+	 * Runs inside the fulfilment transaction, after lockProductTarget() locked the family.
+	 *
+	 * @param string $deliverableWhen 'draft' | 'renewable' | 'addons' | 'root'
+	 * @param list<int>|null $childIds the placements an add-on top-up was priced with
+	 */
+	private static function adFailureReason(int $adId, string $deliverableWhen, ?array $childIds, string $transient): string
+	{
+		if ($adId <= 0) {
+			return self::PERMANENT . 'ad_gone';
+		}
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return $transient;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT `status`, `parent_ad_id` FROM `" . Database::table('ads') . "` WHERE `id` = ?");
+			$stmt->execute([$adId]);
+			$ad = $stmt->fetch(PDO::FETCH_ASSOC);
+			if (!$ad || !empty($ad['parent_ad_id'])) {
+				return self::PERMANENT . 'ad_gone';
+			}
+			if ($deliverableWhen === 'draft') {
+				$deliverable = $ad['status'] === 'draft';
+			} elseif ($deliverableWhen === 'renewable') {
+				$deliverable = in_array($ad['status'], ['active', 'expired'], true);
+			} elseif ($deliverableWhen === 'addons') {
+				$params = [$adId];
+				$only = '';
+				if ($childIds !== null) {
+					if ($childIds === []) {
+						return self::PERMANENT . 'ad_not_deliverable';
+					}
+					$only = ' AND `id` IN (' . implode(',', array_fill(0, count($childIds), '?')) . ')';
+					$params = array_merge($params, $childIds);
+				}
+				$drafts = $pdo->prepare("SELECT COUNT(*) FROM `" . Database::table('ads') . "`
+					WHERE `parent_ad_id` = ? AND `status` = 'draft'{$only}");
+				$drafts->execute($params);
+				$deliverable = (int) $drafts->fetchColumn() > 0;
+			} else {
+				$deliverable = true;
+			}
+			return $deliverable ? $transient : self::PERMANENT . 'ad_not_deliverable';
+		} catch (Throwable $e) {
+			return $transient;
+		}
+	}
+
+	/** Park an order whose provider-side payment does not match it, telling everyone once. */
+	private static function parkMismatch(array $payment, string $reason): void
+	{
+		if (!self::isPermanentError($payment['fulfillment_last_error'] ?? null)) {
+			Database::logAudit(
+				'payment_amount_mismatch',
+				(string) $payment['ext_order_id'] . ': ' . $reason,
+				(int) $payment['user_id']
+			);
+		}
+		PaymentRepository::noteGrantError((string) $payment['ext_order_id'], self::PERMANENT . $reason);
+		self::notifyFailedOnce($payment);
+		self::notifyStaffOnce($payment);
+	}
+
+	/**
+	 * Tell the administrators — once per order — that money arrived for something that cannot
+	 * be delivered, so they can deliver it by hand or refund it. The order has left the sweep.
+	 */
+	private static function notifyStaffOnce(array $payment): void
+	{
+		$extOrderId = (string) $payment['ext_order_id'];
+		try {
+			Notifications::sendMany(Notifications::adminIds(), 'payment.stuck', [
+				'subject' => $extOrderId,
+				'group' => 'payment.stuck:' . $extOrderId,
+				'once' => true,
+				'link' => (defined('APP_URL') ? APP_URL : '') . '/panel.php?tab=premium',
+			]);
+		} catch (Throwable $e) {
+			error_log('Stuck payment notification failed for ' . $extOrderId . ': ' . $e->getMessage());
+		}
 	}
 
 	/** Prefix of a fulfilment error no retry can fix; such orders leave the sweep. */

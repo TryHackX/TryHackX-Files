@@ -101,6 +101,63 @@ final class PaymentFulfilmentFailureTest extends RepoTestCase
 		$this->assertSame(1, $this->failedNotices());
 	}
 
+	private function administrator(): int
+	{
+		$name = 'failadmin' . bin2hex(random_bytes(3));
+		Database::createAdmin($name, 'Str0ng!pass', $name . '@example.com');
+		$id = (int) Database::getUserByEmailOrUsername($name)['id'];
+		Database::getInstance()->exec("UPDATE `" . Database::table('users') . "` SET `is_active` = 1 WHERE `id` = " . $id);
+		return $id;
+	}
+
+	private function stuckNotices(): int
+	{
+		return (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('notifications') . "` WHERE `type` = 'payment.stuck'"
+		)->fetchColumn();
+	}
+
+	/**
+	 * C-F2: a paid amount below the order is parked after the first look — no later poll
+	 * changes what the provider says was paid — and logged and announced once, not on every
+	 * sweep.
+	 */
+	public function testAShortPaymentIsParkedAndAnnouncedOnce(): void
+	{
+		$this->administrator();
+		$ext = (string) PaymentRepository::start('payu', $this->planId, $this->userId, 1000, 'PLN');
+		for ($i = 0; $i < 3; $i++) {
+			$this->assertFalse(PaymentReconciler::fulfil(PaymentRepository::byExtOrderId($ext), 10, 'PLN', 'poll'));
+		}
+		$row = PaymentRepository::byExtOrderId($ext);
+		$this->assertTrue(PaymentReconciler::isPermanentError($row['fulfillment_last_error']));
+		$this->assertSame(0, PaymentReconciler::sweepPending()['checked']);
+		$this->assertSame(1, $this->stuckNotices());
+		$this->assertSame(1, (int) Database::getInstance()->query(
+			"SELECT COUNT(*) FROM `" . Database::table('audit_log') . "` WHERE `action` = 'payment_amount_mismatch'"
+		)->fetchColumn());
+	}
+
+	/** C-F2: the buyer deleted the account with the order open — nobody to grant the plan to. */
+	public function testAnOrderWhoseBuyerIsGoneIsParked(): void
+	{
+		$this->administrator();
+		$name = 'gonebuyer' . bin2hex(random_bytes(3));
+		Database::registerUser($name, $name . '@example.com', 'Str0ng!pass');
+		$buyerId = (int) Database::getUserByEmailOrUsername($name)['id'];
+		$ext = (string) PaymentRepository::start('payu', $this->planId, $buyerId, 1000, 'PLN');
+		$this->assertTrue(UserRepository::delete($buyerId));
+		$payment = PaymentRepository::byExtOrderId($ext);
+		$this->assertNull($payment['user_id'], 'the order outlives its buyer');
+
+		$this->assertFalse(PaymentReconciler::fulfil($payment, 1000, 'PLN', 'notify'));
+		$row = PaymentRepository::byExtOrderId($ext);
+		$this->assertSame('permanent:buyer_gone', $row['fulfillment_last_error']);
+		$this->assertSame(1, (int) $row['fulfillment_attempts']);
+		$this->assertSame(1, $this->stuckNotices());
+		$this->assertSame(0, PaymentReconciler::sweepPending()['checked']);
+	}
+
 	public function testRefusedPremiumActivationIsAuditedOncePerWindow(): void
 	{
 		Database::setSecretSetting('premium_api_token', 'right-token');

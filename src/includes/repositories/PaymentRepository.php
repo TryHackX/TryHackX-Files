@@ -493,6 +493,24 @@ final class PaymentRepository
 		}
 	}
 
+	/** The newest order for an ad still waiting for its money, started within $withinSeconds. */
+	public static function openOrderForAd(int $adId, int $withinSeconds): ?array
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $adId <= 0) {
+			return null;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT * FROM `" . Database::table('payments') . "`
+				WHERE `ad_id` = ? AND `granted_at` IS NULL AND `status` IN (?, ?, ?) AND `created_at` > ?
+				ORDER BY `created_at` DESC, `id` DESC LIMIT 1");
+			$stmt->execute([$adId, self::NEW, self::PENDING, self::PROCESSING, time() - max(0, $withinSeconds)]);
+			return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+		} catch (PDOException $e) {
+			return null;
+		}
+	}
+
 	public static function byExtOrderId(string $extOrderId): ?array
 	{
 		$pdo = Database::getInstance();

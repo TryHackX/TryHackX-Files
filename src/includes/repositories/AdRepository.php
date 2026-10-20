@@ -312,7 +312,12 @@ final class AdRepository
 	 * running ad keeps its `ends_at`: re-approval latency must not eat paid days twice. On
 	 * top of that, an edit of a LIVE ad stamps `resubmitted_at`: if the re-review then drags
 	 * past the operator's grace, approve() credits the whole delay back (runda 4, pt 8).
-	 * Child placements follow the primary: shared copy, same review state.
+	 *
+	 * The copy is shared by the whole purchase, but only what was bought goes back to review:
+	 * the primary while pending or live, or rejected while its purchase still stands, and the
+	 * placements that were pending or live. A placement still a draft (its top-up never paid)
+	 * stays a draft, a rejected placement stays rejected, and a purchase rejected with a
+	 * refund is over — the next approval used to publish all of them for free.
 	 */
 	public static function updateOwn(int $adId, int $userId, array $data): array
 	{
@@ -324,30 +329,97 @@ final class AdRepository
 		if (in_array($ad['status'], ['expired'], true)) {
 			return ['success' => false, 'error' => 'expired'];
 		}
-		$backToReview = in_array($ad['status'], ['pending', 'active', 'rejected'], true);
+		$backToReview = in_array($ad['status'], ['pending', 'active'], true)
+			|| ($ad['status'] === 'rejected' && self::hasStandingPurchase($adId));
 		$wasLive = $ad['status'] === 'active';
+		$table = Database::table('ads');
 		try {
 			$now = time();
-			$stmt = $pdo->prepare("UPDATE `" . Database::table('ads') . "`
-				SET `name` = ?, `image_url` = ?, `target_url` = ?, `alt_text` = ?,
-					`status` = ?, `reject_reason` = NULL,
-					`resubmitted_at` = COALESCE(`resubmitted_at`, ?), `updated_at` = ?
-				WHERE (`id` = ? OR `parent_ad_id` = ?) AND `owner_id` = ?");
-			$stmt->execute([
-				(string) ($data['name'] ?? $ad['name']),
-				(string) ($data['image_url'] ?? ''),
-				(string) ($data['target_url'] ?? ''),
-				(string) ($data['alt_text'] ?? ''),
-				$backToReview ? 'pending' : $ad['status'],
-				$wasLive ? $now : null,
-				$now,
-				$adId,
-				$adId,
-				$userId,
-			]);
+			$pdo->beginTransaction();
+			$pdo->prepare("UPDATE `{$table}`
+				SET `name` = ?, `image_url` = ?, `target_url` = ?, `alt_text` = ?, `updated_at` = ?
+				WHERE (`id` = ? OR `parent_ad_id` = ?) AND `owner_id` = ?")
+				->execute([
+					(string) ($data['name'] ?? $ad['name']),
+					(string) ($data['image_url'] ?? ''),
+					(string) ($data['target_url'] ?? ''),
+					(string) ($data['alt_text'] ?? ''),
+					$now,
+					$adId,
+					$adId,
+					$userId,
+				]);
+			if ($backToReview) {
+				$pdo->prepare("UPDATE `{$table}`
+					SET `status` = 'pending', `reject_reason` = NULL,
+						`resubmitted_at` = COALESCE(`resubmitted_at`, ?)
+					WHERE `id` = ? AND `owner_id` = ?")
+					->execute([$wasLive ? $now : null, $adId, $userId]);
+				$pdo->prepare("UPDATE `{$table}`
+					SET `status` = 'pending', `resubmitted_at` = COALESCE(`resubmitted_at`, ?)
+					WHERE `parent_ad_id` = ? AND `owner_id` = ? AND `status` IN ('pending', 'active')")
+					->execute([$wasLive ? $now : null, $adId, $userId]);
+			}
+			$pdo->commit();
 			return ['success' => true, 'pending' => $backToReview];
 		} catch (PDOException $e) {
+			if ($pdo->inTransaction()) {
+				$pdo->rollBack();
+			}
 			return ['success' => false, 'error' => 'db'];
+		}
+	}
+
+	/**
+	 * Whether the purchase of this (root) ad still stands: a completed placement order that
+	 * was not refunded. A rejection with a refund ends the purchase; buying it again is a new
+	 * checkout.
+	 */
+	public static function hasStandingPurchase(int $adId): bool
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $adId <= 0) {
+			return false;
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT 1 FROM `" . Database::table('payments') . "`
+				WHERE `ad_id` = ? AND `kind` = ? AND `status` = ? LIMIT 1");
+			$stmt->execute([$adId, PaymentRepository::KIND_AD, PaymentRepository::COMPLETED]);
+			return (bool) $stmt->fetchColumn();
+		} catch (PDOException $e) {
+			return false;
+		}
+	}
+
+	/**
+	 * The add-on placements of a root ad that some completed order paid for, or null when a
+	 * completed order predates checkouts recording them (it paid for every placement it had).
+	 *
+	 * @return list<int>|null
+	 */
+	public static function paidChildIds(int $adId): ?array
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo || $adId <= 0) {
+			return [];
+		}
+		try {
+			$stmt = $pdo->prepare("SELECT `meta` FROM `" . Database::table('payments') . "`
+				WHERE `ad_id` = ? AND `kind` IN (?, ?) AND `status` = ?");
+			$stmt->execute([$adId, PaymentRepository::KIND_AD, PaymentRepository::KIND_AD_ADDON, PaymentRepository::COMPLETED]);
+			$paid = [];
+			foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $raw) {
+				$meta = json_decode((string) $raw, true);
+				if (!is_array($meta) || !array_key_exists('children', $meta) || !is_array($meta['children'])) {
+					return null;
+				}
+				foreach ($meta['children'] as $childId) {
+					$paid[(int) $childId] = true;
+				}
+			}
+			return array_keys($paid);
+		} catch (PDOException $e) {
+			return [];
 		}
 	}
 
@@ -417,8 +489,11 @@ final class AdRepository
 	 * activate them on the strength of it.
 	 *
 	 *   - add-on top-up: the surcharges of the draft children, and those children;
-	 *   - first purchase / renewal: the package price plus the surcharge of every child that
-	 *     is not being dropped, and those children.
+	 *   - first purchase: the package price plus the surcharge of every child, and those
+	 *     children;
+	 *   - renewal (the primary is live or expired): the package price plus the surcharge of
+	 *     every child that is renewable with it and not being dropped. A draft placement (its
+	 *     top-up never paid) or a rejected one is not renewed, so it is not charged either.
 	 *
 	 * @param list<int> $dropIds children a renewal leaves behind
 	 * @return array{amount: int, children: list<int>}
@@ -427,16 +502,31 @@ final class AdRepository
 	{
 		$allowed = json_decode((string) ($package['addon_zones'] ?? ''), true) ?: [];
 		$amount = $addonTopUp ? 0 : (int) ($package['amount_minor'] ?? 0);
+		$primaryStatus = (string) (self::get($adId)['status'] ?? '');
+		$renewal = !$addonTopUp && in_array($primaryStatus, ['active', 'expired'], true);
 		$children = [];
 		foreach (self::childrenOf($adId) as $child) {
 			$childId = (int) $child['id'];
-			if ($addonTopUp ? $child['status'] !== 'draft' : in_array($childId, $dropIds, true)) {
+			if ($addonTopUp) {
+				$charged = $child['status'] === 'draft';
+			} elseif ($renewal) {
+				$charged = self::renewableWith($child, $primaryStatus) && !in_array($childId, $dropIds, true);
+			} else {
+				$charged = !in_array($childId, $dropIds, true);
+			}
+			if (!$charged) {
 				continue;
 			}
 			$amount += max(0, (int) ($allowed[(string) $child['zone']] ?? 0));
 			$children[] = $childId;
 		}
 		return ['amount' => $amount, 'children' => $children];
+	}
+
+	/** Whether a placement is renewed together with its primary (see renew()). */
+	public static function renewableWith(array $child, string $primaryStatus): bool
+	{
+		return (string) ($child['status'] ?? '') === ($primaryStatus === 'expired' ? 'expired' : 'active');
 	}
 
 	/**
@@ -503,8 +593,12 @@ final class AdRepository
 	 * Renewal (runda 4, pt 8): buy the same package again for an existing purchase. No
 	 * review round — the creative is exactly what was already approved. A running ad gets
 	 * the days appended; one expired within the grace window comes back live from now.
+	 *
+	 * @param list<int>|null $childIds the placements the renewal was priced with — exactly
+	 *                                 those are renewed with the primary; null for orders
+	 *                                 created before renewals recorded them (every live one)
 	 */
-	public static function renew(int $adId, array $package): bool
+	public static function renew(int $adId, array $package, ?array $childIds = null): bool
 	{
 		$pdo = Database::getInstance();
 		if (!$pdo) {
@@ -529,24 +623,31 @@ final class AdRepository
 				}
 				return false;
 			}
+			$family = '(`id` = ? OR `parent_ad_id` = ?)';
+			$params = [$adId, $adId];
+			if ($childIds !== null) {
+				$childIds = array_values(array_unique(array_filter(array_map('intval', $childIds), fn($id) => $id > 0)));
+				$family = $childIds === []
+					? '`id` = ?'
+					: '(`id` = ? OR (`parent_ad_id` = ? AND `id` IN (' . implode(',', array_fill(0, count($childIds), '?')) . ')))';
+				$params = $childIds === [] ? [$adId] : array_merge([$adId, $adId], $childIds);
+			}
 			if ($ad['status'] === 'active') {
 				$base = max($now, (int) ($ad['ends_at'] ?? $now));
 				$sql = "UPDATE `" . Database::table('ads') . "`
 				 SET `ends_at` = ?, `purchase_duration_days` = ?, `updated_at` = ?
-				 WHERE (`id` = ? OR `parent_ad_id` = ?) AND `status` = 'active'";
+				 WHERE {$family} AND `status` = 'active'";
 			} else {
 				$base = $now;
 				$sql = "UPDATE `" . Database::table('ads') . "`
 				 SET `status` = 'active', `ends_at` = ?, `purchase_duration_days` = ?, `updated_at` = ?
-				 WHERE (`id` = ? OR `parent_ad_id` = ?) AND `status` = 'expired'";
+				 WHERE {$family} AND `status` = 'expired'";
 			}
-			$pdo->prepare($sql)->execute([
+			$pdo->prepare($sql)->execute(array_merge([
 				$base + $days,
 				max(1, (int) ($package['duration_days'] ?? 30)),
 				$now,
-				$adId,
-				$adId,
-			]);
+			], $params));
 			if ($ownsTransaction) {
 				$pdo->commit();
 			}
@@ -753,6 +854,10 @@ final class AdRepository
 	 * operator's grace (`ads_review_comp_days`, runda 4 pt 8) credits the whole delay back:
 	 * the buyer's clock ran while the ad hung unseen in the queue, and past the grace that
 	 * becomes the operator's cost, not theirs. Child placements follow the primary.
+	 *
+	 * A buyer's ad goes live only on a purchase that stands (a completed, unrefunded order),
+	 * and a placement only when a completed order paid for it; a pending placement nothing paid
+	 * for goes back to being a draft.
 	 */
 	public static function approve(int $adId, int $adminId): ?array
 	{
@@ -776,6 +881,16 @@ final class AdRepository
 		if (!$ad || $ad['status'] !== 'pending') {
 			$pdo->rollBack();
 			return null;
+		}
+		$rootId = !empty($ad['parent_ad_id']) ? (int) $ad['parent_ad_id'] : $adId;
+		$paidChildren = null;
+		if (!empty($ad['owner_id'])) {
+			$paidChildren = self::paidChildIds($rootId);
+			if (!self::hasStandingPurchase($rootId)
+				|| (!empty($ad['parent_ad_id']) && $paidChildren !== null && !in_array($adId, $paidChildren, true))) {
+				$pdo->rollBack();
+				return null;
+			}
 		}
 		try {
 			$now = time();
@@ -801,14 +916,25 @@ final class AdRepository
 				$endsAt += $delay;
 			}
 			}
+			$covered = '';
+			$params = [$now, $adminId, $endsAt, $now, $adId, $adId];
+			if ($paidChildren !== null) {
+				$covered = ' AND (`id` = ?' . ($paidChildren !== []
+					? ' OR `id` IN (' . implode(',', array_fill(0, count($paidChildren), '?')) . ')'
+					: '') . ')';
+				$params = array_merge($params, [$adId], $paidChildren);
+			}
 			$stmt = $pdo->prepare("UPDATE `" . Database::table('ads') . "`
 				SET `status` = 'active', `approved_at` = ?, `approved_by` = ?, `ends_at` = ?,
 					`reject_reason` = NULL, `resubmitted_at` = NULL, `updated_at` = ?
-				WHERE (`id` = ? OR `parent_ad_id` = ?) AND `status` = 'pending'");
-			$stmt->execute([$now, $adminId, $endsAt, $now, $adId, $adId]);
+				WHERE (`id` = ? OR `parent_ad_id` = ?) AND `status` = 'pending'{$covered}");
+			$stmt->execute($params);
 			if ($stmt->rowCount() === 0) {
 				$pdo->rollBack();
 				return null;
+			}
+			if ($paidChildren !== null && empty($ad['parent_ad_id'])) {
+				self::returnUnpaidChildrenToDraft($pdo, $adId, $paidChildren);
 			}
 			// A primary's clock governs the whole purchase: re-stamp every child, whatever its
 			// state. Without this, a child approved before its parent kept the NULL it inherited
@@ -829,10 +955,25 @@ final class AdRepository
 		return self::get($adId);
 	}
 
+	/** Pending placements of $parentId that no completed order paid for are drafts again. */
+	private static function returnUnpaidChildrenToDraft(PDO $pdo, int $parentId, array $paidChildren): void
+	{
+		$params = [time(), $parentId];
+		$notPaid = '';
+		if ($paidChildren !== []) {
+			$notPaid = ' AND `id` NOT IN (' . implode(',', array_fill(0, count($paidChildren), '?')) . ')';
+			$params = array_merge($params, $paidChildren);
+		}
+		$pdo->prepare("UPDATE `" . Database::table('ads') . "`
+			SET `status` = 'draft', `updated_at` = ? WHERE `parent_ad_id` = ? AND `status` = 'pending'{$notPaid}")
+			->execute($params);
+	}
+
 	/**
 	 * Approve an addon top-up (runda 7): the primary already runs, only its freshly paid
 	 * child placements await review. They join the parent's clock — the surcharge bought
-	 * the remaining window, not a fresh period.
+	 * the remaining window, not a fresh period. Only placements a completed order paid for
+	 * are activated (see approve()).
 	 */
 	public static function approveChildren(int $parentId, int $adminId): ?array
 	{
@@ -843,24 +984,47 @@ final class AdRepository
 		try {
 			$pdo->beginTransaction();
 			$parentQuery = $pdo->prepare(
-				"SELECT `ends_at` FROM `" . Database::table('ads') . "`
+				"SELECT `ends_at`, `owner_id` FROM `" . Database::table('ads') . "`
 				 WHERE `id` = ? AND `parent_ad_id` IS NULL FOR UPDATE"
 			);
 			$parentQuery->execute([$parentId]);
-			$parentEnd = $parentQuery->fetchColumn();
-			if ($parentEnd === false) {
+			$parent = $parentQuery->fetch(PDO::FETCH_ASSOC);
+			if ($parent === false) {
 				$pdo->rollBack();
 				return null;
 			}
+			$paidChildren = null;
+			if (!empty($parent['owner_id'])) {
+				$paidChildren = self::paidChildIds($parentId);
+				if (!self::hasStandingPurchase($parentId)) {
+					$pdo->rollBack();
+					return null;
+				}
+			}
 			$now = time();
-			$endsAt = $parentEnd !== null ? (int) $parentEnd : null;
+			$endsAt = $parent['ends_at'] !== null ? (int) $parent['ends_at'] : null;
+			$covered = '';
+			$params = [$now, $adminId, $endsAt, $now, $parentId];
+			if ($paidChildren !== null) {
+				if ($paidChildren === []) {
+					self::returnUnpaidChildrenToDraft($pdo, $parentId, []);
+					$pdo->commit();
+					return null;
+				}
+				$covered = ' AND `id` IN (' . implode(',', array_fill(0, count($paidChildren), '?')) . ')';
+				$params = array_merge($params, $paidChildren);
+			}
 			$stmt = $pdo->prepare("UPDATE `" . Database::table('ads') . "`
 				SET `status` = 'active', `approved_at` = ?, `approved_by` = ?, `ends_at` = ?,
 					`reject_reason` = NULL, `resubmitted_at` = NULL, `updated_at` = ?
-				WHERE `parent_ad_id` = ? AND `status` = 'pending'");
-			$stmt->execute([$now, $adminId, $endsAt, $now, $parentId]);
-			if ($stmt->rowCount() === 0) {
-				$pdo->rollBack();
+				WHERE `parent_ad_id` = ? AND `status` = 'pending'{$covered}");
+			$stmt->execute($params);
+			$activated = $stmt->rowCount();
+			if ($paidChildren !== null) {
+				self::returnUnpaidChildrenToDraft($pdo, $parentId, $paidChildren);
+			}
+			if ($activated === 0) {
+				$pdo->commit();
 				return null;
 			}
 			$pdo->commit();

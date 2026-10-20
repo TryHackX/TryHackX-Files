@@ -49,6 +49,9 @@ final class Notifications
 		'payment.failed'       => ['icon' => 'fa-circle-exclamation',   'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
 		// Money returned after completion — today: a paid ad rejected in review (runda 8).
 		'payment.refunded'     => ['icon' => 'fa-rotate-left',          'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
+		// To administrators: a paid order that cannot be delivered (its ad, plan or buyer is
+		// gone, or the amount does not match) — deliver it by hand or refund it. Once per order.
+		'payment.stuck'        => ['icon' => 'fa-triangle-exclamation', 'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true,  'staff' => true],
 		'security.password'    => ['icon' => 'fa-key',                  'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
 		'security.email'       => ['icon' => 'fa-envelope',             'stacks' => false, 'mailable' => true,  'app' => true,  'mail' => true],
 		'report.new'           => ['icon' => 'fa-flag',                 'stacks' => true,  'mailable' => false, 'app' => true,  'mail' => false, 'staff' => true],
@@ -303,6 +306,22 @@ final class Notifications
 		NotificationRepository::warmPrefs($ids);
 		$recipients = array_values(array_filter($ids, static fn(int $id): bool => self::allows($id, $type, 'app')));
 		return NotificationRepository::pushMany($recipients, $type, $text, $link, $broadcastKey);
+	}
+
+	/** The active administrators — money matters are theirs, not every moderator's. */
+	public static function adminIds(): array
+	{
+		$pdo = Database::getInstance();
+		if (!$pdo) {
+			return [];
+		}
+		try {
+			$stmt = $pdo->query("SELECT `id` FROM `" . Database::table('users') . "`
+				WHERE `is_active` = 1 AND `role` = 'admin'");
+			return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+		} catch (PDOException $e) {
+			return [];
+		}
 	}
 
 	/** Everyone who should hear about moderation work. */

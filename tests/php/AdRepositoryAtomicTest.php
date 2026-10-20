@@ -72,6 +72,19 @@ final class AdRepositoryAtomicTest extends RepoTestCase
 		);
 	}
 
+	/**
+	 * The order a placement was bought with, settled: approve() goes live only on a purchase
+	 * that stands (a completed, unrefunded order), so the fixtures record one.
+	 */
+	private function settlePurchase(int $adId): void
+	{
+		$ext = PaymentRepository::startAd('payu', $adId, $this->packageId, $this->userId, 1900, 'PLN');
+		$this->assertNotNull($ext);
+		Database::getInstance()->prepare(
+			'UPDATE `' . Database::table('payments') . '` SET `status` = ?, `granted_at` = ? WHERE `ext_order_id` = ?'
+		)->execute([PaymentRepository::COMPLETED, time(), $ext]);
+	}
+
 	public function testApprovalUsesPurchasedDurationAfterPackageMutation(): void
 	{
 		$created = AdRepository::createDraft($this->userId, $this->package, [
@@ -83,6 +96,7 @@ final class AdRepositoryAtomicTest extends RepoTestCase
 		$adId = (int) $created['id'];
 		$this->assertSame(17, (int) AdRepository::get($adId)['purchase_duration_days']);
 		$this->assertTrue(AdRepository::markPaid($adId, $this->package));
+		$this->settlePurchase($adId);
 
 		Database::getInstance()
 			->prepare('UPDATE `' . Database::table('ad_packages') . '` SET `duration_days` = 1 WHERE `id` = ?')
@@ -103,6 +117,7 @@ final class AdRepositoryAtomicTest extends RepoTestCase
 		]);
 		$adId = (int) $created['id'];
 		$this->assertTrue(AdRepository::markPaid($adId, $this->package));
+		$this->settlePurchase($adId);
 		$this->assertNotNull(AdRepository::approve($adId, $this->userId));
 		$before = (int) AdRepository::get($adId)['ends_at'];
 		$renewal = $this->package + ['duration_days' => 3];
