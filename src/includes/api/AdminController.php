@@ -131,15 +131,21 @@ final class AdminController
 			$staffGroupId = (int) $moderatorGroup['id'];
 		}
 
-		// Default storage 500MB
-		$limit = 500 * 1024 * 1024;
-
+		// No per-account storage override (0): the account gets what its group allows. A value
+		// above zero here beats every group and paid plan — it is exactly the 500 MiB default
+		// that migration 21 had to clear from older accounts.
 		$stmt = $pdo->prepare("INSERT INTO `{$table}`
 			(username, email, password_hash, role, staff_group_id, is_active, storage_limit, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+			VALUES (?, ?, ?, ?, ?, ?, 0, ?)");
 		$stmt->execute([
-			$username, $email, $hash, $role, $staffGroupId, $isActive, $limit, time(),
+			$username, $email, $hash, $role, $staffGroupId, $isActive, time(),
 		]);
+		$createdId = (int) $pdo->lastInsertId();
+		// This endpoint can mint administrators, so it leaves a trace like every update does.
+		Database::logAudit(
+			'user_created',
+			"user #{$createdId} {$username}, role {$role}" . ($isActive ? '' : ', not activated')
+		);
 
 		echo json_encode(['success' => true]);
 	}

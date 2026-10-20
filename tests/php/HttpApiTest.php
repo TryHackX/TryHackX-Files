@@ -1127,7 +1127,27 @@ final class HttpApiTest extends TestCase
 
 		$created = self::postJson('/api.php?action=admin_create_user', $payload);
 		$this->assertTrue($created['success'] ?? false, json_encode($created));
-		$this->assertNotNull(Database::getUserByEmailOrUsername('httpgranted'));
+		$account = Database::getUserByEmailOrUsername('httpgranted');
+		$this->assertNotNull($account);
+
+		// No hidden per-account quota: the account gets what its group allows, like any other.
+		$this->assertSame(0, (int) $account['storage_limit']);
+		$group = Database::getUserEffectiveGroup((int) $account['id']);
+		$this->assertSame(
+			((int) ($group['storage_quota_mb'] ?? 0)) * 1024 * 1024,
+			StorageEnforcer::limitsFor((int) $account['id'])['quota']
+		);
+		// And creating an account, an administrator here, is in the audit log.
+		$audit = Database::getInstance()->prepare(
+			"SELECT `details`, `username` FROM `" . Database::table('audit_log') . "`
+			 WHERE `action` = 'user_created' ORDER BY `id` DESC LIMIT 1"
+		);
+		$audit->execute();
+		$row = $audit->fetch(PDO::FETCH_ASSOC);
+		$this->assertIsArray($row, 'no user_created audit row');
+		$this->assertStringContainsString('#' . (int) $account['id'], (string) $row['details']);
+		$this->assertStringContainsString('role admin', (string) $row['details']);
+		$this->assertSame('httpadmin', $row['username'], 'the row names who created the account');
 	}
 
 	/**
