@@ -117,6 +117,10 @@
 			dialog.cancel.addEventListener('click', function () { finish(false); });
 			dialog.bg.addEventListener('keydown', function (event) {
 				if (event.key === 'Escape') {
+					// This Escape is the prompt's. Left to bubble, the panel's own handler took
+					// it as well and closed the form underneath — the one the admin was saving.
+					if (typeof event.preventDefault === 'function') event.preventDefault();
+					if (typeof event.stopPropagation === 'function') event.stopPropagation();
 					finish(false);
 				}
 			});
@@ -125,6 +129,10 @@
 					finish(false);
 				}
 			});
+			// Closed some other way — the panel's Escape with focus outside the prompt, its
+			// backdrop handling — the answer is "no" as well. Without this the shared promise
+			// never settled and every later privileged action waited on it until a reload.
+			dialog.bg.addEventListener('fh:modal-dismissed', function () { finish(false); });
 			dialog.form.addEventListener('submit', function (event) {
 				event.preventDefault();
 				var password = dialog.input.value;

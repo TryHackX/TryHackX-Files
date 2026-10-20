@@ -251,6 +251,7 @@
 	// Dismiss one modal element and hand control back to the modal beneath it (if any).
 	function dismissModal(m) {
 		if (!m) return;
+		const wasShown = m.classList.contains('show');
 		m.classList.remove('show');
 		m.style.zIndex = '';
 		modalStack = modalStack.filter(x => x !== m);
@@ -260,6 +261,11 @@
 			trapFocus(below); // re-arm focus trap + Tab cycling on the modal underneath
 		} else {
 			document.body.style.overflow = '';
+		}
+		// Whatever closed it — a button, Escape, the backdrop — a dialog that keeps state of its
+		// own (the password re-check prompt, the banner crop) hears about it and settles.
+		if (wasShown && typeof m.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+			m.dispatchEvent(new CustomEvent('fh:modal-dismissed'));
 		}
 	}
 
@@ -285,6 +291,9 @@
 			// Ignore key auto-repeat: holding Esc must not cascade through the modal
 			// stack — one press dismisses one modal, then the key must be released.
 			if (e.repeat) return;
+			// A dialog that handled this Escape itself (the password re-check prompt) has
+			// already closed; the modal beneath it stays open.
+			if (e.defaultPrevented) return;
 			const top = topModal();
 			if (!top) return;
 			e.preventDefault();

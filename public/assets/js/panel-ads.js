@@ -1019,6 +1019,8 @@
 	/** An add-on's own banner goes through the same crop stage, at that zone's box. */
 	function myAdAddonFilePicked(input, zone) {
 		const file = input.files[0];
+		// Cleared at once, so the same file can be picked again after a cancelled crop.
+		input.value = '';
 		const row = input.closest('.myad-addon-row');
 		const nameEl = row.querySelector('.myad-addon-filename');
 		if (!file) return;
@@ -1262,6 +1264,9 @@
 		adCrop.wired = true;
 		const frame = document.getElementById('adCropFrame');
 		const zoomEl = document.getElementById('adCropZoom');
+		// Escape and the backdrop close the stage without going through Cancel; the picked
+		// image and its callback must not outlive it either way.
+		document.getElementById('adCropModal')?.addEventListener('fh:modal-dismissed', releaseCropStage);
 		let dragging = null;
 		frame.addEventListener('pointerdown', e => {
 			if (!adCrop.img) return;
@@ -1352,6 +1357,11 @@
 
 	function adCropCancel() {
 		closeModal('adCropModal');
+		releaseCropStage();
+	}
+
+	/** Forget the image on the stage, its callback and its object URL. */
+	function releaseCropStage() {
 		adCrop.img = null;
 		adCrop.cb = null;
 		releaseCropUrl();
@@ -1398,7 +1408,13 @@
 			drop.classList.remove('is-over');
 			if (e.dataTransfer.files[0]) acceptFile(e.dataTransfer.files[0]);
 		});
-		input.addEventListener('change', () => { if (input.files[0]) acceptFile(input.files[0]); });
+		input.addEventListener('change', () => {
+			const file = input.files[0];
+			// Browsers fire `change` only for a different selection, so a file whose crop was
+			// cancelled could not be picked again. Clear the input once the file is in hand.
+			input.value = '';
+			if (file) acceptFile(file);
+		});
 	}
 
 	/** Re-open the crop stage on the originally picked file (a fresh framing, no re-pick). */

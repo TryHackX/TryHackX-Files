@@ -154,6 +154,48 @@ test('a wrong password keeps the dialog open with the server message', async () 
 	assert.equal(document.getElementById('reauthModalMessage').textContent, 'Wrong password');
 });
 
+test('Escape on the prompt is the prompt\'s: it does not travel on to close the form underneath', async () => {
+	const refusal = { success: false, code: 'recent_auth_required', error: 'again' };
+	const { window, document } = load([refusal]);
+	const pending = window.FHApi.post('admin_plan_save', {});
+	await tick();
+	const stopped = [];
+	document.getElementById('reauthModal').dispatch('keydown', {
+		key: 'Escape',
+		preventDefault() { stopped.push('preventDefault'); },
+		stopPropagation() { stopped.push('stopPropagation'); }
+	});
+	assert.deepEqual(stopped.sort(), ['preventDefault', 'stopPropagation']);
+	assert.equal((await pending).code, 'recent_auth_required');
+});
+
+test('a prompt closed from outside settles, and the next refusal asks again', async () => {
+	const refusal = { success: false, code: 'recent_auth_required', error: 'again' };
+	const { window, document, calls } = load([refusal, refusal]);
+	const first = window.FHApi.post('admin_plan_save', { id: 1 });
+	await tick();
+	// The panel's own Escape (focus outside the prompt) or its backdrop handling closed it.
+	document.getElementById('reauthModal').dispatch('fh:modal-dismissed');
+	assert.equal((await first).code, 'recent_auth_required', 'the caller gets its refusal back');
+	assert.equal(document.getElementById('reauthModal'), null, 'the prompt is gone');
+
+	const second = window.FHApi.post('admin_plan_save', { id: 1 });
+	await tick();
+	const again = document.getElementById('reauthModal');
+	assert.ok(again, 'a new prompt is shown instead of waiting on the old one forever');
+	assert.equal(again.classList.contains('show'), true);
+	again.dispatch('keydown', { key: 'Escape', stopPropagation() {} });
+	assert.equal((await second).code, 'recent_auth_required');
+	assert.equal(calls.length, 2, 'each Save went out once and nothing was retried');
+});
+
+test('the prompt is marked as a run-time node for the live language switch', async () => {
+	const { window, document } = load([{ success: false, code: 'recent_auth_required' }]);
+	window.FHApi.post('admin_plan_save', {});
+	await tick();
+	assert.equal(document.getElementById('reauthModal').attributes['data-fh-runtime'], '');
+});
+
 test('cancelling hands the original refusal back to the caller', async () => {
 	const refusal = { success: false, code: 'recent_auth_required', error: 'again' };
 	const { window, document, calls } = load([refusal]);
