@@ -1571,6 +1571,11 @@ final class AdRepository
 		if (!$ad) {
 			return ['success' => false, 'error' => 'not_found'];
 		}
+		// PHP's own size limits (upload_max_filesize, the form's MAX_FILE_SIZE) refuse a file
+		// before this code sees it; to the advertiser that is "too large", not "upload failed".
+		if (in_array($file['error'] ?? null, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
+			return ['success' => false, 'error' => 'too_large'];
+		}
 		if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || empty($file['tmp_name'])) {
 			return ['success' => false, 'error' => 'upload'];
 		}

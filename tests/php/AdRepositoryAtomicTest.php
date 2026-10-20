@@ -154,6 +154,31 @@ final class AdRepositoryAtomicTest extends RepoTestCase
 		$this->assertNull(AdRepository::get($adId));
 	}
 
+	/**
+	 * E-F10: PHP's upload_max_filesize (2 MB on stock installs) refuses a banner below the
+	 * app's own 5 MB allowance before this code sees it; that is "too large" for the
+	 * advertiser, not "upload failed".
+	 */
+	public function testABannerRefusedByPhpForItsSizeIsTooLarge(): void
+	{
+		$created = AdRepository::createDraft($this->userId, $this->package, [
+			'name' => 'Big banner',
+			'target_url' => 'https://example.com/',
+			'alt_text' => 'Big',
+		]);
+		$adId = (int) $created['id'];
+		foreach ([UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE] as $error) {
+			$this->assertSame(
+				['success' => false, 'error' => 'too_large'],
+				AdRepository::saveBanner($adId, ['error' => $error, 'tmp_name' => ''])
+			);
+		}
+		$this->assertSame(
+			['success' => false, 'error' => 'upload'],
+			AdRepository::saveBanner($adId, ['error' => UPLOAD_ERR_PARTIAL, 'tmp_name' => ''])
+		);
+	}
+
 	public function testOwnerListCarriesLatestPrintableAdOrder(): void
 	{
 		$created = AdRepository::createDraft($this->userId, $this->package, [
