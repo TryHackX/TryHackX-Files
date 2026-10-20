@@ -21,7 +21,9 @@ choosing an arbitrary directory entry.
 **Administration → Settings → Storage → Deleted-file quarantine** accepts 0–3650 days.
 Zero permanently deletes after queue processing. A positive value first copies and verifies the
 file directory in `data/file-quarantine/<id>`, records metadata/reason/actor/checksum, publishes
-database state and only then removes the active copy.
+database state and only then removes the active copy. Delete requests only queue the work; the
+copy is made by the scheduled cleanup (`scripts/cleanup.php`, or the upload service's built-in
+scheduler), so keep it running while the quarantine is on.
 
 A dedicated volume may be configured:
 

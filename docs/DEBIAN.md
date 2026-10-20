@@ -95,6 +95,9 @@ pm.max_children = 16
 ; freed by it. This wall-clock limit is the backstop; keep it above the 300 seconds the
 ; application allows an answer PHP streams itself (setting php_stream_max_seconds).
 request_terminate_timeout = 360s
+; Previews and embeds PHP streams itself are capped server-wide by php_stream_max_global (4)
+; plus php_small_stream_max_global (8, answers up to 1 MiB). Keep the two together below
+; pm.max_children so streaming can never hold every worker.
 ; Advertisement banners are uploaded to PHP (ads_max_banner_kb, 5 MiB by default), while
 ; Debian's php.ini stops at 2 MiB. File uploads go to the upload service and never depend on
 ; these two values.
