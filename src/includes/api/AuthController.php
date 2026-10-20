@@ -205,12 +205,16 @@ final class AuthController
 			return;
 		}
 		$userId = (int) $_SESSION['user_id'];
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
 		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
 		if (!Database::verifyUserPassword($userId, $password)) {
+			recordWrongAccountPassword($userId);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
@@ -294,6 +298,9 @@ final class AuthController
 			return;
 		}
 		$userId = (int) $_SESSION['user_id'];
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
 		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
@@ -302,6 +309,7 @@ final class AuthController
 
 		$user = Database::getUserById($userId);
 		if (!$user || !password_verify($password, $user['password_hash'])) {
+			recordWrongAccountPassword($userId);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
@@ -395,6 +403,9 @@ final class AuthController
 			return;
 		}
 
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
 		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::PASSWORD_MAX) {
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
@@ -402,6 +413,7 @@ final class AuthController
 		}
 		$user = Database::getUserById($userId);
 		if (!$user || !password_verify($password, $user['password_hash'])) {
+			recordWrongAccountPassword($userId);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
@@ -549,8 +561,9 @@ final class AuthController
 	 *
 	 * Actions that grant privileges or rewire payments answer `recent_auth_required` when the
 	 * last password check is more than a few minutes old (bootstrap.php). The panel then asks
-	 * for the password, sends it here, and retries the action. Wrong guesses are capped per
-	 * account and network, the same budget the panel's own gate uses.
+	 * for the password, sends it here, and retries the action. Attempts are capped per account
+	 * and network, the same budget the panel's own gate uses, and wrong passwords also count
+	 * against the account's in-session password budget (accountPasswordGuessesExhausted()).
 	 */
 	public static function handleUserReauth()
 	{
@@ -575,10 +588,14 @@ final class AuthController
 			]);
 			return;
 		}
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
 
 		$input = json_decode(file_get_contents('php://input'), true);
 		$password = is_array($input) && is_string($input['password'] ?? null) ? $input['password'] : '';
 		if ($password === '' || !Database::verifyUserPassword($userId, $password)) {
+			recordWrongAccountPassword($userId);
 			Database::logAudit(
 				'panel_reauth_failed',
 				'wrong password when re-confirming an action',
@@ -651,9 +668,13 @@ final class AuthController
 		}
 		// The password, here and now — the same rule the rest of the account tab follows. A
 		// hijacked session must not be able to quietly cut the owner's other devices loose.
+		if (!requireAccountPasswordBudget($userId)) {
+			return;
+		}
 		$password = self::inputString('password');
 		if (strlen($password) > InputLimits::HARD_PASSWORD_MAX
 			|| !Database::verifyUserPassword($userId, $password)) {
+			recordWrongAccountPassword($userId);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password')]);
 			return;
 		}
@@ -848,6 +869,9 @@ final class AuthController
 			echo json_encode(['success' => false, 'error' => __('api.too_many_attempts_4h')]);
 			return;
 		}
+		if (!requireAccountPasswordBudget((int) $_SESSION['user_id'])) {
+			return;
+		}
 
 		$currentPass = self::inputString('current_password');
 		$newPass = self::inputString('new_password');
@@ -863,6 +887,7 @@ final class AuthController
 		}
 		if (!Database::verifyUserPassword($_SESSION['user_id'], $currentPass)) {
 			incrementRateLimit('change_password');
+			recordWrongAccountPassword((int) $_SESSION['user_id']);
 			echo json_encode(['success' => false, 'error' => __('api.bad_current_password')]);
 			return;
 		}
@@ -912,6 +937,9 @@ final class AuthController
 			echo json_encode(['success' => false, 'error' => __('api.too_many_attempts_4h')]);
 			return;
 		}
+		if (!requireAccountPasswordBudget((int) $_SESSION['user_id'])) {
+			return;
+		}
 
 		$currentPass = self::inputString('password'); // Note: frontend sends 'password'
 		$newEmail = self::inputString('new_email');
@@ -923,6 +951,7 @@ final class AuthController
 		}
 		if (!Database::verifyUserPassword($_SESSION['user_id'], $currentPass)) {
 			incrementRateLimit('change_email');
+			recordWrongAccountPassword((int) $_SESSION['user_id']);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password2')]);
 			return;
 		}
@@ -1011,10 +1040,14 @@ final class AuthController
 			return;
 		}
 
+		if (!requireAccountPasswordBudget((int) $_SESSION['user_id'])) {
+			return;
+		}
 		$input = json_decode(file_get_contents('php://input'), true);
 		$password = is_array($input) && is_string($input['password'] ?? null) ? $input['password'] : '';
 
 		if ($password === '' || !Database::verifyUserPassword((int) $_SESSION['user_id'], $password)) {
+			recordWrongAccountPassword((int) $_SESSION['user_id']);
 			echo json_encode(['success' => false, 'error' => __('api.bad_password2')]);
 			return;
 		}

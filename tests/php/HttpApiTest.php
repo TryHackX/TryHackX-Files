@@ -1485,6 +1485,48 @@ final class HttpApiTest extends TestCase
 		}
 	}
 
+	/**
+	 * A stolen session (or device cookie) used to get a separate guessing budget at every action
+	 * that checks the account password, per address and per fresh session. Wrong passwords now
+	 * count against one budget per account, across all of them; signing in is not affected.
+	 */
+	public function testInSessionPasswordGuessesShareOneBudgetPerAccount(): void
+	{
+		$pdo = Database::getInstance();
+		$limits = Database::table('rate_limits');
+		$pdo->exec("TRUNCATE TABLE `{$limits}`");
+		self::freshUser('httpguessed', 'Guessed1Pass!');
+		try {
+			$this->assertTrue(self::signIn('httpguessed', 'Guessed1Pass!')['success'] ?? false);
+			$actions = ['user_2fa_setup', 'user_remember_revoke', 'user_2fa_disable', 'user_delete_account'];
+			$refusedAfter = null;
+			for ($attempt = 1; $attempt <= 25 && $refusedAfter === null; $attempt++) {
+				// Only the account budget is measured, not the per-address one of each action.
+				$pdo->exec("DELETE FROM `{$limits}` WHERE `bucket` LIKE 'ip:%' OR `bucket` LIKE 'reauth:%'");
+				$answer = self::postJson('/api.php?action=' . $actions[$attempt % count($actions)], [
+					'password' => 'NotIt' . $attempt . 'Pass!',
+				]);
+				if ($answer['status'] === 429) {
+					$refusedAfter = $attempt;
+				} else {
+					$this->assertFalse($answer['success'] ?? true, 'a wrong password was accepted');
+				}
+			}
+			$this->assertNotNull($refusedAfter, 'the account never ran out of guesses');
+			$this->assertGreaterThan(10, $refusedAfter, 'ten wrong passwords are allowed first');
+
+			// The right password is refused too, at every action, the re-confirmation prompt included.
+			$pdo->exec("DELETE FROM `{$limits}` WHERE `bucket` LIKE 'ip:%' OR `bucket` LIKE 'reauth:%'");
+			$this->assertSame(429, self::postJson('/api.php?action=user_reauth', ['password' => 'Guessed1Pass!'])['status']);
+			$this->assertSame(429, self::postJson('/api.php?action=user_2fa_setup', ['password' => 'Guessed1Pass!'])['status']);
+
+			// Signing in has its own budget: the owner can still get in from a fresh browser.
+			$this->assertTrue(self::signIn('httpguessed', 'Guessed1Pass!')['success'] ?? false);
+		} finally {
+			$pdo->exec("TRUNCATE TABLE `{$limits}`");
+		}
+	}
+
 	/** Make this browser's last password check look $seconds older (edits its session file). */
 	private static function ageRecentAuthentication(int $seconds): void
 	{

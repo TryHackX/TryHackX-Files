@@ -162,6 +162,51 @@ function touchPanelAuthorization(): void
 	}
 }
 
+/**
+ * Wrong passwords typed inside a signed-in session are counted per ACCOUNT, across every place
+ * that asks for one: the panel gate, the re-confirmation prompt (user_reauth) and the account
+ * actions that check the password (2FA setup/disable/recovery codes, signing out other devices,
+ * e-mail and password changes, deleting the account). Each of those had only a per-address or
+ * per-session budget, and a stolen session or device cookie mints a fresh session on every
+ * restore, so together they allowed thousands of guesses a day. Only someone holding a session
+ * of this account can spend this budget, so it is no lever against the sign-in form.
+ */
+function accountPasswordBucket(int $userId): string
+{
+	return 'acct:' . $userId;
+}
+
+/** Whether this account's in-session password guesses are used up for the current window. */
+function accountPasswordGuessesExhausted(int $userId): bool
+{
+	return $userId > 0 && RateLimiter::exceeded(accountPasswordBucket($userId), 'reauth_account');
+}
+
+/** Count one wrong password typed inside a session of this account. */
+function recordWrongAccountPassword(int $userId): void
+{
+	if ($userId > 0) {
+		RateLimiter::hit(accountPasswordBucket($userId), 'reauth_account');
+	}
+}
+
+/** JSON gate before a password check: 429 once the account's guesses are used up. */
+function requireAccountPasswordBudget(int $userId): bool
+{
+	if (!accountPasswordGuessesExhausted($userId)) {
+		return true;
+	}
+	http_response_code(429);
+	header('Content-Type: application/json');
+	echo json_encode([
+		'success' => false,
+		'error' => __('api.too_many_attempts_minutes', [
+			'minutes' => (int) ceil(RateLimiter::secondsLeft('reauth_account') / 60),
+		]),
+	]);
+	return false;
+}
+
 /** JSON gate shared by destructive controller handlers. */
 function requireRecentAuthentication(int $maxAgeSeconds = 600): bool
 {

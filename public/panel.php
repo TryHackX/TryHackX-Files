@@ -78,12 +78,20 @@ if (($_POST['action'] ?? '') === 'panel_reauth') {
 			(int) $currentUser['id'],
 			(string) ($currentUser['username'] ?? '')
 		);
+	} elseif (accountPasswordGuessesExhausted((int) $currentUser['id'])) {
+		// The account's in-session password budget, shared with the API's re-confirmation and
+		// the account actions: a stolen session cannot spread its guesses across them.
+		$reauthLocked = true;
+		$reauthError = __('panel.reauth.throttled', [
+			'minutes' => (string) max(1, (int) ceil(RateLimiter::secondsLeft('reauth_account') / 60)),
+		]);
 	} elseif (!csrfValidate()) {
 		$reauthError = __('api.csrf');
 	} elseif ($reauthCaptchaRequired
 		&& !Database::verifyRecaptcha((string) ($_POST['captcha_response'] ?? ''), getClientIP())) {
 		$reauthError = __('panel.reauth.captcha_failed');
 	} elseif (!Database::verifyUserPassword((int) $currentUser['id'], (string) ($_POST['password'] ?? ''))) {
+		recordWrongAccountPassword((int) $currentUser['id']);
 		$reauthFails++;
 		$_SESSION['panel_reauth_fails'] = $reauthFails;
 		$reauthCaptchaRequired = $reauthFails >= 3 && Database::isRecaptchaEnabled();

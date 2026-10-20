@@ -28,6 +28,9 @@ class RateLimiter
 		// AuthController::loginGate() for why only the second may ever refuse.
 		'login_account' => [10, 900],
 		'totp_account' => [10, 900],
+		// Wrong passwords typed inside a signed-in session (the panel gate, re-confirmation and
+		// the account actions that ask for the password), all of them together.
+		'reauth_account' => [10, 900],
 	];
 
 	/** Probability (1 in N) that a request also prunes expired rows — keeps the table small. */
