@@ -2124,6 +2124,98 @@ class TestQrBodyIsBounded:
             raise AssertionError("a JSON list was treated as an object")
 
 
+class TestQrRenderingStaysOffTheEventLoop:
+    """One render holds the GIL for tens of milliseconds; on the loop it froze every transfer."""
+
+    @staticmethod
+    def _status(coroutine):
+        try:
+            asyncio.run(coroutine)
+        except us.HTTPException as exc:
+            return exc.status_code, exc.headers
+        return 200, None
+
+    def test_payloads_over_the_byte_cap_are_refused(self, monkeypatch):
+        monkeypatch.setattr(us, "_qr_cache", us.OrderedDict())
+        assert self._status(us.qr_code("A" * us.QR_DATA_MAX_BYTES))[0] == 200
+        assert self._status(us.qr_code("A" * (us.QR_DATA_MAX_BYTES + 1)))[0] == 400
+        # Counted in UTF-8: 257 two-byte characters are 514 bytes.
+        assert self._status(us.qr_code("é" * 257))[0] == 400
+
+    def test_a_real_otpauth_uri_with_a_long_site_name_still_renders(self, monkeypatch):
+        monkeypatch.setattr(us, "_qr_cache", us.OrderedDict())
+        site = "Moj%20bardzo%20dlugi%20serwer%20plikow%20%E2%80%94%20TryHackX%20Files"
+        uri = (
+            f"otpauth://totp/{site}:{'u' * 50}?secret={'A' * 32}&issuer={site}"
+            "&algorithm=SHA1&digits=6&period=30"
+        )
+        assert len(uri) < us.QR_DATA_MAX_BYTES
+        assert self._status(us.qr_code(uri))[0] == 200
+
+    def test_render_runs_on_the_worker_thread(self, monkeypatch):
+        import segno
+
+        seen = []
+        real_make = segno.make
+
+        def recording_make(*args, **kwargs):
+            seen.append(threading.current_thread())
+            return real_make(*args, **kwargs)
+
+        monkeypatch.setattr(segno, "make", recording_make)
+        monkeypatch.setattr(us, "_qr_cache", us.OrderedDict())
+
+        async def render():
+            loop_thread = threading.current_thread()
+            response = await us.qr_code("https://files.example.org/download.php?id=abc")
+            return loop_thread, response
+
+        loop_thread, response = asyncio.run(render())
+
+        assert response.media_type == "image/svg+xml"
+        assert len(seen) == 1
+        assert seen[0] is not loop_thread
+        assert seen[0].name.startswith("filehost-qr")
+
+    def test_a_saturated_renderer_answers_503_instead_of_queueing(self, monkeypatch):
+        monkeypatch.setattr(us, "_qr_cache", us.OrderedDict())
+        monkeypatch.setattr(us, "_qr_pending", us.QR_MAX_PENDING)
+
+        status, headers = self._status(us.qr_code("https://files.example.org/x"))
+
+        assert status == 503
+        assert headers == {"Retry-After": "1"}
+
+    def test_links_are_cached_but_posted_secrets_are_not(self, monkeypatch):
+        import segno
+
+        calls = []
+        real_make = segno.make
+
+        def counting_make(*args, **kwargs):
+            calls.append(args[0])
+            return real_make(*args, **kwargs)
+
+        monkeypatch.setattr(segno, "make", counting_make)
+        monkeypatch.setattr(us, "_qr_cache", us.OrderedDict())
+
+        link = "https://files.example.org/collection.php?id=abc"
+        first = asyncio.run(us.qr_code(link))
+        second = asyncio.run(us.qr_code(link))
+        assert first.body == second.body and calls == [link]
+        assert first.headers["cache-control"] == "public, max-age=86400"
+
+        body = json.dumps({"data": "otpauth://totp/files:me?secret=ABCDEF"}).encode()
+        for _ in range(2):
+            receive, _state = _receive_chunks([body])
+            response = asyncio.run(us.qr_code_post(_http_request(
+                "/qr", headers={"Content-Length": str(len(body))}, receive=receive, method="POST"
+            )))
+            assert response.headers["cache-control"] == "no-store"
+        assert calls.count("otpauth://totp/files:me?secret=ABCDEF") == 2
+        assert us._qr_pending == 0
+
+
 class TestWebhookDeliveryDeadline:
     def test_slow_receiver_is_cut_at_the_delivery_deadline(self, monkeypatch):
         server = socket.socket()

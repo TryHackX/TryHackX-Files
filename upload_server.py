@@ -30,6 +30,7 @@ import http.client
 import ipaddress
 import socket
 import ssl
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from contextlib import asynccontextmanager
@@ -196,6 +197,14 @@ WEBHOOK_DELIVERY_DEADLINE = 15.0
 WEBHOOK_CONCURRENCY = 5
 # The QR renderer only ever needs a link or an otpauth:// URI.
 QR_POST_MAX_BYTES = 8 * 1024
+# An otpauth URI carries the site name twice next to a username of up to 50 characters, so
+# 512 bytes leave room for a long site name. One render of that size costs about 30 ms of
+# pure-Python CPU; the old 1024-character ceiling cost about 50 ms, and in UTF-8 more.
+QR_DATA_MAX_BYTES = 512
+# Rendering never runs on the event loop: one worker thread draws the codes, and a burst
+# beyond a few waiting renders is answered 503 rather than queued behind them.
+QR_MAX_PENDING = 4
+QR_CACHE_ENTRIES = 64
 # Stored names must fit one filesystem path component (255 bytes on ext4/xfs) with room for
 # the `.blocked` / `.upload` suffixes.
 FILENAME_MAX_BYTES = 200
@@ -213,6 +222,9 @@ THUMB_EXECUTOR = ThreadPoolExecutor(
 MAINTENANCE_EXECUTOR = ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="filehost-maintenance"
 )
+# One thread on purpose: segno is pure Python and holds the GIL, so more render threads
+# would only take more turns away from the event loop.
+QR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="filehost-qr")
 
 BLOCKED_EXTENSIONS = frozenset({
     'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar',
@@ -2673,29 +2685,80 @@ async def sharex_upload(
 # HEALTH & RELOAD ENDPOINTS
 # ============================================================================
 
-def _render_qr(data: str, scale: int) -> Response:
+_qr_pending = 0
+_qr_cache: OrderedDict = OrderedDict()
+
+
+def _render_qr_svg(data: str, scale: int) -> bytes:
+    """Draw one QR code as SVG. Runs on QR_EXECUTOR, never on the event loop."""
+    import segno
+
+    buf = io.BytesIO()
+    segno.make(data, error='m').save(buf, kind='svg', scale=scale, border=2, dark='#111', light='#fff')
+    return buf.getvalue()
+
+
+def _qr_render_finished(future) -> None:
+    """Free the render slot when the worker is really done, even if its caller went away."""
+    global _qr_pending
+    _qr_pending -= 1
+    if not future.cancelled():
+        future.exception()  # retrieved here, so an abandoned failure is not logged as lost
+
+
+async def _render_qr(data: str, scale: int, cacheable: bool = True) -> Response:
+    """SVG for a link or otpauth URI, drawn off the event loop.
+
+    One render of the largest allowed payload holds the GIL for about 30 ms. On the event
+    loop that was 30 ms in which no transfer moved, so about twenty anonymous requests a
+    second stalled every upload and download. Links (`cacheable`) are kept in a small LRU;
+    POSTed payloads carry TOTP secrets and are neither cached here nor by the browser.
+    """
+    global _qr_pending
     try:
         import segno
     except ImportError:
         raise HTTPException(status_code=501, detail="QR support not installed (pip install segno)")
 
-    if not data or len(data) > 1024:
+    if not data or len(data.encode("utf-8", errors="replace")) > QR_DATA_MAX_BYTES:
         raise HTTPException(status_code=400, detail="Invalid data")
 
     scale = max(2, min(12, scale))
-    buf = io.BytesIO()
-    segno.make(data, error='m').save(buf, kind='svg', scale=scale, border=2, dark='#111', light='#fff')
+    key = (data, scale)
+    body = _qr_cache.get(key) if cacheable else None
+    if body is not None:
+        _qr_cache.move_to_end(key)
+    else:
+        if _qr_pending >= QR_MAX_PENDING:
+            raise HTTPException(
+                status_code=503, detail="QR renderer is busy", headers={"Retry-After": "1"}
+            )
+        _qr_pending += 1
+        future = asyncio.get_running_loop().run_in_executor(
+            QR_EXECUTOR, _render_qr_svg, data, scale
+        )
+        future.add_done_callback(_qr_render_finished)
+        try:
+            body = await asyncio.shield(future)
+        except segno.DataOverflowError:
+            raise HTTPException(status_code=400, detail="Invalid data")
+        if cacheable:
+            _qr_cache[key] = body
+            while len(_qr_cache) > QR_CACHE_ENTRIES:
+                _qr_cache.popitem(last=False)
     return Response(
-        content=buf.getvalue(),
+        content=body,
         media_type="image/svg+xml",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={
+            "Cache-Control": "public, max-age=86400" if cacheable else "no-store",
+        },
     )
 
 
 @app.get("/qr")
 async def qr_code(data: str, scale: int = 6):
     """Render an SVG QR code for a link (used by the upload results UI)."""
-    return _render_qr(data, scale)
+    return await _render_qr(data, scale)
 
 
 @app.post("/qr")
@@ -2710,7 +2773,9 @@ async def qr_code_post(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    return _render_qr(str(body.get("data") or ""), safe_int(body.get("scale"), 6))
+    return await _render_qr(
+        str(body.get("data") or ""), safe_int(body.get("scale"), 6), cacheable=False
+    )
 
 
 async def read_bounded_body(request: Request, limit: int) -> bytes:
