@@ -7,6 +7,13 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.1] - 2026-10-21
+
+### Fixed
+
+- The account dialog on the panel pages shows the files, size and downloads counters in one row
+  again, as on the other pages. Since 2.76.4 the panel stacked them in a narrow column.
+
 ## [2.81.0] - 2026-10-21
 
 A second full review of the application — upload server, request pipeline, domain logic, front

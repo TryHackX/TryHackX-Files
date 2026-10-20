@@ -54,7 +54,7 @@ if (!defined('UPLOADS_DIR')) {
 	));
 }
 if (!defined('APP_VERSION')) {
-	define('APP_VERSION', '2.81.0');
+	define('APP_VERSION', '2.81.1');
 }
 if (!defined('APP_URL')) {
 	$canonical = defined('APP_CANONICAL_URL')
