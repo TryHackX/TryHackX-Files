@@ -62,6 +62,9 @@
 					dir: sort.dir
 				}))));
 			}
+			// The search box narrows the list on the server: name, e-mail, or an address.
+			const term = (document.getElementById('userSearch')?.value || '').trim();
+			if (term) params.set('search', term);
 			const r = await fetchLive(`${apiUrl}?${params}`, 'users', silent);
 			if (!r.notModified && r.data && r.data.success) {
 				users = r.data.users;
@@ -75,6 +78,25 @@
 		} finally {
 			if (!silent) finishSkeleton('usersBody');
 		}
+	}
+
+	/** Typing searches once the keyboard pauses, not once per keystroke. */
+	let userSearchTimer = null;
+	function scheduleUserSearch() {
+		clearTimeout(userSearchTimer);
+		userSearchTimer = setTimeout(() => loadUsers(1), 300);
+	}
+
+	/**
+	 * The Tracking view links here as `?tab=users&search=<address>` ("find user"); the term
+	 * goes into the box and the first load already uses it.
+	 */
+	function initUsersTab() {
+		const box = document.getElementById('userSearch');
+		const term = new URLSearchParams(window.location.search).get('search');
+		if (box && term) box.value = term;
+		box?.addEventListener('input', scheduleUserSearch);
+		return loadUsers(1);
 	}
 
 	function sortUsers(col, event) {
@@ -307,6 +329,6 @@
 	window.FHPanelUsers = Object.freeze({
 		loadUsers, sortUsers, userAction, executeUserAction,
 		openBanModal, executeAdvancedBan, showCreateUserModal, createUser,
-		getUsers, isRootAdmin, refreshCurrentPage
+		getUsers, isRootAdmin, refreshCurrentPage, initUsersTab
 	});
 }());

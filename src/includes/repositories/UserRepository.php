@@ -1248,12 +1248,19 @@ final class UserRepository
 	}
 
 	/** Paged user list for the admin panel, with per-user file count / storage / last IP / group. */
+	/**
+	 * One page of the admin user list. `$search` narrows it to accounts whose username or
+	 * e-mail contains the text (taken literally — `%` and `_` are not wildcards) and, when the
+	 * text is an IP address, to accounts registered from it or with an upload from it: the
+	 * Tracking view's "find user" link searches by the address it saw.
+	 */
 	public static function all(
 		int $page = 1,
 		int $limit = 50,
 		string $sortBy = 'created_at',
 		string $order = 'desc',
-		array $sorts = []
+		array $sorts = [],
+		string $search = ''
 	): array
 	{
 		$pdo = Database::getInstance();
@@ -1272,8 +1279,25 @@ final class UserRepository
 		}
 		$order = strtoupper($order) === 'ASC' ? 'ASC' : 'DESC';
 
+		$where = '';
+		$filter = [];
+		$search = trim($search);
+		if ($search !== '') {
+			$like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $search) . '%';
+			$conditions = ["u.`username` LIKE :search_name ESCAPE '!'", "u.`email` LIKE :search_mail ESCAPE '!'"];
+			$filter = [':search_name' => $like, ':search_mail' => $like];
+			if (filter_var($search, FILTER_VALIDATE_IP) !== false) {
+				$conditions[] = 'u.`registered_ip` = :search_ip';
+				$conditions[] = "EXISTS (SELECT 1 FROM `{$filesTable}` sf WHERE sf.`user_id` = u.`id` AND sf.`uploaded_ip` = :search_upload_ip)";
+				$filter[':search_ip'] = $search;
+				$filter[':search_upload_ip'] = $search;
+			}
+			$where = 'WHERE (' . implode(' OR ', $conditions) . ')';
+		}
+
 		try {
-			$stmt = $pdo->query("SELECT COUNT(*) FROM `{$usersTable}`");
+			$stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$usersTable}` u {$where}");
+			$stmt->execute($filter);
 			$total = (int) $stmt->fetchColumn();
 
 			// Sort on real user columns is qualified with `u.` (the groups JOIN also has a
@@ -1308,10 +1332,14 @@ final class UserRepository
 					FROM `{$usersTable}` u
 					LEFT JOIN `{$groupsTable}` g ON u.group_id = g.id
 					LEFT JOIN `{$groupsTable}` sg ON u.staff_group_id = sg.id
+					{$where}
 					ORDER BY {$sortSql}
 					LIMIT :limit OFFSET :offset";
 
 			$stmt = $pdo->prepare($sql);
+			foreach ($filter as $name => $value) {
+				$stmt->bindValue($name, $value, PDO::PARAM_STR);
+			}
 			$stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 			$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 			$stmt->execute();

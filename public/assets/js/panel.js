@@ -881,7 +881,6 @@
 		bindFileControls();
 		// pt 6: same debounce for the purchases list.
 		document.getElementById('premSearch')?.addEventListener('input', schedulePremiumSearch);
-		document.getElementById('userSearch')?.addEventListener('input', () => loadUsers(1));
 
 		// Live strength meter + requirement checklist + match for the manage-user (B2) and
 		// create-user (B3) password fields — matching the account-tab / file-options UX.
@@ -907,7 +906,8 @@
 				initFilesTab();
 				break;
 			case 'users':
-				loadUsers();
+				// Search box (debounced) and the Tracking view's ?search= link.
+				window.FHPanelUsers?.initUsersTab();
 				break;
 			case 'myfiles':
 				initMyFilesTab();

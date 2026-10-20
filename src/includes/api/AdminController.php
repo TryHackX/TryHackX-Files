@@ -43,7 +43,9 @@ final class AdminController
 		}
 
 		$limit = 20; // Default limit
-		$result = Database::getAllUsers($page, $limit, $sortBy, $order, $sorts);
+		// The Users tab's search box and the Tracking view's "find user" link (by address).
+		$search = is_string($_GET['search'] ?? null) ? mb_substr(trim($_GET['search']), 0, 100) : '';
+		$result = UserRepository::all($page, $limit, $sortBy, $order, $sorts, $search);
 
 		// pt 4: which row is the owner, so the list can leave out a delete button that would
 		// only ever be refused.

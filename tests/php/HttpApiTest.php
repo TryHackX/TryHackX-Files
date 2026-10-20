@@ -747,6 +747,13 @@ final class HttpApiTest extends TestCase
 		$users = self::getJson('/api.php?action=admin_users');
 		$this->assertTrue($users['success'] ?? false, 'admin listing should answer the admin');
 
+		// The search box narrows the list on the server (it used to send no term at all).
+		$found = self::getJson('/api.php?action=admin_users&search=' . rawurlencode('HTTPADM'));
+		$this->assertSame(['httpadmin'], array_column($found['users'] ?? [], 'username'));
+		$this->assertSame(1, $found['total'] ?? null);
+		$none = self::getJson('/api.php?action=admin_users&search=' . rawurlencode('no-such-account-%'));
+		$this->assertSame([], $none['users'] ?? null);
+
 		// The admin's panel does carry the scripts of the screens an ordinary account never gets.
 		$panel = self::rawRequest('GET', '/panel.php?tab=users');
 		$this->assertSame(200, $panel['status']);

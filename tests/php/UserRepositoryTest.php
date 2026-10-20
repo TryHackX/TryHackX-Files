@@ -174,6 +174,38 @@ final class UserRepositoryTest extends RepoTestCase
 		);
 	}
 
+	/** The Users tab's search: names and e-mails taken literally, addresses matched exactly. */
+	public function testAdminListSearchesNamesEmailsAndAddresses(): void
+	{
+		$this->truncate('files');
+		$this->assertTrue($this->register('alice', 'alice@example.pl')['success']);
+		$this->assertTrue($this->register('bob_smith', 'bob@example.org')['success']);
+		$this->assertTrue($this->register('carol', 'carol@example.pl')['success']);
+		$pdo = Database::getInstance();
+		$id = static function (string $name) use ($pdo): int {
+			$stmt = $pdo->prepare("SELECT `id` FROM `" . Database::table('users') . "` WHERE `username` = ?");
+			$stmt->execute([$name]);
+			return (int) $stmt->fetchColumn();
+		};
+		$pdo->prepare("UPDATE `" . Database::table('users') . "` SET `registered_ip` = '203.0.113.9' WHERE `id` = ?")
+			->execute([$id('bob_smith')]);
+		$this->insertFile('searchfile0001', $id('carol'), ['uploaded_ip' => '2001:db8::7']);
+
+		$names = static function (array $result): array {
+			$list = array_map(static fn(array $user): string => (string) $user['username'], $result['users']);
+			sort($list);
+			return $list;
+		};
+		$this->assertSame(['alice'], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], 'ALI')));
+		$this->assertSame(['alice', 'carol'], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], 'example.pl')));
+		$this->assertSame(2, UserRepository::all(1, 20, 'created_at', 'desc', [], 'example.pl')['total'], 'the total counts the matches');
+		$this->assertSame(['bob_smith'], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], 'b_s')), '"_" is a character, not a wildcard');
+		$this->assertSame([], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], '%')), '"%" is a character, not a wildcard');
+		$this->assertSame(['bob_smith'], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], '203.0.113.9')), 'registered from the address');
+		$this->assertSame(['carol'], $names(UserRepository::all(1, 20, 'created_at', 'desc', [], '2001:db8::7')), 'uploaded from the address');
+		$this->assertSame(3, UserRepository::all(1, 20, 'created_at', 'desc', [], '   ')['total'], 'a blank search lists everyone');
+	}
+
 	public function testDeactivationRevokesCredentialsAndAdvancesSessionVersion(): void
 	{
 		$this->register();
