@@ -59,4 +59,23 @@ final class ReportRepositoryTest extends RepoTestCase
 		Database::markReportVerified($ip);
 		$this->assertSame(0, Database::getReportCount($ip, 60));
 	}
+
+	/**
+	 * The hard cap counts every report of the network and is not reset by a passed CAPTCHA;
+	 * which files a network reported is remembered so a repeat is not stored twice.
+	 */
+	public function testNetworkCountsSurviveACaptchaAndRememberTheFiles(): void
+	{
+		$this->insertFile('rep_file');
+		$this->insertFile('rep_other');
+		$ip = getClientIP();
+		Database::addReport('rep_file', $this->reportData());
+		$this->assertTrue(ReportRepository::alreadyReported($ip, 'rep_file'));
+		$this->assertFalse(ReportRepository::alreadyReported($ip, 'rep_other'));
+		$this->assertSame(1, ReportRepository::sentFromNetwork($ip));
+
+		Database::markReportVerified($ip);
+		$this->assertSame(0, Database::getReportCount($ip, 60));
+		$this->assertSame(1, ReportRepository::sentFromNetwork($ip), 'a CAPTCHA does not lift the hard cap');
+	}
 }

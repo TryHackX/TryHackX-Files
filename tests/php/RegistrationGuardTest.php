@@ -72,6 +72,28 @@ final class RegistrationGuardTest extends RepoTestCase
 		$this->assertNull(RegistrationGuard::checkIp('203.0.113.8'));    // a different IP is fine
 	}
 
+	/**
+	 * The cap is per network: every address of one IPv6 /64 is the same applicant, and an
+	 * account recorded before the network key was stored still counts by its exact address.
+	 */
+	public function testAccountsPerIpv6NetworkAreCapped(): void
+	{
+		Database::setSetting('reg_ip_limit', 2);
+		$this->assertSame('2001:db8:1:2::/64', RegistrationGuard::registrationKey('2001:db8:1:2::5'));
+		$this->assertSame('203.0.113.7', RegistrationGuard::registrationKey('203.0.113.7'));
+		$this->assertNull(RegistrationGuard::registrationKey(''));
+
+		$ins = Database::getInstance()->prepare('INSERT INTO `' . Database::table('users')
+			. '` (`username`, `email`, `password_hash`, `created_at`, `is_active`, `registered_ip`) VALUES (?, ?, ?, ?, 1, ?)');
+		$ins->execute(['net-a', 'net-a@example.com', 'x', time(), RegistrationGuard::registrationKey('2001:db8:1:2::5')]);
+		$this->assertNull(RegistrationGuard::checkIp('2001:db8:1:2::ffff'));
+		$ins->execute(['net-b', 'net-b@example.com', 'x', time(), '2001:db8:1:2::ffff']); // a legacy exact row
+		$this->assertNotNull(RegistrationGuard::checkIp('2001:db8:1:2::ffff'), 'full for this address');
+		$ins->execute(['net-c', 'net-c@example.com', 'x', time(), RegistrationGuard::registrationKey('2001:db8:1:2::77')]);
+		$this->assertNotNull(RegistrationGuard::checkIp('2001:db8:1:2:9::1'), 'full for the whole /64');
+		$this->assertNull(RegistrationGuard::checkIp('2001:db8:1:3::1'));
+	}
+
 	/** Accounts older than the window stop counting, so the cap is a rate, not a lifetime total. */
 	public function testOldAccountsFallOutOfTheWindow(): void
 	{

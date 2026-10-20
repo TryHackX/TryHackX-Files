@@ -2,6 +2,8 @@
 
 use PHPUnit\Framework\TestCase;
 
+require_once PROJECT_ROOT . '/src/includes/api/ReportController.php';
+
 /**
  * Request-level checks for the file, collection and moderation pages, over real HTTP against a
  * `php -S` instance on the suite's throwaway database (same mechanics as HttpApiTest, which
@@ -21,7 +23,7 @@ final class DomainHttpTest extends TestCase
 	{
 		$pdo = Database::getInstance();
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-		foreach (['users', 'files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications'] as $t) {
+		foreach (['users', 'files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
 			$pdo->exec('TRUNCATE TABLE `' . Database::table($t) . '`');
 		}
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=1');
@@ -54,6 +56,13 @@ final class DomainHttpTest extends TestCase
 		]);
 		self::$ids['owned'] = self::storeFile('owned.bin', 'application/octet-stream', 'owned-bytes', [
 			'user_id' => (int) $owner['id'],
+		]);
+		// C-F5: the guesser's own protected uploads, whose passwords it knows.
+		self::$ids['locked2'] = self::storeFile('locked2.png', 'image/png', 'locked2-bytes', [
+			'password_hash' => password_hash('own-password', PASSWORD_DEFAULT),
+		]);
+		self::$ids['locked3'] = self::storeFile('locked3.png', 'image/png', 'locked3-bytes', [
+			'password_hash' => password_hash('third-password', PASSWORD_DEFAULT),
 		]);
 		Database::createAdmin('httpboss', 'HttpBoss1!x', 'httpboss@example.pl');
 		$pdo->exec("UPDATE `" . Database::table('users') . "` SET `is_active` = 1");
@@ -122,7 +131,7 @@ final class DomainHttpTest extends TestCase
 		Database::setSetting('ads_enabled', '0');
 		$pdo = Database::getInstance();
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=0');
-		foreach (['files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications', 'reports'] as $t) {
+		foreach (['files', 'collections', 'collection_files', 'ads', 'rate_limits', 'security_events', 'notifications', 'reports', 'transfer_quota_usage', 'active_downloads'] as $t) {
 			$pdo->exec('TRUNCATE TABLE `' . Database::table($t) . '`');
 		}
 		$pdo->exec('SET FOREIGN_KEY_CHECKS=1');
@@ -352,5 +361,100 @@ final class DomainHttpTest extends TestCase
 		$res = self::json('POST', '/api.php?action=report_file', ['file_id' => self::$ids['plain'], 'name' => 'Jan'], '203.0.113.90');
 		$this->assertFalse($res['success'] ?? true);
 		$this->assertSame('validation', $res['error_kind'] ?? null);
+	}
+
+	/**
+	 * C-F5: the right password for one's own upload must not buy fresh guesses at someone
+	 * else's. With a correct password every fifth attempt, the twentieth wrong guess still
+	 * ends guessing for the network — and then the right password is refused too.
+	 */
+	public function testACorrectPasswordForAnotherFileDoesNotResetTheBudget(): void
+	{
+		self::freshSession();
+		$ip = '203.0.113.120';
+		$blockedAt = null;
+		for ($i = 0; $i < 30; $i++) {
+			$own = $i % 5 === 4;
+			$res = self::json('POST', '/api.php?action=preview_auth', [
+				'id' => self::$ids[$own ? 'locked2' : 'locked'],
+				'pw' => $own ? 'own-password' : 'guess-' . $i,
+			], $ip);
+			if ($res['status'] === 429) {
+				$blockedAt = $i;
+				break;
+			}
+			$this->assertSame($own, $res['success'] ?? null, json_encode($res));
+		}
+		$this->assertSame(24, $blockedAt, 'twenty wrong guesses take 24 attempts with every fifth one right');
+	}
+
+	/** C-F5/C-F9: every address of one IPv6 /64 spends the same budget. */
+	public function testAddressesOfOneIpv6NetworkShareThePasswordBudget(): void
+	{
+		self::freshSession();
+		for ($i = 1; $i <= 20; $i++) {
+			$wrong = self::json('POST', '/api.php?action=preview_auth', [
+				'id' => self::$ids['locked3'],
+				'pw' => 'guess-' . $i,
+			], '2001:db8:77:1::' . dechex($i));
+			$this->assertTrue($wrong['require_password'] ?? false, json_encode($wrong));
+		}
+		$blocked = self::json('POST', '/api.php?action=preview_auth', [
+			'id' => self::$ids['locked3'],
+			'pw' => 'third-password',
+		], '2001:db8:77:1:ffff:ffff:ffff:1');
+		$this->assertSame(429, $blocked['status']);
+
+		$neighbour = self::json('POST', '/api.php?action=preview_auth', [
+			'id' => self::$ids['locked3'],
+			'pw' => 'third-password',
+		], '2001:db8:77:2::1');
+		$this->assertTrue($neighbour['success'] ?? false, json_encode($neighbour));
+	}
+
+	private static function reportPayload(string $fileId, string $info = 'Details of the problem'): array
+	{
+		return [
+			'file_id' => $fileId,
+			'name' => 'Jan Kowalski',
+			'email' => 'jan@example.pl',
+			'entity' => 'Rights holder',
+			'org' => 'Example Ltd',
+			'title' => 'Copyright',
+			'info' => $info,
+		];
+	}
+
+	/**
+	 * C-F10: abuse reports have a hard cap per network even without a CAPTCHA, a repeat of the
+	 * same file from the same network is not stored twice, and the free text is bounded.
+	 */
+	public function testReportsAreCappedPerNetworkDeduplicatedAndBounded(): void
+	{
+		self::freshSession();
+		$pdo = Database::getInstance();
+		$pdo->prepare(
+			"INSERT INTO `" . Database::table('security_events') . "` (`ip_address`, `event_type`, `counter`, `last_updated_at`)
+			 VALUES (?, 'report_sent', ?, ?)"
+		)->execute(['2001:db8:88:1::/64', ReportRepository::NETWORK_HARD_LIMIT, time()]);
+		$capped = self::json('POST', '/api.php?action=report_file', self::reportPayload(self::$ids['plain']), '2001:db8:88:1::99');
+		$this->assertSame(429, $capped['status'], json_encode($capped));
+		$this->assertSame('rate', $capped['error_kind'] ?? null);
+
+		$reports = static fn(): int => (int) $pdo->query(
+			"SELECT COUNT(*) FROM `" . Database::table('reports') . "`"
+		)->fetchColumn();
+		$before = $reports();
+		$first = self::json('POST', '/api.php?action=report_file', self::reportPayload(self::$ids['plain'], str_repeat('ż', 6000)), '203.0.113.130');
+		$this->assertTrue($first['success'] ?? false, json_encode($first));
+		$again = self::json('POST', '/api.php?action=report_file', self::reportPayload(self::$ids['plain']), '203.0.113.130');
+		$this->assertTrue($again['success'] ?? false);
+		$this->assertTrue($again['duplicate'] ?? false);
+		$this->assertSame($before + 1, $reports(), 'the repeat is not stored');
+
+		$info = (string) $pdo->query(
+			"SELECT `additional_info` FROM `" . Database::table('reports') . "` ORDER BY `id` DESC LIMIT 1"
+		)->fetchColumn();
+		$this->assertSame(ReportController::INFO_MAX, mb_strlen($info));
 	}
 }

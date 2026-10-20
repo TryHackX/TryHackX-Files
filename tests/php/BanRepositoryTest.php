@@ -57,6 +57,39 @@ final class BanRepositoryTest extends RepoTestCase
 		$this->assertCount(2, $res['bans']);
 	}
 
+	/**
+	 * An IPv6 client picks any address of its /64, so an address ban is stored and matched
+	 * per network; IPv4 (also written as IPv4-mapped IPv6) stays per address.
+	 */
+	public function testIpv6BansCoverTheWholeSlash64(): void
+	{
+		$this->assertTrue(BanRepository::add('ip', '2001:db8:1:2::5', null, 'spam'));
+		$row = BanRepository::details('ip', '2001:db8:1:2:aaaa:bbbb:cccc:dddd');
+		$this->assertIsArray($row);
+		$this->assertSame('2001:db8:1:2::/64', $row['value']);
+		$this->assertTrue(BanRepository::isBanned('ip', '2001:db8:1:2::6'));
+		$this->assertFalse(BanRepository::isBanned('ip', '2001:db8:1:3::5'), 'the neighbouring /64');
+
+		// The network form may be typed directly, and is stored the same way.
+		BanRepository::add('ip', '2001:DB8:7:8:0:0:0:1/64', null, '');
+		$this->assertTrue(BanRepository::isBanned('ip', '2001:db8:7:8::ffff'));
+
+		BanRepository::add('ip', '192.0.2.44', null, '');
+		$this->assertTrue(BanRepository::isBanned('ip', '::ffff:192.0.2.44'), 'IPv4-mapped is the IPv4 address');
+		$this->assertFalse(BanRepository::isBanned('ip', '192.0.2.45'));
+	}
+
+	/** Address bans written before they were stored per network keep matching exactly. */
+	public function testExactIpv6RowsFromBeforeStillMatch(): void
+	{
+		Database::getInstance()->prepare(
+			"INSERT INTO `" . Database::table('blacklists') . "` (`type`, `value`, `created_at`, `expires_at`, `reason`)
+			 VALUES ('ip', '2001:db8:9:9::7', ?, NULL, 'legacy')"
+		)->execute([time()]);
+		$this->assertTrue(BanRepository::isBanned('ip', '2001:db8:9:9::7'));
+		$this->assertFalse(BanRepository::isBanned('ip', '2001:db8:9:9::8'));
+	}
+
 	public function testAddIsUpsert(): void
 	{
 		BanRepository::add('ip', '5.5.5.5', null, 'first');

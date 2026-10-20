@@ -1,15 +1,46 @@
 <?php
+require_once __DIR__ . '/../ClientIp.php';
+
 /**
  * ReportRepository (Faza 5 · #2).
  *
  * Abuse reports against files (Report → Moderate). Handles submission, the moderation
  * list/detail views, rejection, and cascade removal when a file is deleted. Also owns the
- * per-IP report throttle: countForIP() and markVerified() implement the "N reports / window,
- * reset after a passed CAPTCHA" rule (the reset flag lives in security_events). Extracted
- * from the Database god-object; the matching Database::* methods delegate here.
+ * report throttle, counted per network (an IPv6 /64, see filehostThrottleKey) in
+ * security_events over the security window:
+ *   - every accepted report, which nothing but the window resets — the hard cap
+ *     (NETWORK_HARD_LIMIT) that holds with or without a CAPTCHA;
+ *   - reports since the last passed CAPTCHA — countForIP()/markVerified(), the "N reports,
+ *     then a CAPTCHA" rule;
+ *   - which files the network has reported — a repeat is not stored twice.
+ * Extracted from the Database god-object; the matching Database::* methods delegate here.
  */
 final class ReportRepository
 {
+	/** Reports one network may file per security window, CAPTCHA or not. */
+	public const NETWORK_HARD_LIMIT = 20;
+
+	private const SENT_EVENT = 'report_sent';
+	private const UNVERIFIED_EVENT = 'report_unverified';
+
+	/** The security_events type marking that a network reported this file. */
+	private static function fileEvent(string $fileId): string
+	{
+		return 'rpt:' . substr(sha1($fileId), 0, 24);
+	}
+
+	/** Every report accepted from $ip's network in the current window. */
+	public static function sentFromNetwork(string $ip): int
+	{
+		return Database::getSecurityEvent(filehostThrottleKey($ip), self::SENT_EVENT);
+	}
+
+	/** Whether $ip's network already reported this file in the current window. */
+	public static function alreadyReported(string $ip, string $fileId): bool
+	{
+		return Database::getSecurityEvent(filehostThrottleKey($ip), self::fileEvent($fileId)) > 0;
+	}
+
 	public static function add(string $fileId, array $data): array
 	{
 		$pdo = Database::getInstance();
@@ -32,6 +63,7 @@ final class ReportRepository
 				(`file_id`, `reporter_name`, `reporter_email`, `reporter_entity`, `reporter_org`, `report_title`, `report_link`, `additional_info`, `created_at`, `ip_address`)
 				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
+			$ip = getClientIP();
 			$stmt->execute([
 				$fileId,
 				$data['name'],
@@ -42,10 +74,16 @@ final class ReportRepository
 				$data['link'] ?? '',
 				$data['info'] ?? '',
 				time(),
-				getClientIP()
+				$ip
 			]);
+			$reportId = $pdo->lastInsertId();
 
-			return ['success' => true, 'report_id' => $pdo->lastInsertId()];
+			$network = filehostThrottleKey($ip);
+			Database::incrementSecurityEvent($network, self::SENT_EVENT);
+			Database::incrementSecurityEvent($network, self::UNVERIFIED_EVENT);
+			Database::incrementSecurityEvent($network, self::fileEvent($fileId));
+
+			return ['success' => true, 'report_id' => $reportId];
 		} catch (PDOException $e) {
 			error_log("Report error: " . $e->getMessage());
 			return ['success' => false, 'error' => 'Database error'];
@@ -123,59 +161,22 @@ final class ReportRepository
 		}
 	}
 
-	/** Record that $ip just passed a CAPTCHA for reporting — resets its report throttle window. */
+	/**
+	 * Record that $ip just passed a CAPTCHA for reporting: its network's count towards the next
+	 * CAPTCHA starts again. The hard cap (sentFromNetwork) is not touched.
+	 */
 	public static function markVerified(string $ip): void
 	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return;
-		}
-		$table = Database::table('security_events');
-		try {
-			$stmt = $pdo->prepare("INSERT INTO `{$table}` (`ip_address`, `event_type`, `counter`, `last_updated_at`)
-				VALUES (?, 'report_verified', 1, ?)
-				ON DUPLICATE KEY UPDATE `last_updated_at` = ?");
-			$stmt->execute([$ip, time(), time()]);
-		} catch (PDOException $e) {
-		}
+		Database::clearSecurityEvent(filehostThrottleKey($ip), self::UNVERIFIED_EVENT);
 	}
 
 	/**
-	 * Number of reports from $ip within the last $minutes, but never counting past the
-	 * last passed CAPTCHA (markVerified) — a verified report effectively resets the counter,
-	 * so a legitimate reporter isn't blocked after proving they're human.
+	 * Reports from $ip's network since its last passed CAPTCHA (markVerified), within the
+	 * security window (`recaptcha_security_window`, which is also what every caller passes as
+	 * $minutes) — so a legitimate reporter isn't blocked after proving they're human.
 	 */
 	public static function countForIP(string $ip, int $minutes): int
 	{
-		$pdo = Database::getInstance();
-		if (!$pdo) {
-			return 0;
-		}
-
-		$table = Database::table('reports');
-		$eventsTable = Database::table('security_events');
-		try {
-			// Check for last verification bypass
-			$lastVerified = 0;
-			try {
-				$stmt = $pdo->prepare("SELECT `last_updated_at` FROM `{$eventsTable}` WHERE `ip_address` = ? AND `event_type` = 'report_verified'");
-				$stmt->execute([$ip]);
-				$lastVerified = (int) $stmt->fetchColumn();
-			} catch (PDOException $e) { /* ignore */
-			}
-
-			$since = time() - ($minutes * 60);
-			// Reset point is the LATEST of (Window Start, Last Verification)
-			// This effectively "resets" the counter after a verified CAPTCHA
-			if ($lastVerified > $since) {
-				$since = $lastVerified;
-			}
-
-			$stmt = $pdo->prepare("SELECT COUNT(*) FROM `{$table}` WHERE `ip_address` = ? AND `created_at` > ?");
-			$stmt->execute([$ip, $since]);
-			return (int) $stmt->fetchColumn();
-		} catch (PDOException $e) {
-			return 0;
-		}
+		return Database::getSecurityEvent(filehostThrottleKey($ip), self::UNVERIFIED_EVENT);
 	}
 }

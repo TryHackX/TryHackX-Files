@@ -8,6 +8,9 @@
  */
 final class ReportController
 {
+	/** The longest "additional information" a report keeps, in characters. */
+	public const INFO_MAX = 5000;
+
 	private static function text(mixed $value, int $maxLength): string
 	{
 		$value = trim(is_scalar($value) ? (string) $value : '');
@@ -78,17 +81,24 @@ final class ReportController
 			return;
 		}
 
-		// Check thresholds for CAPTCHA
+		// A hard cap per network and security window, whether or not a CAPTCHA is configured:
+		// without one, the shared write rate was the only brake on filling the moderation queue.
+		if (ReportRepository::sentFromNetwork($ip) >= ReportRepository::NETWORK_HARD_LIMIT) {
+			http_response_code(429);
+			echo json_encode([
+				'success' => false,
+				'error' => __('api.report_limit'),
+				'error_kind' => 'rate',
+			]);
+			return;
+		}
+
+		// Check thresholds for CAPTCHA: reports from this network since its last passed one.
 		$reportThresholdCount = (int) Database::getSetting('recaptcha_report_threshold_count', 5);
 		$recaptchaReportRequired = false;
 
 		if ($reportThresholdCount !== -1) {
-			// New unified window setting
-			$windowName = 'report_submission';
-			// Actually, Database::getReportCount uses specific logic.
-			// We should probably rely on report_threshold_time which is now synced with security_window
 			$reportWindow = (int) Database::getSetting('recaptcha_security_window', 60);
-
 			$userReportCount = Database::getReportCount($ip, $reportWindow);
 			if ($userReportCount >= $reportThresholdCount) {
 				$recaptchaReportRequired = true;
@@ -120,7 +130,7 @@ final class ReportController
 			'org' => self::text($input['org'] ?? '', 255),       // E.g. Company Name
 			'title' => self::text($input['title'] ?? '', 255),   // Type of violation, e.g. "Copyright Infringement"
 			'link' => self::text($input['link'] ?? '', 255),
-			'info' => self::text($input['info'] ?? '', 20000)
+			'info' => self::text($input['info'] ?? '', self::INFO_MAX)
 		];
 
 		// Backend validation. `error_kind` tells the page what sort of refusal this is; the
@@ -151,6 +161,13 @@ final class ReportController
 			return;
 		}
 
+		// The same network reporting the same file again within the window adds nothing the
+		// moderators do not already have in front of them.
+		if (ReportRepository::alreadyReported($ip, $fileId)) {
+			echo json_encode(['success' => true, 'duplicate' => true]);
+			return;
+		}
+
 		// Use addReport which matches the schema better
 		$result = Database::addReport($fileId, $data);
 
@@ -178,8 +195,8 @@ final class ReportController
 		header('Content-Type: application/json');
 
 		$ip = getClientIP();
-		// Default config
-		$reportThresholdCount = (int) Database::getSetting('recaptcha_report_threshold_count', 3);
+		// Same default as the installer and handleReportFile.
+		$reportThresholdCount = (int) Database::getSetting('recaptcha_report_threshold_count', 5);
 		$reportWindow = (int) Database::getSetting('recaptcha_security_window', 60);
 
 		$requireCaptcha = false;

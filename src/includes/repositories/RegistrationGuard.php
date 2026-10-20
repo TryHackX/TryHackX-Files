@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../ClientIp.php';
+
 /**
  * RegistrationGuard — keeps one person from turning into fifty accounts (pkt C).
  *
@@ -9,7 +11,7 @@
  *      but these). The usual use is blocking throwaway-inbox providers, or restricting a private
  *      instance to one company domain.
  *   2. **How many accounts one IP may create** in a rolling window. `users.registered_ip` is
- *      recorded at sign-up for exactly this.
+ *      recorded at sign-up for exactly this — as the throttling key, so IPv6 counts per /64.
  *   3. **Re-using an address that was changed away from.** Without this the cap is trivially
  *      dodged: register with A, move the account to B, register again with A. When a change is
  *      confirmed the old address is held for a while and counts as taken.
@@ -91,11 +93,22 @@ final class RegistrationGuard
 		return max(1, (int) Database::getSetting('reg_ip_window_days', 90));
 	}
 
+	/**
+	 * What `users.registered_ip` holds for a sign-up from $ip: the throttling key, so an IPv6
+	 * client counts per /64 network rather than per address it can pick freely.
+	 */
+	public static function registrationKey(string $ip): ?string
+	{
+		$ip = trim($ip);
+		return $ip === '' ? null : filehostThrottleKey($ip);
+	}
+
 	/** Has this IP already used up its account allowance? Returns null when fine. */
 	public static function checkIp(string $ip): ?string
 	{
 		$limit = self::ipLimit();
-		if ($limit <= 0 || $ip === '') {
+		$key = self::registrationKey($ip);
+		if ($limit <= 0 || $key === null) {
 			return null;
 		}
 		$pdo = Database::getInstance();
@@ -103,10 +116,13 @@ final class RegistrationGuard
 			return null;
 		}
 		$since = time() - (self::ipWindowDays() * 86400);
+		// Accounts created before the network key was stored carry their exact address.
+		$values = array_values(array_unique([$key, trim($ip)]));
 		try {
 			$stmt = $pdo->prepare("SELECT COUNT(*) FROM `" . Database::table('users')
-				. "` WHERE `registered_ip` = ? AND `created_at` > ?");
-			$stmt->execute([$ip, $since]);
+				. "` WHERE `registered_ip` IN (" . implode(',', array_fill(0, count($values), '?'))
+				. ") AND `created_at` > ?");
+			$stmt->execute(array_merge($values, [$since]));
 			$count = (int) $stmt->fetchColumn();
 		} catch (PDOException $e) {
 			return null; // never block sign-up because a count failed

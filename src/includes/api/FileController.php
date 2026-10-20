@@ -213,7 +213,7 @@ final class FileController
 		// Password-protected files: require the correct password before issuing a token. After
 		// repeated failures the same CAPTCHA proof used by the download page becomes mandatory.
 		if (Database::fileIsProtected($id)) {
-			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $captchaProof, true);
+			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $id, $captchaProof, true);
 			if ($gate['refusal'] !== null) {
 				self::sendRefusal($gate['refusal']);
 				return;
@@ -221,11 +221,16 @@ final class FileController
 			$captchaWasAccepted = $gate['captcha_accepted'];
 			$pwRaw = $input['pw'] ?? $_POST['pw'] ?? $_GET['pw'] ?? '';
 			$pw = is_string($pwRaw) && strlen($pwRaw) <= InputLimits::PASSWORD_MAX ? $pwRaw : '';
-			if ($pw === '' || !Database::verifyFilePassword($id, $pw)) {
-				echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, true));
+			if ($pw === '') {
+				// The page asks first and prompts on this answer: no password is not a guess.
+				echo json_encode(['success' => false, 'require_password' => true]);
 				return;
 			}
-			Database::clearSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
+			if (!Database::verifyFilePassword($id, $pw)) {
+				echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, $id, true));
+				return;
+			}
+			self::passwordSuccess(self::FILE_PASSWORD_EVENT, $id);
 		}
 
 		// CAPTCHA Logic: 0 = always, -1 = never, N = every Nth download of this session.
@@ -382,16 +387,20 @@ final class FileController
 
 		// The same password, the same budget as the Download button: this endpoint must not
 		// be a way round the failed-attempt counter and its CAPTCHA.
-		$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $captchaProof, true);
+		$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, $id, $captchaProof, true);
 		if ($gate['refusal'] !== null) {
 			self::sendRefusal($gate['refusal']);
 			return;
 		}
-		if ($pw === '' || !Database::verifyFilePassword($id, $pw)) {
-			echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, true) + ['error' => __('api.bad_password')]);
+		if ($pw === '') {
+			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
 			return;
 		}
-		Database::clearSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
+		if (!Database::verifyFilePassword($id, $pw)) {
+			echo json_encode(self::passwordFailure(self::FILE_PASSWORD_EVENT, $id, true) + ['error' => __('api.bad_password')]);
+			return;
+		}
+		self::passwordSuccess(self::FILE_PASSWORD_EVENT, $id);
 
 		$_SESSION['preview_grants'][$id] = time();
 		echo json_encode(['success' => true, 'preview' => $previewAllowed]);
@@ -399,30 +408,71 @@ final class FileController
 
 	private const FILE_PASSWORD_EVENT = 'file_password_fail';
 	private const COLLECTION_PASSWORD_EVENT = 'collection_password_fail';
-	/** Wrong passwords per address and security window after which guessing simply stops. */
+	/**
+	 * Wrong passwords per network (an IPv6 /64, see filehostThrottleKey) and security window
+	 * after which guessing simply stops, whatever the target. A correct password does not
+	 * reset it: knowing the password of one's own upload must not buy fresh guesses at
+	 * someone else's.
+	 */
 	private const PASSWORD_FAIL_HARD_LIMIT = 20;
+	/**
+	 * Wrong passwords against one file or collection from all networks together, after which
+	 * that target accepts no more guesses until the window has passed. The brake on a guesser
+	 * spread over many networks.
+	 */
+	private const PASSWORD_TARGET_HARD_LIMIT = 100;
+	/** security_events type of the per-target counter (subject: targetSubject()). */
+	private const PASSWORD_TARGET_EVENT = 'password_fail_all';
+
+	/** The security_events subject counting failures against one target from everywhere. */
+	private static function targetSubject(string $event, string $target): string
+	{
+		return substr(($event === self::COLLECTION_PASSWORD_EVENT ? 'coll:' : 'file:') . $target, 0, 45);
+	}
+
+	/** The security_events type counting this network's failures against one target. */
+	private static function pairEvent(string $event, string $target): string
+	{
+		return ($event === self::COLLECTION_PASSWORD_EVENT ? 'cpw:' : 'fpw:') . substr(sha1($target), 0, 24);
+	}
+
+	/** Has this target taken too many wrong guesses from everywhere to check another one? */
+	private static function targetExhausted(string $event, string $target): bool
+	{
+		return $target !== ''
+			&& Database::getSecurityEvent(self::targetSubject($event, $target), self::PASSWORD_TARGET_EVENT)
+				>= self::PASSWORD_TARGET_HARD_LIMIT;
+	}
 
 	/**
 	 * Decide whether another password guess may be checked at all.
 	 *
 	 * Every endpoint that checks a file or collection password goes through here, so none of
-	 * them is a cheaper oracle than the others. Past `recaptcha_file_password_threshold`
-	 * failures a CAPTCHA proof is required where the page can show one ($captchaCapable);
-	 * past PASSWORD_FAIL_HARD_LIMIT the answer is "try later" whatever is supplied, which is
-	 * also the only brake on an installation that runs without a CAPTCHA.
+	 * them is a cheaper oracle than the others. Three counters, all per security window:
+	 *   - this network over every target: past PASSWORD_FAIL_HARD_LIMIT the answer is "try
+	 *     later" whatever is supplied — also the only brake on an installation without a
+	 *     CAPTCHA — and nothing but the window resets it;
+	 *   - this network against this target ($target): past `recaptcha_file_password_threshold`
+	 *     a CAPTCHA proof is required where the page can show one ($captchaCapable); a solved
+	 *     CAPTCHA or the right password clears this one only;
+	 *   - every network against this target: past PASSWORD_TARGET_HARD_LIMIT the target
+	 *     accepts no more guesses.
 	 *
+	 * @param string $target the file or collection id; '' checks only the network budget
 	 * @return array{refusal: ?array{status: int, body: array}, captcha_accepted: bool}
 	 */
-	private static function passwordAttemptGate(string $event, string $captchaProof, bool $captchaCapable): array
+	private static function passwordAttemptGate(string $event, string $target, string $captchaProof, bool $captchaCapable): array
 	{
 		$ip = getClientIP();
-		$fails = Database::getSecurityEvent($ip, $event);
-		if ($fails >= self::PASSWORD_FAIL_HARD_LIMIT) {
+		$network = filehostThrottleKey($ip);
+		if (Database::getSecurityEvent($network, $event) >= self::PASSWORD_FAIL_HARD_LIMIT
+			|| self::targetExhausted($event, $target)) {
 			return ['refusal' => [
 				'status' => 429,
 				'body' => ['success' => false, 'error' => __('api.too_many_attempts')],
 			], 'captcha_accepted' => false];
 		}
+		$fails = Database::getSecurityEvent($network, $target !== '' ? self::pairEvent($event, $target) : $event);
 		$threshold = (int) Database::getSetting('recaptcha_file_password_threshold', 3);
 		if ($captchaCapable && $threshold >= 0 && $fails >= $threshold && Database::isRecaptchaEnabled()) {
 			if ($captchaProof === '' || !Database::verifyUploadToken($captchaProof, $ip)) {
@@ -431,24 +481,44 @@ final class FileController
 					'body' => ['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')],
 				], 'captcha_accepted' => false];
 			}
+			// A solved CAPTCHA buys `threshold` more guesses at this target before the next
+			// one — never a fresh network budget, which only the window resets.
 			Database::deleteUploadToken($captchaProof);
-			Database::clearSecurityEvent($ip, $event);
+			if ($target !== '') {
+				Database::clearSecurityEvent($network, self::pairEvent($event, $target));
+			}
 			return ['refusal' => null, 'captcha_accepted' => true];
 		}
 		return ['refusal' => null, 'captcha_accepted' => false];
 	}
 
-	/** Count one wrong password and say what the next attempt will need. */
-	private static function passwordFailure(string $event, bool $captchaCapable): array
+	/** Count one wrong password on all three counters and say what the next attempt will need. */
+	private static function passwordFailure(string $event, string $target, bool $captchaCapable): array
 	{
-		$ip = getClientIP();
-		Database::incrementSecurityEvent($ip, $event);
-		$fails = Database::getSecurityEvent($ip, $event);
+		$network = filehostThrottleKey(getClientIP());
+		Database::incrementSecurityEvent($network, $event);
+		$fails = 0;
+		if ($target !== '') {
+			Database::incrementSecurityEvent($network, self::pairEvent($event, $target));
+			Database::incrementSecurityEvent(self::targetSubject($event, $target), self::PASSWORD_TARGET_EVENT);
+			$fails = Database::getSecurityEvent($network, self::pairEvent($event, $target));
+		} else {
+			$fails = Database::getSecurityEvent($network, $event);
+		}
 		$threshold = (int) Database::getSetting('recaptcha_file_password_threshold', 3);
 		if ($captchaCapable && $threshold >= 0 && $fails >= $threshold && Database::isRecaptchaEnabled()) {
 			return ['success' => false, 'require_captcha' => true, 'error' => __('api.captcha_required')];
 		}
 		return ['success' => false, 'require_password' => true];
+	}
+
+	/**
+	 * The right password: this network's count against this target starts again. The network
+	 * budget and the target's count from everywhere are left to their window.
+	 */
+	private static function passwordSuccess(string $event, string $target): void
+	{
+		Database::clearSecurityEvent(filehostThrottleKey(getClientIP()), self::pairEvent($event, $target));
 	}
 
 	/** @param array{status: int, body: array} $refusal */
@@ -866,10 +936,12 @@ final class FileController
 			}
 
 			$ip = getClientIP();
+			// Failures count per network (an IPv6 /64), like every other per-address budget.
+			$subject = filehostThrottleKey($ip);
 
 			// Check Security Threshold. Kept ahead of the row lookup's verdict so a throttled
 			// caller cannot use this endpoint to probe which ids exist.
-			$failCount = Database::getSecurityEvent($ip, 'delete_fail');
+			$failCount = Database::getSecurityEvent($subject, 'delete_fail');
 			$threshold = (int) Database::getSetting('recaptcha_delete_token_threshold', 1);
 
 			if ($threshold >= 0 && $failCount >= $threshold && Database::isRecaptchaEnabled()) {
@@ -888,12 +960,12 @@ final class FileController
 
 			// Verify token (bcrypt hash, with constant-time fallback for legacy plaintext tokens)
 			if (!self::deleteTokenMatches($token, (string) $file['delete_token'])) {
-				Database::incrementSecurityEvent($ip, 'delete_fail');
+				Database::incrementSecurityEvent($subject, 'delete_fail');
 				echo json_encode(['success' => false, 'error' => __('api.bad_delete_token')]);
 				return;
 			}
 
-			Database::clearSecurityEvent($ip, 'delete_fail');
+			Database::clearSecurityEvent($subject, 'delete_fail');
 		}
 
 		// Reached either as the row's signed-in owner or with a verified capability token;
@@ -1200,9 +1272,11 @@ final class FileController
 		$rejected = [];
 		// Member passwords are file passwords: they share the failed-attempt budget of the
 		// download page, so building or unlocking a collection is no cheaper way to guess one.
-		$throttled = Database::getSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT)
-			>= self::PASSWORD_FAIL_HARD_LIMIT;
-		$wrongGuess = false;
+		// Every wrong member password is one guess, and no more passwords are checked than the
+		// network has left — a request carrying 200 of them used to count once.
+		$network = filehostThrottleKey(getClientIP());
+		$budget = self::PASSWORD_FAIL_HARD_LIMIT
+			- Database::getSecurityEvent($network, self::FILE_PASSWORD_EVENT);
 		foreach ($fileIds as $fid) {
 			$row = $rows[$fid] ?? null;
 			if (!$row) {
@@ -1217,19 +1291,26 @@ final class FileController
 			$tokRaw = $tokens[$fid] ?? '';
 			$pw = is_string($pwRaw) && strlen($pwRaw) <= InputLimits::PASSWORD_MAX ? $pwRaw : '';
 			$tok = is_string($tokRaw) && strlen($tokRaw) <= InputLimits::SHORT_TEXT_MAX ? $tokRaw : '';
-			$passwordOk = !$throttled && $pw !== '' && password_verify($pw, (string) $row['password_hash']);
-			if ($passwordOk
-				|| ($exemptByToken && $tok !== ''
-					&& self::deleteTokenMatches($tok, (string) $row['delete_token']))
-			) {
+			if ($exemptByToken && $tok !== ''
+				&& self::deleteTokenMatches($tok, (string) $row['delete_token'])) {
+				$allowed[] = $fid;
+				continue;
+			}
+			$passwordOk = false;
+			if ($pw !== '' && $budget > 0 && !self::targetExhausted(self::FILE_PASSWORD_EVENT, (string) $fid)) {
+				$passwordOk = password_verify($pw, (string) $row['password_hash']);
+				if ($passwordOk) {
+					self::passwordSuccess(self::FILE_PASSWORD_EVENT, (string) $fid);
+				} else {
+					self::passwordFailure(self::FILE_PASSWORD_EVENT, (string) $fid, false);
+					$budget--;
+				}
+			}
+			if ($passwordOk) {
 				$allowed[] = $fid;
 			} else {
-				$wrongGuess = $wrongGuess || ($pw !== '' && !$throttled);
 				$rejected[] = $row['original_name'] ?? $fid;
 			}
-		}
-		if ($wrongGuess) {
-			Database::incrementSecurityEvent(getClientIP(), self::FILE_PASSWORD_EVENT);
 		}
 		return [$allowed, $rejected];
 	}
@@ -1621,18 +1702,22 @@ final class FileController
 			return;
 		}
 		// The collection page has no CAPTCHA to offer, so the budget here is the hard one.
-		$gate = self::passwordAttemptGate(self::COLLECTION_PASSWORD_EVENT, '', false);
+		$gate = self::passwordAttemptGate(self::COLLECTION_PASSWORD_EVENT, $id, '', false);
 		if ($gate['refusal'] !== null) {
 			self::sendRefusal($gate['refusal']);
 			return;
 		}
-		if (strlen($password) > InputLimits::PASSWORD_MAX
-			|| !password_verify($password, $col['password_hash'])) {
-			Database::incrementSecurityEvent(getClientIP(), self::COLLECTION_PASSWORD_EVENT);
+		if ($password === '') {
 			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
 			return;
 		}
-		Database::clearSecurityEvent(getClientIP(), self::COLLECTION_PASSWORD_EVENT);
+		if (strlen($password) > InputLimits::PASSWORD_MAX
+			|| !password_verify($password, $col['password_hash'])) {
+			self::passwordFailure(self::COLLECTION_PASSWORD_EVENT, $id, false);
+			echo json_encode(['success' => false, 'require_password' => true, 'error' => __('api.bad_password')]);
+			return;
+		}
+		self::passwordSuccess(self::COLLECTION_PASSWORD_EVENT, $id);
 		echo json_encode(['success' => true, 'token' => self::collectionToken($id, $col['delete_token'])]);
 	}
 
@@ -1887,7 +1972,7 @@ final class FileController
 				]);
 				return;
 			}
-			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, '', false);
+			$gate = self::passwordAttemptGate(self::FILE_PASSWORD_EVENT, '', '', false);
 			if ($gate['refusal'] !== null) {
 				self::sendRefusal($gate['refusal']);
 				return;

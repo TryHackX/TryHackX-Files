@@ -1139,10 +1139,11 @@ final class PremiumController
 		if ($supplied === '' || !hash_equals($expected, $supplied)) {
 			http_response_code(401);
 			// Anyone can call this URL, so a refusal must not be a way to write to the audit
-			// log at the request rate: one line per address per security window says the same.
-			$ip = getClientIP();
-			$seen = Database::getSecurityEvent($ip, 'premium_activate_denied');
-			Database::incrementSecurityEvent($ip, 'premium_activate_denied');
+			// log at the request rate: one line per network (an IPv6 /64, see
+			// filehostThrottleKey) per security window says the same.
+			$subject = filehostThrottleKey(getClientIP());
+			$seen = Database::getSecurityEvent($subject, 'premium_activate_denied');
+			Database::incrementSecurityEvent($subject, 'premium_activate_denied');
 			if ($seen === 0) {
 				Database::logAudit('premium_activate_denied', 'bad or missing token');
 			}

@@ -239,7 +239,7 @@ final class UserRepository
 				$activationTokenHash,
 				$activationExpiresAt,
 				$lastEmailAt,
-				$registrationIp ?: null,
+				RegistrationGuard::registrationKey($registrationIp),
 			])) {
 				return ['success' => false, 'error' => __('api.registration_failed')];
 			}
