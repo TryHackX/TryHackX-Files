@@ -4923,6 +4923,12 @@ class Database
 		$activeStale = 4 * 3600;                                                     // 4 h
 		$recoveryTtl = 72 * 3600;                                                    // 72 h
 		$downloadReservationCutoff = $now - (30 * 86400);
+		// security_events holds per-address failure counters (sign-in, 2FA, file passwords,
+		// delete tokens), report-captcha marks and each account's last accepted TOTP step. Each
+		// is read only within its window (recaptcha_security_window minutes; a TOTP step is stale
+		// within minutes), and an expired row used to be reset only when the same key came back
+		// — so every address that ever failed once kept a row for ever.
+		$securityEventTtl = max(86400, (int) self::getSetting('recaptcha_security_window', 60) * 60);
 
 		$jobs = [
 			'upload_tokens'     => ['upload_tokens',     'created_at',   $now - $uploadTtl],
@@ -4939,6 +4945,7 @@ class Database
 			'transfer_quota_usage' => [
 				'transfer_quota_usage', 'updated_at', $now - (2 * 366 * 86400),
 			],
+			'security_events' => ['security_events', 'last_updated_at', $now - $securityEventTtl],
 		];
 
 		$deleted = [];
