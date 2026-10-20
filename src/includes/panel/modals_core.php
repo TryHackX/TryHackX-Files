@@ -285,8 +285,9 @@ if (!defined('APP_ROOT')) {
 				</select>
 			</div>
 			<div class="form-group">
-				<label id="banValueLabel"><?= _h('panel.modal.type_ip') ?></label>
-				<input type="text" id="banValueInput" placeholder="192.168.1.1">
+				<label id="banValueLabel" for="banValueInput"><?= _h('panel.modal.type_ip') ?></label>
+				<input type="text" id="banValueInput" placeholder="192.168.1.1 / 2001:db8::1" aria-describedby="banIpv6Hint">
+				<small id="banIpv6Hint"><?= _h('panel.modal.ban_ipv6_hint') ?></small>
 			</div>
 			<div class="form-group">
 				<label><?= _h('panel.modal.reason') ?></label>

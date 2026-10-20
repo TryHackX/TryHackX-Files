@@ -306,7 +306,12 @@
 		document.getElementById('adFormAdsenseFields').style.display = type === 'adsense' ? '' : 'none';
 	}
 
-	async function saveAdForm() {
+	/** One in flight at a time: a double click on "Save" of a new creative created it twice. */
+	function saveAdForm() {
+		return window.FHUi.singleFlight('panel-ad-save', saveAdFormNow);
+	}
+
+	async function saveAdFormNow() {
 		const val = (id) => document.getElementById(id)?.value || '';
 		const id = parseInt(val('adFormId'), 10) || 0;
 		const payload = {
@@ -673,7 +678,11 @@
 		if (hint) hint.textContent = t(isBoost ? 'panel.ads.kind_boost_hint' : 'panel.ads.kind_placement_hint');
 	}
 
-	async function savePackageForm() {
+	function savePackageForm() {
+		return window.FHUi.singleFlight('panel-package-save', savePackageFormNow);
+	}
+
+	async function savePackageFormNow() {
 		const val = (id) => document.getElementById(id)?.value || '';
 		const payload = {
 			id: parseInt(val('packageFormId'), 10) || 0,
@@ -1061,7 +1070,15 @@
 		openMyAdForm(ad, null);
 	}
 
-	async function saveMyAdForm() {
+	/**
+	 * One in flight at a time: a buyer's double click on "Save and pay" created two draft ads,
+	 * and the unpaid one stayed in "My ads" with no way to delete it.
+	 */
+	function saveMyAdForm() {
+		return window.FHUi.singleFlight('panel-my-ad-save', saveMyAdFormNow);
+	}
+
+	async function saveMyAdFormNow() {
 		const val = (id) => document.getElementById(id)?.value || '';
 		const id = parseInt(val('myAdFormId'), 10) || 0;
 		const payload = {

@@ -372,7 +372,12 @@
 		if (hint) hint.style.display = type === 'builtin' ? '' : 'none';
 	}
 
-	async function savePlan() {
+	/** One in flight at a time: the API does not de-duplicate, so a double click made two plans. */
+	function savePlan() {
+		return window.FHUi.singleFlight('panel-plan-save', savePlanNow);
+	}
+
+	async function savePlanNow() {
 		const val = (id) => document.getElementById(id).value;
 		const body = {
 			id: parseInt(val('planId')) || 0,
@@ -475,7 +480,16 @@
 			: t('panel.prem.grant_days_hint_forever');
 	}
 
-	async function grantPlan() {
+	/**
+	 * One in flight at a time. A grant on the same plan extends from the current expiry, so a
+	 * double click (or two calls queued behind the password re-check) gave twice the days, two
+	 * ledger rows and two e-mails.
+	 */
+	function grantPlan() {
+		return window.FHUi.singleFlight('panel-plan-grant', grantPlanNow);
+	}
+
+	async function grantPlanNow() {
 		const planId = parseInt(document.getElementById('pgPlan').value) || 0;
 		if (!planId) { flashMessage('planGrantMessage', t('panel.prem.grant_pick'), 'error'); return; }
 		// An empty box means "as the plan says"; a typed 0 means "no expiry". They are
@@ -795,7 +809,11 @@
 		if (planGroup) planGroup.style.display = scoped ? '' : 'none';
 	}
 
-	async function savePromoForm() {
+	function savePromoForm() {
+		return window.FHUi.singleFlight('panel-promo-save', savePromoFormNow);
+	}
+
+	async function savePromoFormNow() {
 		try {
 			const scope = document.getElementById('promoFormScope').value;
 			const d = await FHApi.post('admin_promo_code_save', {

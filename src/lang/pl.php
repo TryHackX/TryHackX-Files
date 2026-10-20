@@ -1183,6 +1183,7 @@ return [
 	'panel.modal.unban_tooltip' => 'Odbanuj',
 	'panel.modal.ban_need_value' => 'Podaj wartość do zbanowania.',
 	'panel.modal.ban_bad_ip' => 'Nieprawidłowy format adresu IP.',
+	'panel.modal.ban_ipv6_hint' => 'Adres IPv6 blokuje całą sieć /64, z której pochodzi. Możesz też wpisać samą sieć, np. 2001:0db8:1:2::/64.',
 	'panel.modal.ban_bad_email' => 'Nieprawidłowy format e-maila.',
 	'panel.modal.ban_short_name' => 'Nazwa użytkownika musi mieć min. 3 znaki.',
 	'panel.modal.ban_added' => 'Ban dodany',

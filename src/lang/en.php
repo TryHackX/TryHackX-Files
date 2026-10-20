@@ -1181,6 +1181,7 @@ return [
 	'panel.modal.unban_tooltip' => 'Unban',
 	'panel.modal.ban_need_value' => 'Please enter a value to ban.',
 	'panel.modal.ban_bad_ip' => 'Invalid IP address format.',
+	'panel.modal.ban_ipv6_hint' => 'An IPv6 address bans the whole /64 network it belongs to. You can also enter the network itself, e.g. 2001:0db8:1:2::/64.',
 	'panel.modal.ban_bad_email' => 'Invalid email format.',
 	'panel.modal.ban_short_name' => 'Username must be at least 3 characters.',
 	'panel.modal.ban_added' => 'Ban added successfully',

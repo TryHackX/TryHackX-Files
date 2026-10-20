@@ -36,7 +36,15 @@ test('create/submit handlers run through FHUi.singleFlight so a double click can
 		['download.js', 'doDownload'],
 		['download.js', 'submitReport'],
 		['index.js', 'submitCollectionHome'],
-		['index.js', 'submitPwSet']
+		['index.js', 'submitPwSet'],
+		['panel-premium.js', 'grantPlan'],
+		['panel-premium.js', 'savePlan'],
+		['panel-premium.js', 'savePromoForm'],
+		['panel-ads.js', 'saveAdForm'],
+		['panel-ads.js', 'savePackageForm'],
+		['panel-ads.js', 'saveMyAdForm'],
+		['panel-groups.js', 'saveGroup'],
+		['panel-moderation.js', 'executeAddBan']
 	]) {
 		assert.match(functionBody(js(file), fn), /singleFlight\(/, file + ' ' + fn);
 	}

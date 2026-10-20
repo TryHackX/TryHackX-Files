@@ -335,7 +335,12 @@
 		if (never) days.value = '';
 	}
 
-	async function saveGroup() {
+	/** One in flight at a time: a double click on "Save" of a new group created it twice. */
+	function saveGroup() {
+		return window.FHUi.singleFlight('panel-group-save', saveGroupNow);
+	}
+
+	async function saveGroupNow() {
 		const name = document.getElementById('grpName').value.trim();
 		if (!name) { flashMessage('groupsMessage', t('panel.grp.need_name'), 'error'); return; }
 		const body = {

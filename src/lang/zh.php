@@ -1089,6 +1089,7 @@ return array (
   'panel.modal.unban_tooltip' => '解除封禁',
   'panel.modal.ban_need_value' => '请输入要封禁的值。',
   'panel.modal.ban_bad_ip' => 'IP 地址格式无效。',
+  'panel.modal.ban_ipv6_hint' => 'IPv6 地址会封禁其所在的整个 /64 网段。也可以直接输入网段，例如 2001:0db8:1:2::/64。',
   'panel.modal.ban_bad_email' => '邮箱格式无效。',
   'panel.modal.ban_short_name' => '用户名至少需要 3 个字符。',
   'panel.modal.ban_added' => '封禁添加成功',

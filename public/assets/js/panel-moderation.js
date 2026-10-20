@@ -58,6 +58,34 @@
 	/* ------------------------------------------------------------------ *
 	 * Ban management (IP / email / username)
 	 * ------------------------------------------------------------------ */
+	/** The ban type the way the form names it, not its storage code. */
+	function banTypeLabel(type) {
+		const key = { ip: 'panel.modal.type_ip', email: 'panel.modal.type_email', username: 'panel.modal.type_username' }[type];
+		return key ? t(key) : String(type || '');
+	}
+
+	const IPV4 = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$/;
+
+	/** An IPv6 address as a URL host accepts it (compressed forms and an IPv4 tail included). */
+	function isIpv6(value) {
+		if (!/^[0-9a-f:.]+$/i.test(value) || value.indexOf(':') < 0) return false;
+		try {
+			return new URL('http://[' + value + ']/').hostname.length > 2;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * What the "IP" ban type takes: an IPv4 address, an IPv6 address (the server bans its whole
+	 * /64, the unit one subscriber is given), or that network written out as `<net>/64`.
+	 */
+	function isBannableAddress(value) {
+		if (IPV4.test(value)) return true;
+		const network = value.match(/^(.+)\/64$/);
+		return isIpv6(network ? network[1] : value);
+	}
+
 	async function loadIPBans() {
 		showModal('ipBansModal');
 		cancelUnban();
@@ -71,9 +99,9 @@
 					const expires = b.expires_at ? formatDate(b.expires_at) : t('panel.modal.permanent');
 					return `<tr>
 						<td><strong>${esc(b.value)}</strong></td>
-						<td><span class="badge badge-info">${esc(b.type)}</span></td>
+						<td><span class="badge badge-info">${esc(banTypeLabel(b.type))}</span></td>
 						<td>${esc(b.reason || '-')}</td>
-						<td>${expires}</td>
+						<td>${esc(expires)}</td>
 						<td><button class="action-btn del" data-fh-click="unbanIP(${b.id}, ${jsArg(b.type)}, ${jsArg(b.value)}, ${jsArg(expires)})" title="${esc(t('panel.modal.unban_tooltip'))}"><i class="fa-solid fa-trash"></i></button></td>
 					</tr>`;
 				}).join('');
@@ -100,23 +128,30 @@
 		const label = document.getElementById('banValueLabel');
 		const input = document.getElementById('banValueInput');
 		const map = {
-			ip: [t('panel.modal.type_ip'), '192.168.1.1'],
+			ip: [t('panel.modal.type_ip'), '192.168.1.1 / 2001:db8::1'],
 			email: [t('panel.modal.type_email'), 'user@example.com'],
 			username: [t('panel.modal.type_username'), t('panel.modal.type_username')]
 		};
 		const [l, p] = map[type] || map.ip;
 		label.textContent = l;
 		input.placeholder = p;
+		const hint = document.getElementById('banIpv6Hint');
+		if (hint) hint.hidden = type !== 'ip';
 	}
 
-	async function executeAddBan() {
+	/** One in flight at a time: a double click used to add the same ban twice. */
+	function executeAddBan() {
+		return window.FHUi.singleFlight('panel-ban-add', executeAddBanNow);
+	}
+
+	async function executeAddBanNow() {
 		const type = document.getElementById('banTypeInput').value;
 		const value = document.getElementById('banValueInput').value.trim();
 		const reason = document.getElementById('banReasonInput').value.trim();
 		const expiresIn = document.getElementById('banDurationInput').value;
 
 		if (!value) { flashMessage('addBanMessage', t('panel.modal.ban_need_value'), 'error'); return; }
-		if (type === 'ip' && !/^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$/.test(value)) {
+		if (type === 'ip' && !isBannableAddress(value)) {
 			flashMessage('addBanMessage', t('panel.modal.ban_bad_ip'), 'error'); return;
 		}
 		if (type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
@@ -144,7 +179,7 @@
 		document.getElementById('ipBansContent').style.display = 'none';
 		const confirmView = document.getElementById('ipBansConfirmView');
 		document.getElementById('unbanConfirmMessage').innerHTML = (type && value)
-			? t('panel.modal.unban_msg_detail', { type: esc(type), value: esc(value), expires: esc(expires) })
+			? t('panel.modal.unban_msg_detail', { type: esc(banTypeLabel(type)), value: esc(value), expires: esc(expires) })
 			: esc(t('panel.modal.unban_msg'));
 		confirmView.style.display = 'block';
 	}

@@ -1089,6 +1089,7 @@ return array (
   'panel.modal.unban_tooltip' => 'Desbloquear',
   'panel.modal.ban_need_value' => 'Introduce un valor que bloquear.',
   'panel.modal.ban_bad_ip' => 'Formato de dirección IP no válido.',
+  'panel.modal.ban_ipv6_hint' => 'Una dirección IPv6 bloquea toda la red /64 a la que pertenece. También puedes escribir la red directamente, p. ej. 2001:0db8:1:2::/64.',
   'panel.modal.ban_bad_email' => 'Formato de correo no válido.',
   'panel.modal.ban_short_name' => 'El nombre de usuario debe tener al menos 3 caracteres.',
   'panel.modal.ban_added' => 'Bloqueo añadido correctamente',
