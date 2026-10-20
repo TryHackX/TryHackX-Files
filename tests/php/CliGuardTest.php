@@ -22,6 +22,21 @@ final class CliGuardTest extends TestCase
 		$this->assertStringContainsString('--allow-root', $refusal);
 	}
 
+	/** Every script that writes runtime files or database state calls the guard before anything else. */
+	public function testEveryMaintenanceScriptCallsTheGuard(): void
+	{
+		$scripts = ['cleanup.php', 'file-quarantine.php', 'check-storage-integrity.php', 'mail-worker.php', 'migrate.php'];
+		foreach ($scripts as $script) {
+			$source = (string) file_get_contents(dirname(__DIR__, 2) . '/scripts/' . $script);
+			$this->assertMatchesRegularExpression('/^CliGuard::refuseRoot\(/m', $source, $script);
+			$this->assertLessThan(
+				strpos($source, 'config.local.php'),
+				strpos($source, 'CliGuard::refuseRoot('),
+				"$script checks for root before it loads the configuration"
+			);
+		}
+	}
+
 	public function testTheServiceAccountAndOtherUsersRunNormally(): void
 	{
 		$this->assertNull(CliGuard::evaluate(['scripts/cleanup.php'], 33, null)[1], 'www-data');

@@ -17,6 +17,9 @@ if (PHP_SAPI !== 'cli') {
 	exit("This script is CLI-only.\n");
 }
 
+require_once dirname(__DIR__) . '/src/includes/CliGuard.php';
+CliGuard::refuseRoot();
+
 $projectRoot = dirname(__DIR__);
 $configLocal = $projectRoot . '/config/config.local.php';
 if (!is_file($configLocal)) {

@@ -138,6 +138,11 @@ The virtual host serves `/var/www/filehost/public`, never the project root.
 An unsupported newer schema is rejected and never downgraded automatically. Do not manually
 change `schema_version` after a failure; fix the journaled cause or restore the backup.
 
+After a failed step, web requests wait five minutes before running it again and answer 503
+meanwhile, so a broken upgrade is not re-run by every visitor. Once the cause is fixed, retry at
+once as the service account — `sudo -u "$SERVICE_USER" php scripts/migrate.php` — instead of
+waiting (exit 0: schema current and ready; 2: the migration failed again, see the journal).
+
 2.79.0 is a **code-only upgrade — the schema stays at 64.** It adds the selectable captcha
 provider (Cloudflare Turnstile, reCAPTCHA v3, reCAPTCHA v2, hCaptcha) and stores a key pair
 per provider under new settings keys, which are created on demand; nothing has to be migrated
