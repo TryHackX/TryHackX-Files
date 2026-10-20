@@ -101,6 +101,106 @@ test('live transfer tables update only the cells that changed', () => {
 	assert.equal(diffRows(before, [row('d1', 'a', 'b')]).rows[0].op, 'replace');
 });
 
+/**
+ * Just enough of a table for syncRows(): rows parsed out of innerHTML, and a `cells` collection
+ * that is live like the DOM's — moving a cell out of a row renumbers the cells after it.
+ */
+class TableNode {
+	constructor(tag, html = '') {
+		this.tagName = tag.toUpperCase();
+		this.html = html;
+		this.parentNode = null;
+		this.children = [];
+		this.dataset = {};
+	}
+
+	get outerHTML() { return this.html; }
+	get cells() { return this.children; }
+	get textContent() { return this.html.replace(/<[^>]*>/g, ''); }
+
+	set innerHTML(html) {
+		this.replaceChildren();
+		for (const rowHtml of String(html).match(/<tr\b[\s\S]*?<\/tr>/g) || []) {
+			const row = new TableNode('tr', rowHtml);
+			for (const cellHtml of rowHtml.match(/<td\b[\s\S]*?<\/td>/g) || []) row.appendChild(new TableNode('td', cellHtml));
+			this.appendChild(row);
+		}
+	}
+
+	detach(node) {
+		const at = this.children.indexOf(node);
+		if (at >= 0) this.children.splice(at, 1);
+		node.parentNode = null;
+	}
+
+	appendChild(node) {
+		if (node.parentNode) node.parentNode.detach(node);
+		node.parentNode = this;
+		this.children.push(node);
+		return node;
+	}
+
+	replaceWith(node) {
+		const parent = this.parentNode;
+		if (node.parentNode) node.parentNode.detach(node);
+		parent.children.splice(parent.children.indexOf(this), 1, node);
+		node.parentNode = parent;
+		this.parentNode = null;
+	}
+
+	remove() { if (this.parentNode) this.parentNode.detach(this); }
+	replaceChildren() { this.children.slice().forEach(node => this.detach(node)); }
+}
+
+test('an upload row whose progress and running time both changed keeps one kill button', async () => {
+	const uploads = new TableNode('tbody');
+	const downloads = new TableNode('tbody');
+	const responses = [];
+	const document = {
+		getElementById(id) {
+			if (id === 'panelBootstrap') return { dataset: { config: JSON.stringify({ apiUrl: '/api.php', tab: 'dashboard' }) } };
+			return { activeUploadsBody: uploads, activeDownloadsBody: downloads }[id] || null;
+		},
+		createElement: tag => new TableNode(tag),
+		querySelector() { return null; },
+		querySelectorAll() { return []; },
+		visibilityState: 'visible'
+	};
+	const window = {
+		FHUtil: { esc: v => String(v ?? ''), formatSize: v => String(v) + ' B', formatDate: v => String(v) },
+		t: key => key,
+		document
+	};
+	window.window = window;
+	vm.runInNewContext(source, {
+		console,
+		document,
+		localStorage: { getItem() { return null; }, setItem() {} },
+		setInterval() { return 1; },
+		clearInterval() {},
+		FHApi: { get: async () => responses.shift() },
+		window
+	}, { filename: 'panel-dashboard.js' });
+
+	const upload = (received, now) => ({
+		success: true, now, downloads: [],
+		uploads: [{ id: 7, filename: 'big.iso', username: 'bob', ip_address: '1.2.3.4', size: 1000, received, started_at: 990 }]
+	});
+	responses.push(upload(100, 1000));
+	await window.FHPanelDashboard.loadActiveDownloads();
+	const row = uploads.children[0];
+	assert.match(row.cells[4].outerHTML, />10s</);
+
+	responses.push(upload(400, 1003));
+	await window.FHPanelDashboard.loadActiveDownloads();
+	assert.equal(uploads.children[0], row, 'the row node is kept, only its cells change');
+	assert.equal(row.cells.length, 6);
+	assert.match(row.cells[3].outerHTML, /40%/);
+	assert.match(row.cells[4].outerHTML, />13s</, 'the running time is still in its own column');
+	assert.equal(row.cells.filter(cell => /killUpload/.test(cell.outerHTML)).length, 1, 'exactly one kill button');
+	assert.match(row.cells[5].outerHTML, /killUpload\(7\)/);
+});
+
 test('the transfer tables are polled every few seconds, not every second', () => {
 	assert.match(source, /const ACTIVE_POLL_MS = (?:[3-9]\d{3}|\d{5,})/);
 	assert.doesNotMatch(source, /\}, 1000\);/);

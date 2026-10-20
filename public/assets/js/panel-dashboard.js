@@ -362,7 +362,12 @@
 					entry.tr.replaceWith(row.tr);
 					entry = row;
 				} else if (step.op === 'update') {
-					step.changed.forEach(cell => entry.tr.cells[cell].replaceWith(row.tr.cells[cell]));
+					// `cells` is a live collection: moving one cell out of the fresh row renumbers
+					// the rest, so the second changed cell used to be filled with its neighbour (an
+					// upload row ended up with two kill buttons and no running time). Take the fresh
+					// cells as they are before moving any of them.
+					const freshCells = Array.from(row.tr.cells);
+					step.changed.forEach(cell => entry.tr.cells[cell].replaceWith(freshCells[cell]));
 					entry = { key: row.key, tr: entry.tr, cells: row.cells };
 				}
 			}
@@ -466,6 +471,6 @@
 		loadTopFilesPref, loadTrafficPref, loadDashboard, loadTopFiles,
 		openTopFilesSettings, onTopFilesPeriodChange, applyTopFilesSettings,
 		setTrafficRange, openTrafficRange, applyTrafficRange, loadTraffic,
-		loadActiveDownloads, killDownload, killUpload, initActiveDownloadsLive, diffRows
+		loadActiveDownloads, killDownload, killUpload, initActiveDownloadsLive, diffRows, syncRows
 	});
 }());
