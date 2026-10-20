@@ -2771,6 +2771,182 @@ class TestWebhookDeliveryDeadline:
         assert us.WEBHOOK_EXECUTOR._max_workers == us.WEBHOOK_CONCURRENCY
         assert us.WEBHOOK_EXECUTOR is not us.THUMB_EXECUTOR
 
+    def test_the_name_lookup_counts_against_the_deadline(self, monkeypatch):
+        def slow_dns(_url):
+            time.sleep(0.3)  # an authoritative server that answers slowly
+            return ("http", "hooks.example.test", 80, "93.184.216.34", "/hook")
+
+        def no_connection(*_args, **_kwargs):
+            raise AssertionError("connected after the deadline had passed")
+
+        monkeypatch.setattr(us, "_public_webhook_target", slow_dns)
+        monkeypatch.setattr(us.http.client, "HTTPConnection", no_connection)
+
+        ok, info = us._post_webhook("http://hooks.example.test/hook", "s", "e", "upload", "{}", deadline=0.2)
+
+        assert (ok, info) == (False, "deadline")
+
+
+class _WebhookStore:
+    """webhooks + webhook_deliveries in memory, answering the statements the worker sends."""
+
+    def __init__(self, hooks, deliveries):
+        self.hooks = hooks  # hook id -> (account id, url)
+        self.rows = {
+            did: {"hook": hook, "status": "pending", "attempts": 0} for did, hook in deliveries
+        }
+        self.delivered = []
+        self.queries = []
+        self.rowcount = 1
+        self._result = None
+
+    def acquire(self):
+        store = self
+
+        class Acquire:
+            def __await__(self):
+                async def connection():
+                    return _Connection(store)
+                return connection().__await__()
+
+            async def __aenter__(self):
+                return _Connection(store)
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return Acquire()
+
+    def release(self, _conn):
+        return None
+
+    async def execute(self, query, params=None):
+        self.queries.append((query, params))
+        self.rowcount = 1
+        if "GET_LOCK" in query or "RELEASE_LOCK" in query:
+            self._result = [(1,)]
+        elif "ROW_NUMBER() OVER" in query:
+            oldest = {}
+            for did in sorted(self.rows):
+                row = self.rows[did]
+                if row["status"] == "pending" and row["hook"] not in oldest:
+                    oldest[row["hook"]] = did
+            self._result = [
+                (did, hook, f"event{did}", "upload", "{}", self.rows[did]["attempts"],
+                 self.hooks[hook][1], "secret", self.hooks[hook][0])
+                for hook, did in sorted(oldest.items(), key=lambda item: item[1])
+            ]
+        elif "SET `status`='processing'" in query:
+            for did in params[2:]:
+                self.rows[did]["status"] = "processing"
+        elif "SET `status`='delivered'" in query:  # (attempts, delivered_at, id, owner)
+            self.rows[params[2]]["status"] = "delivered"
+            self.delivered.append(params[2])
+        elif "SET `status`='pending'" in query:  # (attempts, next_attempt_at, id, owner)
+            self.rows[params[2]].update(status="pending", attempts=params[0])
+        elif "SET `status`='failed'" in query:  # (attempts, id, owner)
+            self.rows[params[1]].update(status="failed", attempts=params[0])
+
+    async def fetchone(self):
+        return (self._result or [None])[0]
+
+    async def fetchall(self):
+        return self._result or []
+
+
+class TestWebhookFairness:
+    """One account's dead receiver must not hold back everybody else's events."""
+
+    @staticmethod
+    def _row(did, hook, account):
+        return (did, hook, f"event{did}", "upload", "{}", 0, f"https://hook{hook}.example/", "s", account)
+
+    def test_each_webhook_offers_one_row_and_an_account_takes_two_slots(self, monkeypatch):
+        candidates = [self._row(1, 1, 10), self._row(2, 2, 10), self._row(3, 3, 10), self._row(4, 4, 20)]
+        cursor = _ScriptedCursor([("GET_LOCK", (1,))], [("ROW_NUMBER() OVER", candidates)])
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files", "prefix": "fh_"})
+
+        def claim(**kwargs):
+            cursor.queries.clear()
+            rows = asyncio.run(us._claim_pending_webhooks(_OneConnectionPool(cursor), "fh_", 5, **kwargs))
+            return [row[0] for row in rows], next(
+                (p for q, p in cursor.queries if "SET `status`='processing'" in q), ()
+            )
+
+        picked, claimed = claim()
+        assert picked == [1, 2, 4] and claimed[2:] == (1, 2, 4)
+        assert claim(busy_hooks={1})[0] == [2, 3, 4]
+        assert claim(account_load={10: 2})[0] == [4]
+        candidate_query = next(q for q, _ in cursor.queries if "ROW_NUMBER() OVER" in q)
+        assert "PARTITION BY d0.`webhook_id` ORDER BY d0.`id`" in candidate_query
+        assert "w0.`is_active` = 1" in candidate_query and "due.`position` = 1" in candidate_query
+
+    def test_a_fast_receiver_is_served_while_a_dead_one_has_a_backlog(self, monkeypatch):
+        # Account 10: one black-holed hook with 50 queued events. Account 20: one healthy hook
+        # whose only event is the newest row. The old FIFO batch never even claimed it.
+        store = _WebhookStore(
+            hooks={1: (10, "https://dead.example/"), 2: (20, "https://fast.example/")},
+            deliveries=[(did, 1) for did in range(1, 51)] + [(51, 2)],
+        )
+        slow_in_flight, slow_peak = [0], [0]
+
+        def post(url, *_args):
+            if "dead" in url:
+                slow_in_flight[0] += 1
+                slow_peak[0] = max(slow_peak[0], slow_in_flight[0])
+                time.sleep(0.3)
+                slow_in_flight[0] -= 1
+                return (False, "deadline")
+            return (True, "200")
+
+        async def pool():
+            return store
+
+        monkeypatch.setattr(us, "_post_webhook", post)
+        monkeypatch.setattr(us, "get_db_pool", pool)
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files", "prefix": "fh_"})
+        monkeypatch.setattr(us, "WEBHOOK_START_DELAY_SECONDS", 0)
+        monkeypatch.setattr(us, "WEBHOOK_IDLE_POLL_SECONDS", 0.02)
+        monkeypatch.setattr(us, "_webhook_failure_streaks", {})
+
+        async def scenario():
+            worker = asyncio.create_task(us.webhook_worker())
+            started = time.monotonic()
+            for _ in range(150):
+                if 51 in store.delivered:
+                    break
+                await asyncio.sleep(0.02)
+            served_after = time.monotonic() - started
+            worker.cancel()
+            return served_after
+
+        served_after = asyncio.run(scenario())
+
+        assert store.delivered == [51]
+        assert served_after < 0.3, "served before the dead receiver's first attempt even ended"
+        assert slow_peak[0] == 1, "one delivery at a time per webhook"
+
+    def test_a_hook_failing_for_a_day_is_switched_off_with_a_reason(self, monkeypatch):
+        now = int(time.time())
+
+        def deliver(streak):
+            cursor = _ScriptedCursor()
+            monkeypatch.setattr(us, "_webhook_failure_streaks", {11: streak} if streak else {})
+            asyncio.run(us._deliver_claimed_webhook(
+                _OneConnectionPool(cursor), "fh_", (5, 11, "event5", "upload", "{}", 1, "https://x/", "s", 7)
+            ))
+            return [(q, p) for q, p in cursor.queries if "`is_active`=0" in q]
+
+        monkeypatch.setattr(us, "_post_webhook", lambda *_args: (False, "deadline"))
+        assert deliver((us.WEBHOOK_DISABLE_AFTER_FAILURES - 1, now - us.WEBHOOK_DISABLE_AFTER_SECONDS - 1))
+        assert us._webhook_failure_streaks == {}
+        assert not deliver((us.WEBHOOK_DISABLE_AFTER_FAILURES - 1, now - 60)), "a short outage is tolerated"
+        assert us._webhook_failure_streaks[11][0] == us.WEBHOOK_DISABLE_AFTER_FAILURES
+
+        monkeypatch.setattr(us, "_post_webhook", lambda *_args: (True, "200"))
+        deliver((5, now - 60))
+        assert us._webhook_failure_streaks == {}, "a success ends the streak"
+
 
 class TestZip64Members:
     def test_member_over_the_zip64_limit_streams_into_a_valid_archive(self, monkeypatch, tmp_path):

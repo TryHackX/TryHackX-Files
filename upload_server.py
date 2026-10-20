@@ -202,9 +202,20 @@ DB_ACQUIRE_TIMEOUT = _env_number("FILEHOST_DB_ACQUIRE_TIMEOUT", 10.0, 1.0, 120.0
 # The readiness probe (schema check plus a staging write) is cached this long between
 # requests; /ready itself always probes afresh.
 READINESS_CACHE_SECONDS = 5.0
-# A webhook delivery gets this long in total, however slowly the receiver answers.
+# A webhook delivery gets this long in total, name lookup included, however slowly the
+# receiver answers.
 WEBHOOK_DELIVERY_DEADLINE = 15.0
 WEBHOOK_CONCURRENCY = 5
+# Fairness: one account holds at most this many of the delivery slots, and each webhook has
+# at most one delivery in flight, so a receiver that never answers delays only its owner.
+WEBHOOK_PER_ACCOUNT = 2
+WEBHOOK_CLAIM_CANDIDATES = 50
+WEBHOOK_START_DELAY_SECONDS = 5.0
+WEBHOOK_IDLE_POLL_SECONDS = 5.0
+# A hook that has failed every attempt for a day (and at least this many in a row) is switched
+# off, with a last_status saying so; the owner can add it again once the receiver is back.
+WEBHOOK_DISABLE_AFTER_FAILURES = 20
+WEBHOOK_DISABLE_AFTER_SECONDS = 86400
 # The QR renderer only ever needs a link or an otpauth:// URI.
 QR_POST_MAX_BYTES = 8 * 1024
 # An otpauth URI carries the site name twice next to a username of up to 50 characters, so
@@ -4298,7 +4309,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
-def _abort_webhook_connection(connection, state: dict) -> None:
+def _abort_webhook_connection(holder: dict, state: dict) -> None:
     """Watchdog: cut a delivery that outlived its deadline, from outside its thread.
 
     The socket timeout bounds each read, not the delivery: a receiver dribbling one byte
@@ -4307,7 +4318,7 @@ def _abort_webhook_connection(connection, state: dict) -> None:
     socket's state is not touched from this thread.
     """
     state["expired"] = True
-    sock = getattr(connection, "sock", None)
+    sock = getattr(holder.get("connection"), "sock", None)
     if sock is None:
         return
     try:
@@ -4324,12 +4335,23 @@ def _post_webhook(
     payload: str,
     deadline: float = WEBHOOK_DELIVERY_DEADLINE,
 ):
-    """DNS-pinned webhook POST. Redirects and non-public destinations are refused."""
-    connection = None
-    watchdog = None
+    """DNS-pinned webhook POST. Redirects and non-public destinations are refused.
+
+    The deadline runs from the start, so the name lookup is inside it: a slow authoritative
+    DNS server used to add its own time on top, and the connect timeout is cut to what is left.
+    """
+    started = time.monotonic()
+    holder = {"connection": None}
     state = {"expired": False}
+    watchdog = threading.Timer(deadline, _abort_webhook_connection, args=(holder, state))
+    watchdog.daemon = True
+    watchdog.start()
     try:
         scheme, host, port, pinned_ip, path = _public_webhook_target(url)
+        remaining = deadline - (time.monotonic() - started)
+        if state["expired"] or remaining <= 0:
+            return (False, "deadline")
+        timeout = max(0.5, min(10.0, remaining))
         data = payload.encode("utf-8")
         sig = hmac.new(secret.encode("utf-8"), data, hashlib.sha256).hexdigest()
         host_header = f"[{host}]" if ":" in host else host
@@ -4344,12 +4366,10 @@ def _post_webhook(
             "Connection": "close",
         }
         if scheme == "https":
-            connection = _PinnedHTTPSConnection(host, pinned_ip, port, timeout=10)
+            connection = _PinnedHTTPSConnection(host, pinned_ip, port, timeout=timeout)
         else:
-            connection = http.client.HTTPConnection(pinned_ip, port, timeout=10)
-        watchdog = threading.Timer(deadline, _abort_webhook_connection, args=(connection, state))
-        watchdog.daemon = True
-        watchdog.start()
+            connection = http.client.HTTPConnection(pinned_ip, port, timeout=timeout)
+        holder["connection"] = connection
         connection.request("POST", path, body=data, headers=headers)
         response = connection.getresponse()
         response.read(4096)
@@ -4360,19 +4380,32 @@ def _post_webhook(
     except Exception as e:
         return (False, "deadline" if state["expired"] else type(e).__name__)
     finally:
-        if watchdog is not None:
-            watchdog.cancel()
-        if connection is not None:
-            connection.close()
+        watchdog.cancel()
+        if holder["connection"] is not None:
+            holder["connection"].close()
 
 
-async def _claim_pending_webhooks(pool, prefix: str, limit: int = 20):
-    """Claim a bounded delivery batch under a short cross-worker advisory lock."""
+async def _claim_pending_webhooks(
+    pool,
+    prefix: str,
+    limit: int,
+    busy_hooks=frozenset(),
+    account_load: dict | None = None,
+):
+    """Claim up to `limit` due deliveries fairly, under a short cross-worker advisory lock.
+
+    Each active webhook offers only its oldest due delivery, a webhook that already has one
+    in flight offers none, and an account takes at most WEBHOOK_PER_ACCOUNT of the slots
+    (`account_load` counts what each account already holds). One global FIFO used to let a
+    single account's backlog against a receiver that never answers (up to 15 s an attempt,
+    five attempts an event) hold every other account's events back for hours.
+    """
     wh_table = f"{prefix}webhooks"
     del_table = f"{prefix}webhook_deliveries"
     now = int(time.time())
     lease_until = now + 60
     lock_name = build_lock_name("webhook-claim")
+    load = dict(account_load or {})
     conn = await pool.acquire()
     locked = False
     try:
@@ -4383,15 +4416,30 @@ async def _claim_pending_webhooks(pool, prefix: str, limit: int = 20):
                 return []
             await cur.execute(
                 f"SELECT d.`id`, d.`webhook_id`, d.`event_id`, d.`event`, d.`payload`, "
-                f"d.`attempts`, w.`url`, w.`secret` "
-                f"FROM `{del_table}` d JOIN `{wh_table}` w ON w.`id`=d.`webhook_id` "
-                f"WHERE w.`is_active`=1 AND ("
-                f" (d.`status`='pending' AND d.`next_attempt_at`<=%s)"
-                f" OR (d.`status`='processing' AND d.`lease_until`<%s)"
-                f") ORDER BY d.`id` LIMIT {max(1, min(100, limit))}",
+                f"d.`attempts`, w.`url`, w.`secret`, w.`user_id` "
+                f"FROM ("
+                f"SELECT d0.`id`, ROW_NUMBER() OVER "
+                f"(PARTITION BY d0.`webhook_id` ORDER BY d0.`id`) AS `position` "
+                f"FROM `{del_table}` d0 JOIN `{wh_table}` w0 ON w0.`id` = d0.`webhook_id` "
+                f"WHERE w0.`is_active` = 1 AND ("
+                f" (d0.`status` = 'pending' AND d0.`next_attempt_at` <= %s)"
+                f" OR (d0.`status` = 'processing' AND d0.`lease_until` < %s))"
+                f") due "
+                f"JOIN `{del_table}` d ON d.`id` = due.`id` "
+                f"JOIN `{wh_table}` w ON w.`id` = d.`webhook_id` "
+                f"WHERE due.`position` = 1 "
+                f"ORDER BY d.`id` LIMIT {WEBHOOK_CLAIM_CANDIDATES}",
                 (now, now),
             )
-            rows = await cur.fetchall()
+            rows = []
+            for row in await cur.fetchall():
+                hook, account = safe_int(row[1]), safe_int(row[8])
+                if hook in busy_hooks or load.get(account, 0) >= WEBHOOK_PER_ACCOUNT:
+                    continue
+                rows.append(row)
+                load[account] = load.get(account, 0) + 1
+                if len(rows) >= limit:
+                    break
             if not rows:
                 return []
             ids = [safe_int(row[0]) for row in rows]
@@ -4412,17 +4460,31 @@ async def _claim_pending_webhooks(pool, prefix: str, limit: int = 20):
         pool.release(conn)
 
 
-async def _deliver_claimed_webhook(pool, prefix: str, row, semaphore: asyncio.Semaphore):
+# Consecutive failed attempts per webhook in this process: (count, time of the first one).
+_webhook_failure_streaks: dict = {}
+
+
+async def _deliver_claimed_webhook(pool, prefix: str, row):
     del_table = f"{prefix}webhook_deliveries"
     wh_table = f"{prefix}webhooks"
-    did, wid, event_id, event, payload, attempts, url, secret = row
-    async with semaphore:
-        # Own executor: a slow receiver can only ever occupy webhook threads, never the
-        # ones every upload and download does its file I/O on.
-        ok, info = await asyncio.get_running_loop().run_in_executor(
-            WEBHOOK_EXECUTOR, _post_webhook, url, secret, event_id, event, payload
-        )
+    did, wid, event_id, event, payload, attempts, url, secret = row[:8]
+    # Own executor: a slow receiver can only ever occupy webhook threads, never the ones
+    # every upload and download does its file I/O on.
+    ok, info = await asyncio.get_running_loop().run_in_executor(
+        WEBHOOK_EXECUTOR, _post_webhook, url, secret, event_id, event, payload
+    )
     ts = int(time.time())
+    disable = False
+    if ok:
+        _webhook_failure_streaks.pop(wid, None)
+    else:
+        failures, since = _webhook_failure_streaks.get(wid, (0, ts))
+        failures += 1
+        _webhook_failure_streaks[wid] = (failures, since)
+        disable = (
+            failures >= WEBHOOK_DISABLE_AFTER_FAILURES
+            and ts - since >= WEBHOOK_DISABLE_AFTER_SECONDS
+        )
     new_attempts = safe_int(attempts) + 1
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -4455,31 +4517,50 @@ async def _deliver_claimed_webhook(pool, prefix: str, row, semaphore: asyncio.Se
                     f"WHERE `id`=%s",
                     (label, ts, wid),
                 )
-
-
-async def _deliver_pending_webhooks():
-    pool = await get_db_pool()
-    if not pool:
-        return
-    prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
-    rows = await _claim_pending_webhooks(pool, prefix)
-    if not rows:
-        return
-    semaphore = asyncio.Semaphore(WEBHOOK_CONCURRENCY)
-    await asyncio.gather(*[
-        _deliver_claimed_webhook(pool, prefix, row, semaphore) for row in rows
-    ])
+            if disable:
+                await cur.execute(
+                    f"UPDATE `{wh_table}` SET `is_active`=0, `last_status`=%s WHERE `id`=%s",
+                    ("disabled: no delivery succeeded for 24 h", wid),
+                )
+                _webhook_failure_streaks.pop(wid, None)
+                print(f"Webhook {wid} disabled: every delivery has failed for 24 hours")
 
 
 async def webhook_worker():
-    """Background loop: deliver pending webhook rows with retry/backoff."""
-    await asyncio.sleep(5)  # let startup settle
+    """Background loop: deliver due webhook rows with retry/backoff, fairly and continuously.
+
+    A freed slot is refilled at once instead of after the slowest delivery of a batch, and
+    the claim keeps one account (or one webhook) from taking every slot.
+    """
+    await asyncio.sleep(WEBHOOK_START_DELAY_SECONDS)  # let startup settle
+    inflight: dict = {}  # task -> (webhook id, account id)
     while True:
         try:
-            await _deliver_pending_webhooks()
+            free = WEBHOOK_CONCURRENCY - len(inflight)
+            pool = await get_db_pool() if free > 0 else None
+            if pool:
+                prefix = db_config_cache.get('prefix', '') if db_config_cache else ''
+                load: dict = {}
+                for _hook, account in inflight.values():
+                    load[account] = load.get(account, 0) + 1
+                rows = await _claim_pending_webhooks(
+                    pool, prefix, free, {hook for hook, _account in inflight.values()}, load
+                )
+                for row in rows:
+                    task = asyncio.create_task(_deliver_claimed_webhook(pool, prefix, row))
+                    inflight[task] = (safe_int(row[1]), safe_int(row[8]))
         except Exception as e:
             print(f"⚠️  webhook worker error: {e}")
-        await asyncio.sleep(5)
+        if not inflight:
+            await asyncio.sleep(WEBHOOK_IDLE_POLL_SECONDS)
+            continue
+        done, _pending = await asyncio.wait(
+            inflight, timeout=WEBHOOK_IDLE_POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            inflight.pop(task, None)
+            if not task.cancelled() and task.exception() is not None:
+                print(f"⚠️  webhook delivery error: {task.exception()}")
 
 
 # ============================================================================
