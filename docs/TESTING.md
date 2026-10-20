@@ -109,7 +109,8 @@ docker compose down --volumes --remove-orphans
 
 ## Release gate
 
-A release requires repository policy, syntax/compile checks, PHPStan, Ruff, Node tests, full
-PHPUnit on a fresh database, full pytest and an appropriate browser/HTTP smoke test. Schema
+A release requires repository policy, syntax/compile checks, PHPStan, Ruff, Node tests, the
+installer shell test, full PHPUnit on a fresh database, full pytest and an appropriate
+browser/HTTP smoke test. Schema
 changes additionally require historical contracts, snapshots, forward-repair and failure
 injection. Reservation/lease changes require concurrency and process-interruption tests.
