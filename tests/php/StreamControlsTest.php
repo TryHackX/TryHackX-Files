@@ -99,6 +99,32 @@ final class StreamControlsTest extends RepoTestCase
 		$this->assertNotNull($other);
 	}
 
+	/**
+	 * C-F9: a guest's concurrent downloads were counted per exact address, so an IPv6 client
+	 * had a fresh allowance on every address of its /64. They are counted as the upload server
+	 * counts them: IPv4 per address, IPv6 per /64 whatever the spelling, the stored rows
+	 * keeping the exact address.
+	 */
+	public function testConcurrentDownloadsAreCountedPerIpv6Network(): void
+	{
+		Database::addActiveDownload('2001:db8:1:2::10', 'f1');
+		Database::addActiveDownload('2001:0DB8:0001:0002:ffff:0:0:1', 'f2');
+		Database::addActiveDownload('2001:db8:1:3::10', 'f3');
+		Database::addActiveDownload('198.51.100.7', 'f4');
+		Database::addActiveDownload('198.51.100.8', 'f5');
+		Database::addActiveDownload('unknown', 'f6');
+
+		$this->assertSame(2, Database::getConcurrentDownloads('2001:db8:1:2::99'));
+		$this->assertSame(1, Database::getConcurrentDownloads('2001:db8:1:3:abcd::1'));
+		$this->assertSame(0, Database::getConcurrentDownloads('2001:db8:1:4::1'));
+		$this->assertSame(1, Database::getConcurrentDownloads('198.51.100.7'));
+		$this->assertSame(1, Database::getConcurrentDownloads('::ffff:198.51.100.8'), 'an IPv4-mapped address is the IPv4 one');
+		$this->assertSame(1, Database::getConcurrentDownloads('unknown'));
+		$this->assertSame('2001:db8:1:2::10', (string) Database::getInstance()->query(
+			"SELECT `ip_address` FROM `" . Database::table('active_downloads') . "` WHERE `file_id` = 'f1'"
+		)->fetchColumn(), 'the live list keeps the exact address');
+	}
+
 	public function testKillIsReportedOnlyWhenSomethingWasStoppedAndTheStreamNotices(): void
 	{
 		$id = (int) Database::addActiveDownload('198.51.100.4', 'f1');

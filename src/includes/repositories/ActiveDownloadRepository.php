@@ -69,6 +69,11 @@ final class ActiveDownloadRepository
 		}
 	}
 
+	/**
+	 * Downloads in progress for one client, counted as the upload server counts them: an IPv4
+	 * address on its own, an IPv6 one together with every address of its /64 (a client can
+	 * pick any of them at will).
+	 */
 	public static function concurrentFor(string $ip): int
 	{
 		$pdo = Database::getInstance();
@@ -78,15 +83,40 @@ final class ActiveDownloadRepository
 		$table = Database::table('active_downloads');
 		// Ignore stale entries (> 4 h) so a dead download can't inflate the total.
 		$staleTime = time() - (4 * 3600);
+		[$sameClient, $params] = self::sameClientCondition('ip_address', $ip);
 		try {
 			$stmt = $pdo->prepare(
-				"SELECT COUNT(*) FROM `{$table}` WHERE `ip_address` = ? AND `heartbeat_at` > ?"
+				"SELECT COUNT(*) FROM `{$table}` WHERE {$sameClient} AND `heartbeat_at` > ?"
 			);
-			$stmt->execute([$ip, $staleTime]);
+			$stmt->execute(array_merge($params, [$staleTime]));
 			return (int) $stmt->fetchColumn();
 		} catch (PDOException $e) {
 			return 0;
 		}
+	}
+
+	/**
+	 * SQL matching every stored address counted under $ip's throttle key (filehostThrottleKey),
+	 * the PHP twin of the upload server's _same_client_condition(). Rows keep the exact address,
+	 * which is what the live list shows; IPv6 rows are matched by their /64 network on the
+	 * packed form, so the spelling of an address cannot matter, and a row that already stores
+	 * the key itself matches too. INET6_ATON() only ever sees valid IPv6 strings.
+	 *
+	 * @return array{0: string, 1: list<string>}
+	 */
+	private static function sameClientCondition(string $column, string $ip): array
+	{
+		$key = filehostThrottleKey($ip);
+		$packed = @inet_pton($ip);
+		if ($packed === false || strlen($packed) !== 16 || !str_ends_with($key, '/64')) {
+			$values = array_values(array_unique([$ip, $key]));
+			return ['`' . $column . '` IN (' . implode(', ', array_fill(0, count($values), '?')) . ')', $values];
+		}
+		return [
+			'(`' . $column . '` IN (?, ?) OR CASE WHEN IS_IPV6(`' . $column . '`)'
+				. ' THEN HEX(LEFT(INET6_ATON(`' . $column . '`), 8)) END = ?)',
+			[$ip, $key, strtoupper(bin2hex(substr($packed, 0, 8)))],
+		];
 	}
 
 	public static function count(): int
