@@ -605,8 +605,13 @@
      * this account's.
      */
     function adoptUploadToken(data) {
-        if (data && data.upload_token && window.FHUploadSession) {
+        if (!window.FHUploadSession) return;
+        if (data && data.upload_token) {
             window.FHUploadSession.replace(data.upload_token, (Number(data.upload_token_expires_at) || 0) * 1000);
+        } else if (typeof window.FHUploadSession.refresh === 'function') {
+            // The tab kept its token, now the account's: the upload page asks for the account's
+            // numbers instead of showing the guest's cap ("5/5") until the next upload.
+            window.FHUploadSession.refresh();
         }
     }
 

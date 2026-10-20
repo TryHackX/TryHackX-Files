@@ -445,6 +445,24 @@ test('signing out or in switches the upload session the next upload uses', async
 	assert.equal(page.sessionStore.getItem('uploadToken'), 'HANDED');
 });
 
+test('signing in shows the account\'s files-per-session cap at once, not the guest\'s', async () => {
+	let cap = 5;
+	const page = loadIndex({
+		loggedIn: false,
+		api: { token_info: () => ({ success: true, valid: true, expires_at: 4102444800, files_uploaded: 0, files_limit: cap }) }
+	});
+	await flush();
+	assert.match(page.document.getElementById('sessionInfo').textContent, /5\/5$/);
+
+	// The sign-in kept this tab's token and handed it to the account (auth.js then calls refresh).
+	cap = 15;
+	page.window.FHUploadSession.refresh();
+	await flush();
+	assert.match(page.document.getElementById('sessionInfo').textContent, /15\/15$/);
+	assert.equal(page.document.getElementById('limitCount').textContent, '15');
+	assert.equal(page.calls.get.filter(call => call.action === 'token_info').at(-1).params.token, 'TOK', 'the same token, asked again');
+});
+
 test('refusals are explained in the page language, and Retry is offered only where it can help', async () => {
 	const page = loadIndex({ api: { token_info: validSession() } });
 	await flush();

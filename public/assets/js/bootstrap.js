@@ -100,6 +100,14 @@
 			window.FHStorage.session.remove('uploadTokenExpiry');
 			announceUploadSession('', 0);
 		},
+		/**
+		 * Same token, new owner: signing in hands the tab's upload session to the account, whose
+		 * cap is not the guest's. Subscribers read the session again.
+		 */
+		refresh: function () {
+			var token = window.FHStorage.session.get('uploadToken') || '';
+			announceUploadSession(token, token ? Number(window.FHStorage.session.get('uploadTokenExpiry')) || 0 : 0);
+		},
 		current: function () {
 			return window.FHStorage.session.get('uploadToken') || '';
 		},

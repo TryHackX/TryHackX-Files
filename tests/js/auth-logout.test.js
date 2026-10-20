@@ -17,7 +17,7 @@ const { createMiniDocument } = require('./support/mini-dom');
 
 const source = fs.readFileSync(path.join(__dirname, '../../public/assets/js/auth.js'), 'utf8');
 
-function loadAuth(pathname, logoutAnswer) {
+function loadAuth(pathname, logoutAnswer, uploadSession = null) {
 	const document = createMiniDocument();
 	const modal = document.add('div', 'authModal');
 	modal.className = 'auth-modal show';
@@ -35,7 +35,7 @@ function loadAuth(pathname, logoutAnswer) {
 	const window = {
 		location,
 		history: { replaceState() {} },
-		FHUploadSession: { current: () => 'TOK', clear() { window.cleared = true; }, replace() {} }
+		FHUploadSession: uploadSession || { current: () => 'TOK', clear() { window.cleared = true; }, replace() {} }
 	};
 	window.window = window;
 	const context = {
@@ -80,4 +80,37 @@ test('signing out in the panel still goes to the home page', async () => {
 	timers.forEach(timer => timer.fn());
 	assert.equal(location.reloaded, 0);
 	assert.notEqual(location.href, 'https://files.example/panel.php');
+});
+
+/**
+ * Signing in hands this tab's upload token to the account (or, when it belonged to someone
+ * else, replaces it). Either way the upload page has to read the session again: the account's
+ * files-per-session cap is not the guest's, and the line used to show "5/5" until the next upload.
+ */
+test('signing in tells the upload page to read its session again, whether or not the token changed', async () => {
+	const signIn = async answer => {
+		const session = {
+			calls: [],
+			current: () => 'TOK',
+			clear() { this.calls.push('clear'); },
+			replace(token) { this.calls.push('replace ' + token); },
+			refresh() { this.calls.push('refresh'); }
+		};
+		const { context, document } = loadAuth('/', async () => answer, session);
+		document.add('button', 'loginBtn');
+		const form = document.createElement('form');
+		form.username = { value: 'someone' };
+		form.password = { value: 'Secret1!x' };
+		await context.handleLogin({ preventDefault() {}, target: form });
+		return session.calls;
+	};
+	const user = { id: 5, username: 'someone', is_admin: false };
+
+	assert.deepEqual(await signIn({ success: true, user }), ['refresh'], 'kept: same token, new owner');
+	assert.deepEqual(
+		await signIn({ success: true, user, upload_token: 'NEW', upload_token_expires_at: 4102444800 }),
+		['replace NEW'],
+		'replaced: the new token is announced'
+	);
+	assert.deepEqual(await signIn({ success: false, error: 'nope' }), [], 'a refused sign-in changes nothing');
 });
