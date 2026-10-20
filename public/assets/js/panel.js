@@ -479,7 +479,7 @@
 		try {
 			const data = await FHApi.get('token_info');
 			if (data.success && data.expires_in) {
-				document.getElementById('sessionTime').textContent = Math.ceil(data.expires_in / 60) + ' min';
+				document.getElementById('sessionTime').textContent = t('panel.session_minutes', { n: Math.ceil(data.expires_in / 60) });
 				document.getElementById('sessionInfo').style.display = 'block';
 			}
 		} catch (e) { /* ignore */ }
@@ -547,7 +547,7 @@
 			let score = 0;
 			[[o.len, val.length >= (Number(pass.minLength) || 8)], [o.upper, /[A-Z]/.test(val)], [o.digit, /\d/.test(val)], [o.spec, /[^a-zA-Z0-9]/.test(val)]]
 				.forEach(([id, ok]) => { const el = id && document.getElementById(id); if (el) el.classList.toggle('valid', ok); if (ok) score++; });
-			if (bar) { const pct = (score / 4) * 100; bar.style.width = pct + '%'; bar.style.backgroundColor = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : pct < 75 ? '#f59e0b' : 'var(--success)'; }
+			if (bar) { bar.style.width = (score / 4) * 100 + '%'; bar.style.backgroundColor = score <= 1 ? 'var(--danger)' : score === 2 ? 'var(--warning)' : 'var(--success)'; }
 			evalMatch();
 		};
 		pass.addEventListener('input', evalStrength);

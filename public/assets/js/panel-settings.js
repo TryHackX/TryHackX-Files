@@ -139,9 +139,8 @@
 					if (ok) score++;
 				});
 				if (bar) {
-					const pct = (score / 4) * 100;
-					bar.style.width = pct + '%';
-					bar.style.backgroundColor = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : pct < 75 ? '#f59e0b' : 'var(--success)';
+					bar.style.width = (score / 4) * 100 + '%';
+					bar.style.backgroundColor = score <= 1 ? 'var(--danger)' : score === 2 ? 'var(--warning)' : 'var(--success)';
 				}
 				checkPanelPassMatch();
 			});

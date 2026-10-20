@@ -25,6 +25,8 @@
 	--text-muted: #8b8b94;
 	--accent: #6366f1;
 	--accent-hover: #5558e3;
+	/* The second stop of the brand gradient (logo, bars, chart fills). */
+	--accent-2: #8b5cf6;
 	--border: #27272a;
 	--success: #22c55e;
 	--danger: #ef4444;
@@ -262,7 +264,7 @@ header {
 	width: 42px;
 	height: 42px;
 	flex-shrink: 0;
-	background: linear-gradient(135deg, var(--accent), #8b5cf6);
+	background: linear-gradient(135deg, var(--accent), var(--accent-2));
 	border-radius: 12px;
 	display: flex;
 	align-items: center;

@@ -166,9 +166,10 @@ test('an upload row whose progress and running time both changed keeps one kill 
 		querySelectorAll() { return []; },
 		visibilityState: 'visible'
 	};
+	const strings = { 'js.duration_s': ':s s', 'js.duration_ms': ':m min :s s' };
 	const window = {
 		FHUtil: { esc: v => String(v ?? ''), formatSize: v => String(v) + ' B', formatDate: v => String(v) },
-		t: key => key,
+		t: (key, params = {}) => (strings[key] || key).replace(/:([a-z]+)/g, (match, name) => name in params ? String(params[name]) : match),
 		document
 	};
 	window.window = window;
@@ -189,14 +190,14 @@ test('an upload row whose progress and running time both changed keeps one kill 
 	responses.push(upload(100, 1000));
 	await window.FHPanelDashboard.loadActiveDownloads();
 	const row = uploads.children[0];
-	assert.match(row.cells[4].outerHTML, />10s</);
+	assert.match(row.cells[4].outerHTML, />10 s</);
 
 	responses.push(upload(400, 1003));
 	await window.FHPanelDashboard.loadActiveDownloads();
 	assert.equal(uploads.children[0], row, 'the row node is kept, only its cells change');
 	assert.equal(row.cells.length, 6);
 	assert.match(row.cells[3].outerHTML, /40%/);
-	assert.match(row.cells[4].outerHTML, />13s</, 'the running time is still in its own column');
+	assert.match(row.cells[4].outerHTML, />13 s</, 'the running time is still in its own column');
 	assert.equal(row.cells.filter(cell => /killUpload/.test(cell.outerHTML)).length, 1, 'exactly one kill button');
 	assert.match(row.cells[5].outerHTML, /killUpload\(7\)/);
 });

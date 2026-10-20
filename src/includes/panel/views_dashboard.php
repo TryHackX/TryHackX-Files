@@ -30,8 +30,8 @@ if (!defined('APP_ROOT')) {
 			<p class="widget-period" id="trafficPeriod"></p>
 			<div id="trafficChart" class="chart-holder"><?= _h('common.loading') ?></div>
 			<div class="chart-legend">
-				<span><i style="background:var(--accent)"></i> Upload</span>
-				<span><i style="background:#22c55e"></i> Download</span>
+				<span><i style="background:var(--accent)"></i> <?= _h('panel.dash.series_upload') ?></span>
+				<span><i style="background:var(--success)"></i> <?= _h('panel.dash.series_download') ?></span>
 			</div>
 		</div>
 		<div class="settings-section">

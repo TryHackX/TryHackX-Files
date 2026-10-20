@@ -142,6 +142,7 @@ return [
 	'download.embed_btn' => 'Osadź',
 	'download.embed_tooltip' => 'Kody do udostępniania / osadzania',
 	'download.embed_title' => 'Udostępnij / osadź obraz',
+	'download.embed_link' => 'Link',
 	'download.embed_note' => 'Wyświetlenie osadzonego obrazu liczy się jako pobranie (podgląd na tej stronie — nie).',
 	'download.delete_title' => 'Usuń plik',
 	'download.delete_token_ph' => 'Wprowadź token usuwania...',
@@ -242,6 +243,8 @@ return [
 	'js.logged_out' => 'Wylogowano pomyślnie!',
 	'js.account_created' => 'Konto utworzone! Zaloguj się.',
 	'js.resend_available_in' => 'Nowy link dostępny za:',
+	'js.duration_s' => ':s s',
+	'js.duration_ms' => ':m min :s s',
 	'js.resend_button' => 'Wyślij nowy link aktywacyjny',
 	'js.resend_confirm' => 'Wysłać link aktywacyjny ponownie?',
 	'js.resend_yes' => 'Tak',
@@ -527,6 +530,7 @@ return [
 	 * ================================================================ */
 	'panel.title' => 'Panel',
 	'panel.session_left' => 'Pozostały czas sesji:',
+	'panel.session_minutes' => ':n min',
 
 	/* ---- nawigacja ---- */
 	'panel.nav.dashboard' => 'Pulpit',
@@ -553,6 +557,8 @@ return [
 	'panel.dash.bucket_month' => 'miesięcznie',
 	'panel.dash.bucket_hint' => 'Zostaw automatycznie, aby dobrać krok do wybranego zakresu.',
 	'panel.dash.chart_alt' => 'Wykres ruchu: przesyłanie i pobieranie',
+	'panel.dash.series_upload' => 'Przesyłanie',
+	'panel.dash.series_download' => 'Pobieranie',
 	'panel.dash.top_files' => 'Najczęściej pobierane',
 	'panel.top.settings' => 'Ustawienia widżetu',
 	'panel.top.period' => 'Okres',

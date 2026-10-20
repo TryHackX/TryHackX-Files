@@ -140,6 +140,7 @@ return [
 	'download.embed_btn' => 'Embed',
 	'download.embed_tooltip' => 'Sharing / embedding codes',
 	'download.embed_title' => 'Share / embed image',
+	'download.embed_link' => 'Link',
 	'download.embed_note' => 'Viewing an embedded image counts as a download (the preview on this page does not).',
 	'download.delete_title' => 'Delete file',
 	'download.delete_token_ph' => 'Enter the delete token...',
@@ -240,6 +241,8 @@ return [
 	'js.logged_out' => 'Signed out!',
 	'js.account_created' => 'Account created! Please sign in.',
 	'js.resend_available_in' => 'New link available in:',
+	'js.duration_s' => ':s s',
+	'js.duration_ms' => ':m min :s s',
 	'js.resend_button' => 'Send a new activation link',
 	'js.resend_confirm' => 'Send the activation link again?',
 	'js.resend_yes' => 'Yes',
@@ -525,6 +528,7 @@ return [
 	 * ================================================================ */
 	'panel.title' => 'Panel',
 	'panel.session_left' => 'Session time remaining:',
+	'panel.session_minutes' => ':n min',
 
 	/* ---- navigation ---- */
 	'panel.nav.dashboard' => 'Dashboard',
@@ -551,6 +555,8 @@ return [
 	'panel.dash.bucket_month' => 'monthly',
 	'panel.dash.bucket_hint' => 'Leave on automatic to let the step follow the range you picked.',
 	'panel.dash.chart_alt' => 'Upload/download traffic chart',
+	'panel.dash.series_upload' => 'Upload',
+	'panel.dash.series_download' => 'Download',
 	'panel.dash.top_files' => 'Most downloaded',
 	'panel.top.settings' => 'Widget settings',
 	'panel.top.period' => 'Period',

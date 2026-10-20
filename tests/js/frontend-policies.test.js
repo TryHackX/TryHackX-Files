@@ -101,6 +101,25 @@ test('user-visible strings in the scripts come from the dictionary, not from lit
 		assert.doesNotMatch(js(file), /\.alt\s*=\s*'[^']/, file + ' hard-codes an alt text');
 	}
 	assert.doesNotMatch(js('panel-moderation.js'), /detailCell\('E-mail'/);
+	// The round-1 leftovers: units, chart series names and an alt text written in English.
+	assert.doesNotMatch(js('panel.js'), /\+ ' min'/);
+	assert.doesNotMatch(js('panel-dashboard.js'), /· (?:Upload|Download) \$\{/);
+	assert.doesNotMatch(js('panel-files.js'), /alt="QR"/);
+	for (const file of ['auth.js', 'panel-dashboard.js']) {
+		assert.doesNotMatch(js(file), /'m ' \+|\$\{m\}m \$\{s\}s|seconds \+ 's'/, file + ' writes its own m/s units');
+	}
+	assert.doesNotMatch(read('src/includes/panel/views_dashboard.php'), /<\/i> (?:Upload|Download)</);
+	assert.doesNotMatch(read('public/download.php'), /class="embed-tag">Link</);
+});
+
+test('colours come from the theme tokens, so the light palette applies to them too', () => {
+	const hardCoded = /#(?:f59e0b|ff6b6b|ff4444|22c55e|8b5cf6)\b/i;
+	for (const file of fs.readdirSync(path.join(root, 'public/assets/js')).filter(name => name.endsWith('.js'))) {
+		assert.doesNotMatch(js(file), hardCoded, file);
+	}
+	assert.doesNotMatch(read('public/download.php'), /\scolor="#|!important/);
+	assert.doesNotMatch(read('src/includes/panel/views_dashboard.php'), hardCoded);
+	assert.match(read('public/assets/css/base.css'), /--accent-2: #8b5cf6;/);
 });
 
 test('the captcha widget follows the page theme', () => {

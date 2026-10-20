@@ -73,7 +73,7 @@
 .top-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .top-file-meta { color: var(--text-muted); white-space: nowrap; }
 .top-file-bar { height: 7px; border-radius: 4px; background: var(--bg-secondary); overflow: hidden; }
-.top-file-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
+.top-file-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 
 /* Group permissions (Faza 6 · #1) — the checkbox grid in the group form and the
    "what will this user get" preview in the change-group modal. */
@@ -503,7 +503,7 @@
 	overflow: hidden;
 	margin-bottom: 4px;
 }
-.lang-coverage i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), #8b5cf6); }
+.lang-coverage i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 
 /* Inline links inside body copy (settings hints, doc references). Without this they fall back
    to the UA's pure blue, which reads as "unstyled page" against the panel's palette. Anchors

@@ -436,7 +436,7 @@
 	display: block;
 	height: 100%;
 	border-radius: 6px;
-	background: linear-gradient(90deg, var(--accent), #8b5cf6);
+	background: linear-gradient(90deg, var(--accent), var(--accent-2));
 	transition: width 0.4s ease;
 	/* A used-but-tiny fraction should still show as a sliver rather than as nothing. */
 	min-width: 2px;

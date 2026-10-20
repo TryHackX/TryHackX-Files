@@ -184,7 +184,7 @@
 							reload,
 							document.createTextNode(' ' + t('up.or_check_conn'))
 						);
-						loading.style.color = '#ff6b6b';
+						loading.style.color = 'var(--danger)';
 					}
 				}, 10000);
 			} else {
@@ -1269,6 +1269,11 @@
 		setTimeout(() => input.focus(), 100);
 	}
 
+	/** Meter colour for 0-4 met requirements, from the theme's tokens (red, amber, green). */
+	function strengthColour(score) {
+		return score <= 1 ? 'var(--danger)' : score === 2 ? 'var(--warning)' : 'var(--success)';
+	}
+
 	/**
 	 * Live strength meter + requirement checklist + "passwords match" indicator, bound to a
 	 * set of element ids (mirrors account creation / the panel). Returns a reset function.
@@ -1303,7 +1308,7 @@
 			if (bar) {
 				const pct = (score / 4) * 100;
 				bar.style.width = pct + '%';
-				bar.style.backgroundColor = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : pct < 75 ? '#f59e0b' : 'var(--success)';
+				bar.style.backgroundColor = strengthColour(score);
 			}
 			updateMatch();
 		}

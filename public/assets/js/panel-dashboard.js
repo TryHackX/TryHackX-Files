@@ -251,8 +251,8 @@
 			const x = padL + i * bw;
 			const half = Math.max(1, (bw - gap) / 2);
 			const upY = y(s.upload), dlY = y(s.download);
-			bars += `<rect x="${x + gap / 2}" y="${upY}" width="${half}" height="${Math.max(0, base - upY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gUp)"><title>${esc(s.date)} · Upload ${formatSize(s.upload)}</title></rect>`;
-			bars += `<rect x="${x + gap / 2 + half}" y="${dlY}" width="${half}" height="${Math.max(0, base - dlY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gDl)"><title>${esc(s.date)} · Download ${formatSize(s.download)}</title></rect>`;
+			bars += `<rect x="${x + gap / 2}" y="${upY}" width="${half}" height="${Math.max(0, base - upY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gUp)"><title>${esc(s.date)} · ${esc(t('panel.dash.series_upload'))} ${formatSize(s.upload)}</title></rect>`;
+			bars += `<rect x="${x + gap / 2 + half}" y="${dlY}" width="${half}" height="${Math.max(0, base - dlY)}" rx="${half > 4 ? 3 : 1}" fill="url(#gDl)"><title>${esc(s.date)} · ${esc(t('panel.dash.series_download'))} ${formatSize(s.download)}</title></rect>`;
 			if (i % every === 0) {
 				bars += `<text x="${x + bw / 2}" y="${H - 8}" font-size="${dateFont}" fill="var(--text-muted)" text-anchor="middle">${esc(trafficLabel(s.date, bucket))}</text>`;
 			}
@@ -265,8 +265,8 @@
 					<stop offset="1" stop-color="var(--accent)" stop-opacity="0.5"/>
 				</linearGradient>
 				<linearGradient id="gDl" x1="0" y1="0" x2="0" y2="1">
-					<stop offset="0" stop-color="#22c55e" stop-opacity="0.95"/>
-					<stop offset="1" stop-color="#22c55e" stop-opacity="0.5"/>
+					<stop offset="0" stop-color="var(--success)" stop-opacity="0.95"/>
+					<stop offset="1" stop-color="var(--success)" stop-opacity="0.5"/>
 				</linearGradient>
 			</defs>
 			${grid}
@@ -294,7 +294,7 @@
 	function formatDuration(sec) {
 		sec = Math.max(0, Math.floor(sec));
 		const m = Math.floor(sec / 60), s = sec % 60;
-		return m > 0 ? `${m}m ${s}s` : `${s}s`;
+		return m > 0 ? t('js.duration_ms', { m, s }) : t('js.duration_s', { s });
 	}
 
 	// Plain fetch (not ETag) on purpose: we re-render every tick so the elapsed time keeps moving.

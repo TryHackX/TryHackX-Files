@@ -125,10 +125,12 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						</div>
 						<div class="meta-card">
 							<div class="meta-icon">
+								<?php /* A storage drum, the same symbol the collection page uses for size. */ ?>
 								<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
 									stroke-width="2">
-									<circle cx="12" cy="12" r="10" />
-									<polyline points="12 6 12 12 16 14" />
+									<ellipse cx="12" cy="5" rx="9" ry="3" />
+									<path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+									<path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
 								</svg>
 							</div>
 							<div class="meta-content">
@@ -232,7 +234,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 
 				<div class="actions">
 					<button class="btn" type="button" data-download-action="open-report" title="<?= _h('download.report_tooltip') ?>" aria-label="<?= _h('download.report_tooltip') ?>">
-						<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" color="#ff4444" aria-hidden="true">
+						<svg class="report-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 							<path
 								d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
 							<line x1="12" y1="9" x2="12" y2="13" />
@@ -280,7 +282,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						</h3>
 						<div class="embed-list">
 							<div class="embed-row">
-								<span class="embed-tag">Link</span>
+								<span class="embed-tag"><?= _h('download.embed_link') ?></span>
 								<code class="embed-code" id="embDirect"></code>
 								<button class="btn btn-copy" type="button" data-embed-key="direct"><?= _h('common.copy') ?></button>
 							</div>

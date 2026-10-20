@@ -1801,7 +1801,7 @@
 		// otherwise leave a broken icon on a white card, so hide the holder instead.
 		const qr = document.getElementById('ccQr');
 		qr.style.display = '';
-		qr.innerHTML = `<img alt="QR" width="200" height="200" src="${appUrl}/api/qr?scale=5&data=${encodeURIComponent(createdCollectionUrl)}"
+		qr.innerHTML = `<img alt="${esc(t('qr.alt'))}" width="200" height="200" src="${appUrl}/api/qr?scale=5&data=${encodeURIComponent(createdCollectionUrl)}"
 			data-fh-error="this.parentNode.style.display='none'">`;
 
 		const rejected = d.rejected || [];
@@ -2587,9 +2587,8 @@
 			if (ok) score++;
 		});
 		if (bar) {
-			const pct = (score / 4) * 100;
-			bar.style.width = pct + '%';
-			bar.style.backgroundColor = pct < 25 ? 'var(--danger)' : pct < 50 ? 'var(--warning)' : pct < 75 ? '#f59e0b' : 'var(--success)';
+			bar.style.width = (score / 4) * 100 + '%';
+			bar.style.backgroundColor = score <= 1 ? 'var(--danger)' : score === 2 ? 'var(--warning)' : 'var(--success)';
 		}
 		updateFoMatch();
 	}

@@ -304,6 +304,10 @@
 	display: none;
 }
 
+.report-icon {
+	color: var(--danger);
+}
+
 .preview-unlock-btn {
 	margin-top: 12px;
 }
@@ -588,7 +592,6 @@
 .coll-file .cn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .coll-file .cs { color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; }
 .coll-empty { color: var(--text-muted); text-align: center; padding: 28px 18px; }
-.coll-count-badge { font-size: 0.82rem; color: var(--text-muted); padding: 0 20px 4px; }
 .coll-pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
 	gap: 6px; padding: 0 20px 22px; }
 .coll-pagination a, .coll-pagination span { min-width: 36px; height: 36px; display: inline-flex;

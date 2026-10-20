@@ -100,7 +100,7 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #22c55e;
+    background: var(--success);
     margin-left: 6px;
     vertical-align: middle;
     animation: livePulse 1.6s ease-in-out infinite;

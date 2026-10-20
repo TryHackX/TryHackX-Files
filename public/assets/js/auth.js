@@ -193,9 +193,6 @@
             const roleEl = document.getElementById('userRole');
             if (roleEl) roleEl.textContent = currentUser.is_admin ? t('auth.role_admin') : t('auth.role_user');
 
-            const adminLink = document.getElementById('adminLink');
-            if (adminLink) adminLink.style.display = currentUser.is_admin ? 'flex' : 'none';
-
             const loginPrompt = document.getElementById('loginPrompt');
             if (loginPrompt) loginPrompt.style.display = 'none';
         } else {
@@ -649,10 +646,8 @@
     }
 
     function formatDuration(seconds) {
-        if (seconds < 60) return seconds + 's';
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        return m + 'm ' + s + 's';
+        if (seconds < 60) return t('js.duration_s', { s: seconds });
+        return t('js.duration_ms', { m: Math.floor(seconds / 60), s: seconds % 60 });
     }
 
     function startResendCountdown(seconds, container) {
@@ -822,18 +817,11 @@
                 }
             }
 
-            const pct = (score / max) * 100;
             if (bar) {
-                bar.style.width = pct + '%';
-                if (pct < 25) {
-                    bar.style.backgroundColor = 'var(--danger)';
-                } else if (pct < 50) {
-                    bar.style.backgroundColor = 'var(--warning)';
-                } else if (pct < 75) {
-                    bar.style.backgroundColor = '#f59e0b';
-                } else {
-                    bar.style.backgroundColor = 'var(--success)';
-                }
+                bar.style.width = (score / max) * 100 + '%';
+                // Red, amber, green from the theme's own tokens (a fixed amber was brighter than
+                // the step before it in the light theme).
+                bar.style.backgroundColor = score <= 1 ? 'var(--danger)' : score === 2 ? 'var(--warning)' : 'var(--success)';
             }
 
             checkPasswordMatch();

@@ -695,7 +695,7 @@
 		holder.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(t('panel.prem.chart_title'))}">
 			<defs><linearGradient id="gPrem" x1="0" y1="0" x2="0" y2="1">
 				<stop offset="0" stop-color="var(--accent)" stop-opacity="0.95"/>
-				<stop offset="1" stop-color="#8b5cf6" stop-opacity="0.5"/>
+				<stop offset="1" stop-color="var(--accent-2)" stop-opacity="0.5"/>
 			</linearGradient></defs>
 			${grid}${bars}
 		</svg>`;
