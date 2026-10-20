@@ -213,11 +213,20 @@ Lang::init(isset($settings) ? ($settings['default_language'] ?? null) : null);
 // Create the storage roots on demand. A custom UPLOADS_PATH/DATA_PATH can point at a disk
 // that is not mounted (or not writable by the web user), so fail loudly instead of letting
 // every later write break in a confusing way. See docs/STORAGE.md.
+// The path goes to the server log (and to the terminal of a CLI run) — not to every visitor.
 foreach (['uploads' => UPLOADS_DIR, 'data' => DATA_DIR] as $label => $dir) {
 	if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+		$storageProblem = PRODUCT_NAME . ': cannot create the ' . $label . ' directory: ' . $dir
+			. ' — check that the drive is mounted and writable (see docs/STORAGE.md).';
+		if (PHP_SAPI === 'cli') {
+			fwrite(STDERR, $storageProblem . "\n");
+			exit(1);
+		}
+		error_log($storageProblem);
 		http_response_code(500);
-		exit(PRODUCT_NAME . ': cannot create the ' . $label . ' directory: ' . htmlspecialchars($dir)
-			. ' — check that the drive is mounted and writable (see docs/STORAGE.md).');
+		header('Content-Type: text/plain; charset=utf-8');
+		exit(PRODUCT_NAME . ': the ' . $label . ' storage is not available right now.'
+			. ' The administrator will find the details in the server log.');
 	}
 }
 

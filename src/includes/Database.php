@@ -65,16 +65,29 @@ class Database
 	/** @var array<int, bool> */
 	private static array $injectedMigrationPublicationFaults = [];
 	private static ?PDO $instance = null;
+	/** When the last connection attempt failed (microtime); see getInstance(). */
+	private static ?float $connectFailedAt = null;
+	/** How long a refused connection is believed before the database is dialled again. */
+	private const CONNECT_RETRY_SECONDS = 5.0;
 
 	public static function resetInstance(): void
 	{
 		self::$instance = null;
+		self::$connectFailedAt = null;
 	}
 
 	public static function getInstance(): ?PDO
 	{
 		if (self::$instance === null) {
 			if (!defined('DB_HOST') || !defined('DB_NAME') || empty(DB_HOST) || empty(DB_NAME)) {
+				return null;
+			}
+			// Every repository a page touches asks for the connection. While the database is
+			// down (a MariaDB restart, say) that was 10-20 connection attempts and as many log
+			// lines per page view. A refusal is now believed for a few seconds: one attempt and
+			// one line per request, while a long-running worker still reconnects soon after.
+			if (self::$connectFailedAt !== null
+				&& microtime(true) - self::$connectFailedAt < self::CONNECT_RETRY_SECONDS) {
 				return null;
 			}
 
@@ -85,7 +98,9 @@ class Database
 					PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 					PDO::ATTR_EMULATE_PREPARES => false,
 				]);
+				self::$connectFailedAt = null;
 			} catch (PDOException $e) {
+				self::$connectFailedAt = microtime(true);
 				error_log("Database connection failed: " . $e->getMessage());
 				return null;
 			}
@@ -103,6 +118,7 @@ class Database
 				PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 				PDO::ATTR_EMULATE_PREPARES => false,
 			]);
+			self::$connectFailedAt = null;
 			return self::$instance;
 		} catch (PDOException $e) {
 			error_log("Database connection failed: " . $e->getMessage());
