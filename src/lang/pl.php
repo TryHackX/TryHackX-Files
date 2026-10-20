@@ -686,6 +686,7 @@ return [
 	'panel.track.year' => 'Ruch w roku',
 	'panel.track.monitor' => 'Monitoruj podejrzaną aktywność',
 	'panel.track.threshold_ph' => 'Próg',
+	'panel.track.unit' => 'Jednostka',
 	'panel.track.hours_ph' => 'Godzin',
 	'panel.track.check' => 'Sprawdź',
 	'panel.track.clear' => 'Wyczyść filtr',

@@ -429,6 +429,13 @@
 	filter: brightness(1.1);
 }
 
+/* "Copy all" and "Create collection" were 31px high for a finger. */
+@media (pointer: coarse) {
+	.copy-all {
+		min-height: 40px;
+	}
+}
+
 /* C1: "Create collection" sits next to "Copy all"; styled as a secondary action. */
 .results-actions {
 	display: flex;

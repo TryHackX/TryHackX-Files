@@ -118,6 +118,9 @@ if (!defined('APP_ROOT')) {
 		         the room back; at two it slides out from the right. The counter in the label is
 		         then always a real number, which is why it no longer needs the muted state it
 		         used to carry. */ ?>
+		<?php /* On phones `.selection-bar` floats these over the bottom of the screen, so
+		         ticking a row never moves the table (panel-premium.css). */ ?>
+		<div class="selection-bar">
 		<?php if ($pMyCollCreate): ?>
 			<button class="btn btn-primary collect-slide" id="createCollectionBtn" data-fh-click="openCreateCollection()"
 				tabindex="-1" aria-hidden="true">
@@ -132,6 +135,7 @@ if (!defined('APP_ROOT')) {
 			<i class="fa-solid fa-trash"></i> <span class="collect-slide-label"><?= _h('panel.files.delete_selected') ?></span>
 			<span class="collect-count" id="myDelSelCount">0</span>
 		</button>
+		</div>
 	</div>
 
 	<?php if ($pMyFilters): ?>
@@ -173,11 +177,13 @@ if (!defined('APP_ROOT')) {
 		<div class="section-head-actions">
 			<button class="btn" data-fh-click="loadCollections()"><i class="fa-solid fa-arrows-rotate"></i> <?= _h('common.refresh') ?></button>
 			<?php if ($pMyCollDelete): ?>
-				<button class="btn btn-danger collect-slide" id="deleteMyCollectionsBtn" data-fh-click="bulkDeleteMyCollections()"
-					tabindex="-1" aria-hidden="true">
-					<i class="fa-solid fa-trash"></i> <span class="collect-slide-label"><?= _h('panel.files.delete_selected') ?></span>
-					<span class="collect-count" id="myCollSelCount">0</span>
-				</button>
+				<div class="selection-bar">
+					<button class="btn btn-danger collect-slide" id="deleteMyCollectionsBtn" data-fh-click="bulkDeleteMyCollections()"
+						tabindex="-1" aria-hidden="true">
+						<i class="fa-solid fa-trash"></i> <span class="collect-slide-label"><?= _h('panel.files.delete_selected') ?></span>
+						<span class="collect-count" id="myCollSelCount">0</span>
+					</button>
+				</div>
 			<?php endif; ?>
 		</div>
 	</div>

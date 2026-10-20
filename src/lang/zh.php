@@ -636,6 +636,7 @@ return array (
   'panel.track.year' => '本年流量',
   'panel.track.monitor' => '监控可疑活动',
   'panel.track.threshold_ph' => '阈值',
+  'panel.track.unit' => '单位',
   'panel.track.hours_ph' => '小时',
   'panel.track.check' => '检查',
   'panel.track.clear' => '清除筛选',

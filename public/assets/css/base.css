@@ -383,6 +383,13 @@ header {
 		flex-wrap: wrap;
 		justify-content: flex-end;
 		min-width: 0;
+		/* With four finger-sized language links and the premium link the row needed 324px of
+		   the 320 a 360px phone has, and the account button wrapped onto a row of its own. */
+		gap: 6px;
+	}
+
+	.lang-switch {
+		margin-right: 0;
 	}
 }
 

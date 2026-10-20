@@ -54,7 +54,9 @@ if (!defined('APP_ROOT')) {
 		<?php /* The selection actions live in the toolbar and slide out of its right edge, the
 		         same gesture "My files" uses — one mechanism for both lists instead of a bar
 		         that pushed the table down the moment a row was ticked. Collecting still needs
-		         two files, deleting appears at one. */ ?>
+		         two files, deleting appears at one. On phones `.selection-bar` floats them over
+		         the bottom of the screen instead (panel-premium.css). */ ?>
+		<div class="selection-bar">
 		<?php if ($pCanCollect): ?>
 			<button class="btn btn-primary collect-slide" id="bulkCollectionBtn" data-fh-click="openCollectionFromAll()"
 				tabindex="-1" aria-hidden="true">
@@ -69,6 +71,7 @@ if (!defined('APP_ROOT')) {
 				<span class="collect-count" id="bulkCount">0</span>
 			</button>
 		<?php endif; ?>
+		</div>
 	</div>
 
 	<?php if ($pFilters): ?>
@@ -119,11 +122,13 @@ if (!defined('APP_ROOT')) {
 				<div class="section-head-actions">
 					<button class="btn" data-fh-click="loadAdminCollections(1)"><i class="fa-solid fa-arrows-rotate"></i> <?= _h('common.refresh') ?></button>
 					<?php if ($pCollDelete): ?>
-						<button class="btn btn-danger collect-slide" id="collBulkDeleteBtn" data-fh-click="bulkDeleteCollections()"
-							tabindex="-1" aria-hidden="true">
-							<i class="fa-solid fa-trash"></i> <span class="collect-slide-label"><?= _h('panel.coll.delete_selected') ?></span>
-							<span class="collect-count" id="collBulkCount">0</span>
-						</button>
+						<div class="selection-bar">
+							<button class="btn btn-danger collect-slide" id="collBulkDeleteBtn" data-fh-click="bulkDeleteCollections()"
+								tabindex="-1" aria-hidden="true">
+								<i class="fa-solid fa-trash"></i> <span class="collect-slide-label"><?= _h('panel.coll.delete_selected') ?></span>
+								<span class="collect-count" id="collBulkCount">0</span>
+							</button>
+						</div>
 					<?php endif; ?>
 				</div>
 			</div>

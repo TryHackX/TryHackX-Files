@@ -100,14 +100,16 @@ if (!defined('APP_ROOT')) {
 			         parametry — inaczej sprawdzenie progu wyrzucałoby z powrotem na zgłoszenia. */ ?>
 			<input type="hidden" name="tab" value="moderate">
 			<input type="hidden" name="mstab" value="tracking">
-			<div style="display: flex; gap: 10px; align-items: center;">
-				<input type="number" name="threshold" placeholder="<?= _h('panel.track.threshold_ph') ?>" value="<?= $threshold ? rtrim(rtrim(number_format($threshold, 2, '.', ''), '0'), '.') : '' ?>" min="0" step="0.1" class="search" style="width: 130px; flex: none;">
-					<select name="unit" class="input" style="width: 80px; flex: none;">
-						<option value="MB" <?= $thresholdUnit === 'MB' ? 'selected' : '' ?>>MiB</option>
-						<option value="GB" <?= $thresholdUnit === 'GB' ? 'selected' : '' ?>>GiB</option>
-						<option value="TB" <?= $thresholdUnit === 'TB' ? 'selected' : '' ?>>TiB</option>
-					</select>
-				<input type="number" name="period" placeholder="<?= _h('panel.track.hours_ph') ?>" value="<?= $period ?>" class="search" style="width: 100px; flex: none;">
+			<?php /* A class, not inline widths: `.search` has a 200px minimum, so the row was 608px
+			         wide and could not wrap, and phones panned sideways (panel-forms.css). */ ?>
+			<div class="track-filter">
+				<input type="number" name="threshold" placeholder="<?= _h('panel.track.threshold_ph') ?>" aria-label="<?= _h('panel.track.threshold_ph') ?>" value="<?= $threshold ? rtrim(rtrim(number_format($threshold, 2, '.', ''), '0'), '.') : '' ?>" min="0" step="0.1" class="search">
+				<select name="unit" class="input" aria-label="<?= _h('panel.track.unit') ?>">
+					<option value="MB" <?= $thresholdUnit === 'MB' ? 'selected' : '' ?>>MiB</option>
+					<option value="GB" <?= $thresholdUnit === 'GB' ? 'selected' : '' ?>>GiB</option>
+					<option value="TB" <?= $thresholdUnit === 'TB' ? 'selected' : '' ?>>TiB</option>
+				</select>
+				<input type="number" name="period" placeholder="<?= _h('panel.track.hours_ph') ?>" aria-label="<?= _h('panel.track.hours_ph') ?>" value="<?= $period ?>" class="search">
 				<button type="submit" class="btn btn-primary"><?= _h('panel.track.check') ?></button>
 			</div>
 			<?php if ($threshold > 0): ?>

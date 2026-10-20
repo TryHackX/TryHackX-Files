@@ -226,12 +226,45 @@
 	pointer-events: auto;
 }
 
+/* The holder of a list's selection actions. On wide screens it has no box of its own: the
+   buttons stay items of the toolbar and slide out of its right edge as above. */
+.selection-bar {
+	display: contents;
+}
+
 /* Phones: the filter row wraps, and the two collapsed buttons — zero width but still full
    height — formed a second, empty row of their own between the search box and the table.
-   There is no room for the slide on a wrapping row anyway, so they simply appear. */
+   There is no room for the slide on a wrapping row anyway, so they simply appear.
+   Appearing in the toolbar still took a new row each, pushing the table 58 px down per button
+   while the user was ticking rows, so the next tap landed on the row above. The actions float
+   over the bottom of the screen instead and the table never moves. */
 @media (max-width: 600px) {
 	.btn.collect-slide:not(.is-shown) {
 		display: none;
+	}
+
+	.selection-bar {
+		position: fixed;
+		left: 16px;
+		right: 16px;
+		bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+		z-index: 900;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 8px;
+		/* The empty strip between the buttons lets taps through to the page. */
+		pointer-events: none;
+	}
+
+	.selection-bar .btn.collect-slide.is-shown {
+		pointer-events: auto;
+		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+	}
+
+	/* Room under the last row and the pager while the bar is up (two buttons stack). */
+	body:has(.selection-bar .collect-slide.is-shown) .container {
+		padding-bottom: 120px;
 	}
 }
 

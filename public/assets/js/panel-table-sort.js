@@ -142,7 +142,10 @@
 	}
 
 	function prepareTable(table) {
-		if (!table || table.matches('.shortcuts-table') || !table.tHead || !table.tBodies.length) return;
+		// Not data tables: the shortcut list, and the notification preference matrix (as a
+		// "stable" 680px table its toggles started at x 580 on a phone, and its channel
+		// headers re-sorted the types by checkbox state).
+		if (!table || table.matches('.shortcuts-table, .notif-prefs') || !table.tHead || !table.tBodies.length) return;
 		if (!states.has(table)) states.set(table, { sorts: [] });
 		const headers = Array.from(table.tHead.rows[table.tHead.rows.length - 1]?.cells || []);
 		table.classList.add('table-stable');

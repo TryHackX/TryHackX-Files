@@ -477,6 +477,60 @@
 	min-width: 0;
 }
 
+/* Phones: at 360px the four tiles stacked into one column and a full-height preview followed,
+   so "Download" started one to 1.6 screens down. Two tiles a row, the buttons straight under
+   them (a PDF frame or a tall image would still push them off the first screen), and a
+   shorter preview after them. */
+@media (max-width: 500px) {
+	.file-card {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.file-header {
+		order: -2;
+	}
+
+	.actions,
+	.embed-section {
+		order: -1;
+	}
+
+	.file-meta-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 8px;
+	}
+
+	.meta-card {
+		padding: 10px;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	.meta-icon {
+		width: 28px;
+		height: 28px;
+		flex: none;
+	}
+
+	.meta-content {
+		min-width: 0;
+	}
+
+	.preview {
+		padding: 12px;
+	}
+
+	.preview img,
+	.preview video {
+		max-height: 45vh;
+	}
+
+	.preview iframe {
+		height: min(55vh, 420px);
+	}
+}
+
 /* Report form */
 #reportModal {
 	z-index: 2000;

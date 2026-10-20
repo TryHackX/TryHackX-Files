@@ -292,6 +292,26 @@
 	display: block;
 	color: var(--text-muted);
 	font-weight: 400;
+	font-size: 0.8rem;
+}
+
+/* Phones: two narrow toggle columns, and the type column takes the rest and wraps. */
+@media (max-width: 600px) {
+	.notif-prefs th,
+	.notif-prefs td {
+		padding: 10px 6px;
+	}
+
+	.notif-prefs th:not(:first-child),
+	.notif-prefs td:not(:first-child) {
+		width: 56px;
+		font-size: 0.75rem;
+	}
+
+	.notif-prefs .notif-type {
+		gap: 8px;
+		overflow-wrap: anywhere;
+	}
 }
 
 .notif-prefs td.is-na {

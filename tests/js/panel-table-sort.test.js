@@ -65,3 +65,17 @@ test('responsive tables keep natural column widths and an intact rounded edge', 
 test('generic sorter appends its icon without a layout-changing spacer node', () => {
 	assert.doesNotMatch(source, /createTextNode\(['"]\s+['"]\)/);
 });
+
+test('the notification preference matrix is left alone: no 680px minimum, no sort handles', () => {
+	const sorter = loadModule();
+	const touched = [];
+	const table = {
+		matches: selector => selector === 'table' || selector.split(',').map(part => part.trim()).includes('.notif-prefs'),
+		tHead: { rows: [{ cells: [] }] },
+		tBodies: [{}],
+		classList: { add: name => touched.push(name) },
+		style: { setProperty: name => touched.push(name) }
+	};
+	sorter.refresh(table);
+	assert.deepEqual(touched, []);
+});

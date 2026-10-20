@@ -512,8 +512,8 @@ if (!defined('APP_ROOT')) {
 
 		<div class="settings-section">
 			<h3><i class="fa-solid fa-circle-info"></i> <?= _h('panel.set.sysinfo') ?></h3>
-			<div style="background: var(--bg-secondary); padding: 16px; border-radius: 8px;">
-				<p style="color: var(--text-secondary); line-height: 1.8; margin: 0;">
+			<div class="sysinfo-box">
+				<p>
 					<strong><?= _h('panel.set.version') ?>:</strong> <?= APP_VERSION ?><br>
 					<strong><?= _h('panel.set.php_version') ?>:</strong> <?= phpversion() ?><br>
 					<strong><?= _h('panel.set.server') ?>:</strong> <?= htmlspecialchars($_SERVER['SERVER_SOFTWARE'] ?? __('panel.set.unknown')) ?><br>

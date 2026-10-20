@@ -636,6 +636,7 @@ return array (
   'panel.track.year' => 'Tráfico del año',
   'panel.track.monitor' => 'Vigilar actividad sospechosa',
   'panel.track.threshold_ph' => 'Umbral',
+  'panel.track.unit' => 'Unidad',
   'panel.track.hours_ph' => 'Horas',
   'panel.track.check' => 'Comprobar',
   'panel.track.clear' => 'Quitar el filtro',

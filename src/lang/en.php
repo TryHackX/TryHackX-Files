@@ -684,6 +684,7 @@ return [
 	'panel.track.year' => 'Traffic Year',
 	'panel.track.monitor' => 'Monitor Suspicious Activity',
 	'panel.track.threshold_ph' => 'Threshold',
+	'panel.track.unit' => 'Unit',
 	'panel.track.hours_ph' => 'Hours',
 	'panel.track.check' => 'Check',
 	'panel.track.clear' => 'Clear Filter',

@@ -34,6 +34,21 @@
     text-align: center;
 }
 
+/* Settings → System facts. A long uploads path cannot break at a space, so it widened the
+   page on a phone (492px at 360); here it breaks anywhere instead. */
+.sysinfo-box {
+    background: var(--bg-secondary);
+    padding: 16px;
+    border-radius: 8px;
+}
+
+.sysinfo-box p {
+    color: var(--text-secondary);
+    line-height: 1.8;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
 .form-row {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -102,6 +117,22 @@
 .input:focus {
     outline: none;
     border-color: var(--accent);
+}
+
+/* Moderation → Tracking: threshold, unit, hours and the button. The two number fields are
+   `.search` (200px minimum) and the row could not wrap: 608px on a 360px phone, which made
+   the whole page pan sideways. Now they share the row and wrap as a group. */
+.track-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.track-filter .search {
+    flex: 1 1 110px;
+    min-width: 0;
+    max-width: 180px;
 }
 
 /* Modal */

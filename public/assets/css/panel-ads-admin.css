@@ -252,14 +252,17 @@
 .ad-dropzone.has-file { padding: 10px 16px; }
 .ad-dropzone small { color: var(--text-muted); }
 
+/* Wraps, and the slider may shrink: icon + slider + icon + button could not go below ~317px,
+   so at 360px "Center" was cut and the dialog scrolled sideways. */
 .ad-cropper-controls {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 10px;
 	margin-top: 8px;
 	color: var(--text-muted);
 }
-.ad-cropper-controls input[type="range"] { flex: 1; max-width: 200px; }
+.ad-cropper-controls input[type="range"] { flex: 1 1 120px; min-width: 0; max-width: 200px; }
 
 .myad-addons { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .myad-addon-row {
