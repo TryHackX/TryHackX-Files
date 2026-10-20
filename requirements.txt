@@ -1,6 +1,6 @@
 # Human-maintained runtime inputs. The only supported install path is the hash-locked
 # requirements-lock.txt compiled from this file (see tests/README.md for the exact command).
-fastapi>=0.143.0
+fastapi>=0.143.2
 uvicorn>=0.54
 # uvicorn's optional HTTP parser and event loop. Declared explicitly (instead of the
 # uvicorn[standard] extra) so websockets, watchfiles, python-dotenv and PyYAML - none of which

@@ -82,15 +82,18 @@ where it exists, `colorama` only on Windows). A plain `pip-compile` run on one m
 that, which is how production once ended up without `uvloop`.
 
 ```bash
-python -m pip install uv==0.13.0
+python -m pip install uv==0.13.1
 uv pip compile requirements.txt --universal --python-version 3.11 --generate-hashes --upgrade \
   -o requirements-lock.txt
 uv pip compile requirements-dev.txt requirements.txt --universal --python-version 3.11 \
   --generate-hashes --allow-unsafe --upgrade -o requirements-dev-lock.txt
 ```
 
-Without `--upgrade` the existing pins are kept and only new requirements are resolved. Then prove
-that the result still installs and agrees with itself:
+Without `--upgrade` the existing pins are kept and only new requirements are resolved. A pin that
+no longer satisfies its requirement (a raised floor) is resolved again, to the newest release. To
+take one exact version instead, for example the one a Dependabot pull request proposes, add
+`-P name==version` (`--upgrade-package`) per package; uv leaves that option out of the file
+header. Then prove that the result still installs and agrees with itself:
 
 ```bash
 python -m venv /tmp/lockcheck && /tmp/lockcheck/bin/python -m pip install --require-hashes \
