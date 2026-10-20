@@ -799,6 +799,59 @@ def resolve_client_ip(server: dict, trusted_proxies, trusted_header: str = "") -
     return value if _is_ip_literal(value) else remote
 
 
+def throttle_key(ip: str) -> str:
+    """
+    Python mirror of filehostThrottleKey() in src/includes/ClientIp.php: the key every
+    per-guest counter, cap, quota subject and ban is kept under, on both sides.
+
+    IPv4 counts per address. IPv6 counts per /64, the block one customer is routinely handed:
+    counting single addresses gave one /64 2^64 fresh budgets. An IPv4-mapped IPv6 address is
+    the IPv4 one, and anything that is not an address comes back unchanged, as in PHP.
+    """
+    if not isinstance(ip, str) or "%" in ip:
+        return ip
+    try:
+        address = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if address.version == 4:
+        return ip
+    if address.ipv4_mapped is not None:
+        return str(address.ipv4_mapped)
+    return f"{ipaddress.IPv6Address((int(address) >> 64) << 64).compressed}/64"
+
+
+def _same_client_condition(column: str, ip: str) -> tuple[str, tuple]:
+    """SQL that matches every stored address counted under `ip`'s throttle key.
+
+    Rows keep the exact address, which is what the live list shows. IPv6 rows are matched by
+    their /64 network on the packed form, so the spelling of an address cannot matter; a row
+    that already stores the key itself matches too. INET6_ATON() only ever sees valid IPv6
+    strings: on anything else ("unknown", a /64 key) it raises a warning per row.
+    """
+    key = throttle_key(ip)
+    try:
+        address = ipaddress.ip_address(ip) if "%" not in ip else None
+    except ValueError:
+        address = None
+    if address is None or address.version == 4 or address.ipv4_mapped is not None:
+        values = tuple(dict.fromkeys((ip, key)))
+        return f"`{column}` IN ({', '.join(['%s'] * len(values))})", values
+    network = (int(address) >> 64).to_bytes(8, "big").hex().upper()
+    return (
+        f"(`{column}` IN (%s, %s) OR CASE WHEN IS_IPV6(`{column}`) "
+        f"THEN HEX(LEFT(INET6_ATON(`{column}`), 8)) END = %s)",
+        (ip, key, network),
+    )
+
+
+def _download_lock_name(ip: str) -> str:
+    """The advisory lock that serializes one client's concurrency counts (per throttle key)."""
+    return build_lock_name(
+        "download:" + hashlib.sha256(throttle_key(ip).encode()).hexdigest()[:24]
+    )
+
+
 _trusted_proxy_cache: dict = {"source": None, "proxies": (), "header": ""}
 
 
@@ -1731,17 +1784,28 @@ def _upload_failure(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Upload failed")
 
 async def authorize_upload_identity(token: str | None, ip: str):
-    """Fail-closed ban/CAPTCHA/token decision without consuming the upload slot yet."""
+    """Fail-closed ban/token decision without consuming the upload slot yet.
+
+    Every upload carries a token from PHP: minted after the CAPTCHA, or on request while the
+    CAPTCHA is off, under PHP's per-network rate limit. A token-less upload used to get an
+    implicit guest session per exact address, so each fresh IPv6 address of one /64 started a
+    new session and the per-session file cap never applied.
+    """
+    if not token:
+        return False, None, None
     pool = await require_storage_ready()
     prefix = db_config_cache.get("prefix", "") if db_config_cache else ""
     now = int(time.time())
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                # A ban covers the exact address and its whole /64 (BanRepository stores IPv6
+                # bans by network; rows written before that hold the exact address).
                 await cur.execute(
-                    f"SELECT 1 FROM `{prefix}blacklists` WHERE `type`='ip' AND `value`=%s "
+                    f"SELECT 1 FROM `{prefix}blacklists` WHERE `type`='ip' "
+                    f"AND `value` IN (%s, %s) "
                     f"AND (`expires_at` IS NULL OR `expires_at` > %s)",
-                    (ip, now),
+                    (ip, throttle_key(ip), now),
                 )
                 if await cur.fetchone():
                     return False, None, None
@@ -1749,73 +1813,34 @@ async def authorize_upload_identity(token: str | None, ip: str):
                 await cur.execute(
                     f"SELECT `setting_key`, `setting_value` FROM `{prefix}settings` "
                     f"WHERE `setting_key` IN "
-                    f"('recaptcha_enabled','recaptcha_site_key','recaptcha_secret_key',"
-                    f"'recaptcha_token_lifetime','recaptcha_max_files_per_session_guest',"
+                    f"('recaptcha_token_lifetime','recaptcha_max_files_per_session_guest',"
                     f"'recaptcha_max_files_per_session_auth')"
                 )
                 policy = {str(key): value for key, value in await cur.fetchall()}
-                captcha_enabled = (
-                    str(policy.get("recaptcha_enabled", "0")) == "1"
-                    and bool(policy.get("recaptcha_site_key"))
-                    and bool(policy.get("recaptcha_secret_key"))
-                )
 
-                if token:
-                    lifetime = max(1, safe_int(policy.get("recaptcha_token_lifetime"), 120))
-                    await cur.execute(
-                        f"SELECT t.`user_id`, t.`files_count` FROM `{prefix}upload_tokens` t "
-                        f"LEFT JOIN `{prefix}users` u ON u.`id` = t.`user_id` "
-                        f"WHERE t.`token` = %s AND t.`ip_address` = %s AND t.`created_at` > %s "
-                        f"AND (t.`user_id` IS NULL OR u.`is_active` = 1)",
-                        (token, ip, now - lifetime * 60),
-                    )
-                    row = await cur.fetchone()
-                    if row:
-                        default_limit_key = (
-                            "recaptcha_max_files_per_session_auth"
-                            if row[0]
-                            else "recaptcha_max_files_per_session_guest"
-                        )
-                        return True, (int(row[0]) if row[0] else None), {
-                            "token": token,
-                            "ip": ip,
-                            "default_limit": max(0, safe_int(policy.get(default_limit_key), 0)),
-                        }
-                    # A supplied but invalid capability is never silently downgraded to guest.
-                    return False, None, None
-
-                if captcha_enabled:
-                    return False, None, None
-
-                # No token and no CAPTCHA: still a guest session, and still subject to the
-                # guest per-session file cap. Leaving out the header used to skip the cap
-                # entirely, so the address's newest guest token is counted instead (one is
-                # created when there is none), exactly as if the browser had sent it.
                 lifetime = max(1, safe_int(policy.get("recaptcha_token_lifetime"), 120))
+                # Tokens stay bound to the exact address PHP minted them for.
                 await cur.execute(
-                    f"SELECT `token` FROM `{prefix}upload_tokens` "
-                    f"WHERE `ip_address` = %s AND `user_id` IS NULL AND `created_at` > %s "
-                    f"ORDER BY `created_at` DESC, `token` ASC LIMIT 1",
-                    (ip, now - lifetime * 60),
+                    f"SELECT t.`user_id`, t.`files_count` FROM `{prefix}upload_tokens` t "
+                    f"LEFT JOIN `{prefix}users` u ON u.`id` = t.`user_id` "
+                    f"WHERE t.`token` = %s AND t.`ip_address` = %s AND t.`created_at` > %s "
+                    f"AND (t.`user_id` IS NULL OR u.`is_active` = 1)",
+                    (token, ip, now - lifetime * 60),
                 )
                 row = await cur.fetchone()
                 if row:
-                    implicit_token = str(row[0])
-                else:
-                    implicit_token = secrets.token_hex(32)
-                    await cur.execute(
-                        f"INSERT INTO `{prefix}upload_tokens` "
-                        f"(`token`, `ip_address`, `user_id`, `created_at`, `files_count`) "
-                        f"VALUES (%s, %s, NULL, %s, 0)",
-                        (implicit_token, ip, now),
+                    default_limit_key = (
+                        "recaptcha_max_files_per_session_auth"
+                        if row[0]
+                        else "recaptcha_max_files_per_session_guest"
                     )
-                return True, None, {
-                    "token": implicit_token,
-                    "ip": ip,
-                    "default_limit": max(
-                        0, safe_int(policy.get("recaptcha_max_files_per_session_guest"), 0)
-                    ),
-                }
+                    return True, (int(row[0]) if row[0] else None), {
+                        "token": token,
+                        "ip": ip,
+                        "default_limit": max(0, safe_int(policy.get(default_limit_key), 0)),
+                    }
+                # A supplied but invalid capability is never silently downgraded to guest.
+                return False, None, None
     except HTTPException:
         raise
     except Exception as exc:
@@ -2037,14 +2062,16 @@ async def reconcile_upload_storage():
 
 
 async def enforce_ip_allowed(pool, ip: str):
+    """Refuse a banned address, or any address of a banned IPv6 /64."""
     prefix = db_config_cache.get("prefix", "") if db_config_cache else ""
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    f"SELECT 1 FROM `{prefix}blacklists` WHERE `type`='ip' AND `value`=%s "
+                    f"SELECT 1 FROM `{prefix}blacklists` WHERE `type`='ip' "
+                    f"AND `value` IN (%s, %s) "
                     f"AND (`expires_at` IS NULL OR `expires_at` > %s)",
-                    (ip, int(time.time())),
+                    (ip, throttle_key(ip), int(time.time())),
                 )
                 if await cur.fetchone():
                     raise HTTPException(status_code=403, detail="IP banned")
@@ -2988,12 +3015,14 @@ async def _reserve_download_slot_with_cursor(
     group_conn = safe_int(group_limits.get('concurrent_connections_per_file'), 0)
     limit_files = max(0, group_files)
     limit_conn = max(0, group_conn)
+    # Counted per throttle key: every address of one IPv6 /64 shares one budget.
+    same_client, client_params = _same_client_condition("ip_address", ip)
 
     if limit_conn > 0:
         await cur.execute(
             f"SELECT COUNT(*) FROM `{active_table}` "
-            f"WHERE `ip_address` = %s AND `file_id` = %s AND `heartbeat_at` >= %s",
-            (ip, file_id, now - 3600),
+            f"WHERE {same_client} AND `file_id` = %s AND `heartbeat_at` >= %s",
+            (*client_params, file_id, now - 3600),
         )
         if safe_int((await cur.fetchone() or (0,))[0]) >= limit_conn:
             raise HTTPException(
@@ -3004,8 +3033,8 @@ async def _reserve_download_slot_with_cursor(
     if limit_files > 0:
         await cur.execute(
             f"SELECT COUNT(DISTINCT `file_id`) FROM `{active_table}` "
-            f"WHERE `ip_address` = %s AND `file_id` <> %s AND `heartbeat_at` >= %s",
-            (ip, file_id, now - 3600),
+            f"WHERE {same_client} AND `file_id` <> %s AND `heartbeat_at` >= %s",
+            (*client_params, file_id, now - 3600),
         )
         if safe_int((await cur.fetchone() or (0,))[0]) >= limit_files:
             raise HTTPException(status_code=429, detail="Too many concurrent downloads.")
@@ -3081,8 +3110,9 @@ async def _reserve_transfer_quota_with_cursor(
     if period not in {"day", "week", "month", "year"}:
         period = "week"
     period_start, _ = _quota_period_window(period)
+    # Guests are one subject per throttle key, the row TransferQuotaRepository reads as well.
     subject_type = "user" if user_id else "ip"
-    subject_key = str(user_id) if user_id else ip
+    subject_key = str(user_id) if user_id else throttle_key(ip)
     table = f"{prefix}transfer_quota_usage"
     now = int(time.time())
     await cur.execute(
@@ -3694,9 +3724,7 @@ async def download_file(token: str, request: Request, background_tasks: Backgrou
                     request.headers.get('range', ''),
                     safe_int(file_size),
                 )
-                download_lock_name = build_lock_name(
-                    'download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:24]
-                )
+                download_lock_name = _download_lock_name(client_ip)
                 await cur.execute("SELECT GET_LOCK(%s, 5)", (download_lock_name,))
                 lock_row = await cur.fetchone()
                 if not lock_row or safe_int(lock_row[0]) != 1:
@@ -4773,9 +4801,7 @@ async def download_collection(id: str, request: Request, background_tasks: Backg
                 group_dl = safe_int(group_limits.get('limit_download'), 0)
                 limit_Bps = max(0, group_dl)
 
-                download_lock_name = build_lock_name(
-                    'download:' + hashlib.sha256(client_ip.encode()).hexdigest()[:24]
-                )
+                download_lock_name = _download_lock_name(client_ip)
                 await cur.execute("SELECT GET_LOCK(%s, 5)", (download_lock_name,))
                 lock_row = await cur.fetchone()
                 if not lock_row or safe_int(lock_row[0]) != 1:

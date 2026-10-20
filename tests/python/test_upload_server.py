@@ -2374,17 +2374,36 @@ class TestZip64Members:
             assert zf.testzip() is None
 
 
-class TestTokenlessUploadsAreCapped:
+class TestThrottleKey:
+    @pytest.mark.parametrize(
+        "ip, key", CLIENT_IP_VECTORS["throttle_keys"], ids=lambda value: repr(value)
+    )
+    def test_matches_php_on_the_shared_vectors(self, ip, key):
+        assert us.throttle_key(ip) == key
+
+    def test_one_network_is_one_client_and_its_neighbours_are_not(self):
+        assert us.throttle_key("2001:db8:1:2::1") == us.throttle_key("2001:db8:1:2:ffff::ffff")
+        assert us.throttle_key("2001:db8:1:2::1") != us.throttle_key("2001:db8:1:3::1")
+        assert us.throttle_key("203.0.113.9") != us.throttle_key("203.0.113.10")
+        assert len(us.throttle_key("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")) <= 45
+
+
+class TestUploadIdentity:
+    """Uploads need a token PHP minted; bans and caps follow the client's throttle key."""
+
     POLICY = [
-        ("recaptcha_enabled", "0"),
         ("recaptcha_token_lifetime", "120"),
         ("recaptcha_max_files_per_session_guest", "5"),
+        ("recaptcha_max_files_per_session_auth", "0"),
     ]
 
-    def _run(self, monkeypatch, existing_token, policy=None):
+    def _run(self, monkeypatch, token, ip, banned=False, token_row=(None, 0)):
         cursor = _ScriptedCursor(
-            [("FROM `fh_upload_tokens`", (existing_token,) if existing_token else None)],
-            [("FROM `fh_settings`", policy or self.POLICY)],
+            [
+                ("FROM `fh_blacklists`", (1,) if banned else None),
+                ("FROM `fh_upload_tokens` t", token_row),
+            ],
+            [("FROM `fh_settings`", self.POLICY)],
         )
         pool = _OneConnectionPool(cursor)
 
@@ -2393,35 +2412,154 @@ class TestTokenlessUploadsAreCapped:
 
         monkeypatch.setattr(us, "require_storage_ready", ready)
         monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
-        result = asyncio.run(us.authorize_upload_identity(None, "198.51.100.4"))
-        return result, cursor
+        return asyncio.run(us.authorize_upload_identity(token, ip)), cursor
 
-    def test_first_tokenless_upload_gets_a_counted_guest_session(self, monkeypatch):
-        (allowed, user_id, reservation), cursor = self._run(monkeypatch, None)
+    def test_an_upload_without_a_token_is_refused_even_with_the_captcha_off(self, monkeypatch):
+        # Each fresh address of a /64 used to get its own implicit guest session here.
+        async def unreachable(*_args, **_kwargs):
+            raise AssertionError("a token-less upload must not reach the database")
+
+        monkeypatch.setattr(us, "require_storage_ready", unreachable)
+
+        assert asyncio.run(us.authorize_upload_identity(None, "2001:db8:1:2::77")) == (
+            False, None, None,
+        )
+        assert asyncio.run(us.authorize_upload_identity("", "198.51.100.4")) == (False, None, None)
+
+    def test_a_token_opens_the_session_bound_to_the_exact_address(self, monkeypatch):
+        (allowed, user_id, reservation), cursor = self._run(monkeypatch, "c" * 64, "2001:db8:1:2::77")
 
         assert allowed is True and user_id is None
-        assert re.fullmatch(r"[a-f0-9]{64}", reservation["token"])
-        assert reservation["ip"] == "198.51.100.4"
-        assert reservation["default_limit"] == 5
-        inserts = [params for query, params in cursor.queries if "INSERT INTO `fh_upload_tokens`" in query]
-        assert inserts and inserts[0][0] == reservation["token"]
-
-    def test_later_tokenless_uploads_count_against_the_same_session(self, monkeypatch):
-        (allowed, _user, reservation), cursor = self._run(monkeypatch, "c" * 64)
-
-        assert allowed is True
-        assert reservation["token"] == "c" * 64
+        assert reservation == {"token": "c" * 64, "ip": "2001:db8:1:2::77", "default_limit": 5}
+        token_params = next(p for q, p in cursor.queries if "FROM `fh_upload_tokens` t" in q)
+        assert token_params[:2] == ("c" * 64, "2001:db8:1:2::77")
         assert not any("INSERT INTO" in query for query, _ in cursor.queries)
 
-    def test_captcha_still_requires_a_real_token(self, monkeypatch):
-        policy = [
-            ("recaptcha_enabled", "1"),
-            ("recaptcha_site_key", "site"),
-            ("recaptcha_secret_key", "secret"),
-        ]
-        (allowed, _user, reservation), _cursor = self._run(monkeypatch, None, policy)
+    def test_a_ban_on_the_network_refuses_every_address_in_it(self, monkeypatch):
+        (allowed, _user, reservation), cursor = self._run(
+            monkeypatch, "c" * 64, "2001:db8:1:2::77", banned=True
+        )
 
         assert allowed is False and reservation is None
+        ban_query, ban_params = next((q, p) for q, p in cursor.queries if "fh_blacklists" in q)
+        assert "`value` IN (%s, %s)" in ban_query
+        assert ban_params[:2] == ("2001:db8:1:2::77", "2001:db8:1:2::/64")
+
+    def test_an_unknown_token_is_never_downgraded_to_a_guest_session(self, monkeypatch):
+        (allowed, _user, reservation), _cursor = self._run(
+            monkeypatch, "d" * 64, "198.51.100.4", token_row=None
+        )
+
+        assert allowed is False and reservation is None
+
+    def test_sharex_bans_cover_the_network_too(self, monkeypatch):
+        cursor = _ScriptedCursor([("FROM `fh_blacklists`", (1,))])
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+
+        with pytest.raises(us.HTTPException) as refused:
+            asyncio.run(us.enforce_ip_allowed(_OneConnectionPool(cursor), "2001:db8:1:2::9"))
+
+        assert refused.value.status_code == 403
+        assert cursor.queries[0][1][:2] == ("2001:db8:1:2::9", "2001:db8:1:2::/64")
+
+
+class TestUploadSessionCap:
+    """The cap is the group's when it sets one, else the flat setting; 0 means no cap."""
+
+    def _reserve(self, monkeypatch, default_limit, group_limit, rowcount=1):
+        cursor = _ScriptedCursor()
+        cursor.rowcount = rowcount
+        pool = _OneConnectionPool(cursor)
+
+        async def ready(*_args, **_kwargs):
+            return pool
+
+        monkeypatch.setattr(us, "require_storage_ready", ready)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        reservation = {"token": "c" * 64, "ip": "198.51.100.4", "default_limit": default_limit}
+        result = asyncio.run(
+            us.reserve_upload_slot(reservation, {"max_files_per_session": group_limit})
+        )
+        return result, cursor.queries[-1]
+
+    def test_group_zero_and_flat_zero_means_no_cap(self, monkeypatch):
+        result, (query, params) = self._reserve(monkeypatch, 0, 0)
+
+        assert result is True
+        assert "`files_count` < %s" not in query
+        assert params == ("c" * 64, "198.51.100.4")
+
+    def test_the_flat_setting_applies_when_the_group_sets_none(self, monkeypatch):
+        _result, (query, params) = self._reserve(monkeypatch, 3, 0)
+
+        assert "`files_count` < %s" in query and params[-1] == 3
+
+    def test_the_group_cap_wins_over_the_flat_setting(self, monkeypatch):
+        _result, (_query, params) = self._reserve(monkeypatch, 3, 5)
+
+        assert params[-1] == 5
+
+    def test_a_full_session_answers_429(self, monkeypatch):
+        with pytest.raises(us.HTTPException) as full:
+            self._reserve(monkeypatch, 5, 0, rowcount=0)
+
+        assert full.value.status_code == 429
+
+
+class TestPerNetworkDownloadLimits:
+    """Two addresses of one IPv6 /64 share one concurrency count and one guest quota."""
+
+    LIMITS = {"concurrent_downloads": 1, "concurrent_connections_per_file": 8}
+
+    def _reserve(self, monkeypatch, ip, counts=(0,)):
+        cursor = _ScriptedCursor([("COUNT(", counts)])
+        slot = asyncio.run(us._reserve_download_slot_with_cursor(
+            cursor, "fh_", ip, None, "file1", self.LIMITS
+        ))
+        return slot, cursor
+
+    def test_ipv6_counts_match_the_whole_network(self, monkeypatch):
+        slot, cursor = self._reserve(monkeypatch, "2001:db8:1:2::5")
+
+        counts = [(q, p) for q, p in cursor.queries if "COUNT(" in q]
+        assert slot == 5 and len(counts) == 2
+        for query, params in counts:
+            assert "WHEN IS_IPV6(`ip_address`) THEN HEX(LEFT(INET6_ATON(`ip_address`), 8)) END = %s" in query
+            assert params[:3] == ("2001:db8:1:2::5", "2001:db8:1:2::/64", "20010DB800010002")
+        insert = next(p for q, p in cursor.queries if q.startswith("INSERT INTO `fh_active_downloads`"))
+        assert insert[0] == "2001:db8:1:2::5", "the live list keeps the exact address"
+
+    def test_ipv4_counts_stay_per_address(self, monkeypatch):
+        _slot, cursor = self._reserve(monkeypatch, "203.0.113.9")
+
+        for query, params in [(q, p) for q, p in cursor.queries if "COUNT(" in q]:
+            assert "`ip_address` IN (%s)" in query and "INET6_ATON" not in query
+            assert params[0] == "203.0.113.9"
+
+    def test_a_network_at_its_limit_gets_429(self, monkeypatch):
+        with pytest.raises(us.HTTPException) as refused:
+            self._reserve(monkeypatch, "2001:db8:1:2:ffff::1", counts=(8,))
+
+        assert refused.value.status_code == 429
+
+    def test_one_lock_serializes_the_whole_network(self, monkeypatch):
+        monkeypatch.setattr(us, "db_config_cache", {"database": "files", "prefix": "fh_"})
+
+        assert us._download_lock_name("2001:db8:1:2::5") == us._download_lock_name("2001:db8:1:2:ffff::1")
+        assert us._download_lock_name("2001:db8:1:2::5") != us._download_lock_name("2001:db8:1:3::5")
+        assert us._download_lock_name("203.0.113.9") != us._download_lock_name("203.0.113.10")
+
+    def test_guests_of_one_network_share_one_transfer_quota_row(self):
+        subjects = []
+        for ip in ("2001:db8:1:2::5", "2001:db8:1:2:ffff::1"):
+            cursor = _ScriptedCursor([("FOR UPDATE", (0, 0))])
+            reservation = asyncio.run(us._reserve_transfer_quota_with_cursor(
+                cursor, "fh_", None, ip,
+                {"transfer_quota_bytes": 1000, "transfer_quota_period": "week"}, 10,
+            ))
+            subjects.append((reservation["subject_type"], reservation["subject_key"]))
+
+        assert subjects == [("ip", "2001:db8:1:2::/64")] * 2
 
 
 class TestStoredFilenames:
