@@ -150,7 +150,24 @@ emitStrictTransportSecurity();
 
 $db = Database::getInstance();
 if ($db) {
-	Database::migrate();
+	try {
+		Database::migrate();
+	} catch (Throwable $e) {
+		if (PHP_SAPI === 'cli') {
+			throw $e;
+		}
+		// An upgrade that cannot be served yet answers a short 503 instead of a fatal error on
+		// every request. A failure of this request's own attempt is logged; waiting out a recent
+		// failure, or another process's migration, is not news (Database::migrate()).
+		if (!$e instanceof MigrationUnavailableException) {
+			error_log('Database migration failed: ' . $e->getMessage());
+		}
+		http_response_code(503);
+		header('Content-Type: text/plain; charset=utf-8');
+		header('Cache-Control: no-store');
+		header('Retry-After: 300');
+		exit(PRODUCT_NAME . ' is being upgraded. Please try again in a few minutes.');
+	}
 	$settings = Database::getAllSettings();
 
 	// PHP owns the CSP header for every document it serves, and must be the ONLY policy on

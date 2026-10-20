@@ -87,7 +87,7 @@ final class InstallerSecurityTest extends TestCase
 		$this->assertNotFalse($end);
 		$handler = substr($page, $start, $end - $start);
 
-		$this->assertStringContainsString('Database::migrate();', $handler);
+		$this->assertStringContainsString('Database::migrate(true);', $handler);
 		$this->assertStringContainsString('Database::CURRENT_SCHEMA_VERSION', $handler);
 		$this->assertStringContainsString("Database::getSetting('schema_ready', '0')", $handler);
 	}

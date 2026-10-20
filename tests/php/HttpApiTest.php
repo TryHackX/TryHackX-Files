@@ -1330,6 +1330,56 @@ final class HttpApiTest extends TestCase
 		$this->assertStringContainsString('class="onward" href="' . self::$base . '/"', $page['body']);
 	}
 
+	/**
+	 * After a migration step failed, the site answers a short 503 for a few minutes instead of
+	 * every request re-running the failed step (and logging a fatal error).
+	 */
+	public function testARecentlyFailedMigrationAnswers503WithoutRerunningIt(): void
+	{
+		$pdo = Database::getInstance();
+		$journal = Database::table('migration_journal');
+		$version = Database::CURRENT_SCHEMA_VERSION;
+		$read = $pdo->prepare("SELECT * FROM `{$journal}` WHERE `version` = ?");
+		$read->execute([$version]);
+		$saved = $read->fetch(PDO::FETCH_ASSOC);
+		$pdo->prepare(
+			"INSERT INTO `{$journal}` (`version`, `status`, `attempts`, `started_at`, `finished_at`, `last_error`)
+			 VALUES (?, 'failed', 1, ?, ?, 'injected failure')
+			 ON DUPLICATE KEY UPDATE `status` = 'failed', `finished_at` = VALUES(`finished_at`),
+			  `last_error` = VALUES(`last_error`)"
+		)->execute([$version, time(), time()]);
+		$read->execute([$version]);
+		$failedAttempts = (int) $read->fetch(PDO::FETCH_ASSOC)['attempts'];
+		Database::setSetting('schema_ready', '0');
+		self::serverSettingsChanged();
+		try {
+			self::$cookies = [];
+			$page = self::rawRequest('GET', '/index.php');
+			$this->assertSame(503, $page['status']);
+			$this->assertContains('Retry-After: 300', $page['headers']);
+			$this->assertDoesNotMatchRegularExpression('/Fatal error|Uncaught/', $page['body']);
+			$read->execute([$version]);
+			$row = $read->fetch(PDO::FETCH_ASSOC);
+			$this->assertSame('failed', $row['status'], 'the failed step was not re-run');
+			$this->assertSame($failedAttempts, (int) $row['attempts']);
+		} finally {
+			if (is_array($saved)) {
+				$pdo->prepare(
+					"UPDATE `{$journal}` SET `status` = ?, `attempts` = ?, `started_at` = ?,
+					 `finished_at` = ?, `last_error` = ? WHERE `version` = ?"
+				)->execute([
+					$saved['status'], $saved['attempts'], $saved['started_at'],
+					$saved['finished_at'], $saved['last_error'], $version,
+				]);
+			} else {
+				$pdo->prepare("DELETE FROM `{$journal}` WHERE `version` = ?")->execute([$version]);
+			}
+			Database::setSetting('schema_ready', '1');
+			self::serverSettingsChanged();
+		}
+		$this->assertSame(200, self::rawRequest('GET', '/index.php')['status']);
+	}
+
 	/** Pages print outcome messages they own, chosen by code; never the query string itself. */
 	public function testOutcomeMessagesComeFromCodesNotFromTheQueryString(): void
 	{

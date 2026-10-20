@@ -602,7 +602,8 @@ function handleCreateTables(): never
 	// then traverse the same audited migration chain as an upgrade; otherwise modern workers
 	// see schema_version=0 and correctly refuse to start.
 	Database::invalidateSettingsCache();
-	Database::migrate();
+	// The operator is here on purpose: a step that failed a minute ago is retried at once.
+	Database::migrate(true);
 	Database::invalidateSettingsCache();
 	$schemaVersion = (int) Database::getSetting('schema_version', 0);
 	$schemaReady = (string) Database::getSetting('schema_ready', '0');

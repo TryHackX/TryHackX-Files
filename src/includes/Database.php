@@ -10,6 +10,7 @@ require_once __DIR__ . '/InputLimits.php';
 require_once __DIR__ . '/PasswordPolicy.php';
 require_once __DIR__ . '/Crypto.php';
 require_once __DIR__ . '/exceptions/AccountAlreadyExistsException.php';
+require_once __DIR__ . '/exceptions/MigrationUnavailableException.php';
 require_once __DIR__ . '/repositories/SettingsRepository.php';
 require_once __DIR__ . '/repositories/AuditService.php';
 require_once __DIR__ . '/repositories/CaptchaService.php';
@@ -56,6 +57,8 @@ class Database
 	 */
 	public const ACTIVE_DOCUMENT_EXTENSIONS = ['html', 'htm', 'xhtml', 'svg', 'shtml', 'xml'];
 	private const SCHEMA_CONTRACT_CACHE_SECONDS = 300;
+	/** After a failed migration step, web requests wait this long before running it again. */
+	private const FAILED_MIGRATION_RETRY_SECONDS = 300;
 	private static bool $migrationJournalActive = false;
 	private static string $migrationJournalPrefix = '';
 	private static int $migrationJournalStep = 0;
@@ -1899,11 +1902,45 @@ class Database
 	}
 
 	/**
+	 * The most recent failed migration step, when it failed less than
+	 * FAILED_MIGRATION_RETRY_SECONDS ago. Read only on the path where the schema is not
+	 * published, so a healthy installation never pays for it.
+	 *
+	 * @return array{version: int, age: int, error: string}|null
+	 */
+	private static function recentMigrationFailure(PDO $pdo, string $prefix): ?array
+	{
+		try {
+			$row = $pdo->query(
+				"SELECT `version`, `finished_at`, `last_error` FROM `{$prefix}migration_journal`
+				 WHERE `status` = 'failed' ORDER BY `finished_at` DESC LIMIT 1"
+			)->fetch(PDO::FETCH_ASSOC);
+		} catch (PDOException $e) {
+			return null; // no journal yet (an install older than it): nothing to wait for
+		}
+		if (!is_array($row)) {
+			return null;
+		}
+		$age = time() - (int) $row['finished_at'];
+		if ($age < 0 || $age >= self::FAILED_MIGRATION_RETRY_SECONDS) {
+			return null;
+		}
+		return ['version' => (int) $row['version'], 'age' => $age, 'error' => (string) ($row['last_error'] ?? '')];
+	}
+
+	/**
 	 * Lightweight schema migration for installs created before audit-log / file-sharing
 	 * columns existed. Runs the idempotent DDL once, then records a schema version so it
 	 * never runs again (cheap: gated by a single cached setting).
+	 *
+	 * After a step fails, web requests do not run it again for FAILED_MIGRATION_RETRY_SECONDS:
+	 * every visitor used to re-take the lock and repeat the failing step (table rebuilds and
+	 * table-wide repairs included), queueing on the lock and pinning the PHP workers while the
+	 * operator was diagnosing. They answer 503 meanwhile (MigrationUnavailableException). The
+	 * CLI — `php scripts/migrate.php`, the installer — passes $retryFailedStepNow and retries
+	 * at once.
 	 */
-	public static function migrate(): void
+	public static function migrate(bool $retryFailedStepNow = PHP_SAPI === 'cli'): void
 	{
 		$pdo = self::getInstance();
 		if (!$pdo) {
@@ -1917,13 +1954,26 @@ class Database
 		if (self::schemaPublishedForThisCode(false) && self::reverifyPublishedSchema($pdo, $prefix)) {
 			return;
 		}
+		if (!$retryFailedStepNow) {
+			$failure = self::recentMigrationFailure($pdo, $prefix);
+			if ($failure !== null) {
+				throw new MigrationUnavailableException(sprintf(
+					'Database migration v%d failed %d s ago; web requests retry it after %d s'
+					. ' (php scripts/migrate.php retries now): %s',
+					$failure['version'],
+					$failure['age'],
+					self::FAILED_MIGRATION_RETRY_SECONDS,
+					$failure['error']
+				));
+			}
+		}
 
 		$migrationLockName = 'filehost:migrate:all:'
 			. sha1((defined('DB_NAME') ? DB_NAME : '') . ':' . $prefix);
 		$lockStatement = $pdo->prepare('SELECT GET_LOCK(?, 15)');
 		$lockStatement->execute([$migrationLockName]);
 		if ((int) $lockStatement->fetchColumn() !== 1) {
-			throw new RuntimeException('Could not acquire the database migration lock.');
+			throw new MigrationUnavailableException('Could not acquire the database migration lock.');
 		}
 		$releaseMigrationLock = static function () use ($pdo, $migrationLockName): void {
 			try {

@@ -777,6 +777,65 @@ final class MigrationJournalTest extends RepoTestCase
 		$this->assertNull($row['last_error']);
 	}
 
+	/**
+	 * A failed step is not re-run by every web request: for five minutes they refuse at once,
+	 * touching nothing, and the CLI (scripts/migrate.php, the installer) retries immediately.
+	 */
+	public function testWebRequestsWaitBeforeRetryingAFailedStep(): void
+	{
+		$pdo = Database::getInstance();
+		$reports = Database::table('reports');
+		$blockedReports = $reports . '_migration_blocked';
+		$journal = Database::table('migration_journal');
+		$attempts = static function () use ($pdo, $journal): int {
+			return (int) $pdo->query("SELECT `attempts` FROM `{$journal}` WHERE `version` = 3")->fetchColumn();
+		};
+
+		$pdo->exec("RENAME TABLE `{$reports}` TO `{$blockedReports}`");
+		try {
+			$this->assertTrue(Database::setSetting('schema_version', '2'));
+			$this->assertTrue(Database::setSetting('schema_ready', '1'));
+			try {
+				Database::migrate(true);
+				$this->fail('The migration must fail while its table is missing.');
+			} catch (RuntimeException $e) {
+				$this->assertNotInstanceOf(MigrationUnavailableException::class, $e);
+			}
+			$afterFailure = $attempts();
+
+			// A web request right after: refused at once, nothing locked, journalled or re-run.
+			try {
+				Database::migrate(false);
+				$this->fail('A web request must not re-run a step that just failed.');
+			} catch (MigrationUnavailableException $e) {
+				$this->assertStringContainsString('v3 failed', $e->getMessage());
+				$this->assertStringContainsString('scripts/migrate.php', $e->getMessage());
+			}
+			$this->assertSame($afterFailure, $attempts());
+			Database::invalidateSettingsCache();
+			$this->assertSame('0', (string) Database::getSetting('schema_ready'));
+
+			// Once the wait is over, the next web request tries again. (Every failure is aged:
+			// earlier tests in this class leave failed rows of their own behind.)
+			$pdo->exec("UPDATE `{$journal}` SET `finished_at` = `finished_at` - 301 WHERE `status` = 'failed'");
+			try {
+				Database::migrate(false);
+				$this->fail('The table is still missing.');
+			} catch (RuntimeException $e) {
+				$this->assertNotInstanceOf(MigrationUnavailableException::class, $e);
+			}
+			$this->assertSame($afterFailure + 1, $attempts());
+		} finally {
+			$pdo->exec("RENAME TABLE `{$blockedReports}` TO `{$reports}`");
+		}
+
+		// The deliberate retry does not wait.
+		Database::migrate(true);
+		Database::invalidateSettingsCache();
+		$this->assertSame((string) Database::CURRENT_SCHEMA_VERSION, (string) Database::getSetting('schema_version'));
+		$this->assertSame('1', (string) Database::getSetting('schema_ready'));
+	}
+
 	public function testVersion54RepairsThePublishedPlanGroupDeletePolicy(): void
 	{
 		$pdo = Database::getInstance();
