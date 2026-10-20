@@ -851,6 +851,7 @@ return array (
   'panel.reauth.back' => 'Volver al sitio',
   'panel.reauth.throttled' => 'Demasiados intentos. Vuelve a probar en :minutes min.',
   'panel.reauth.action_msg' => 'Este cambio requiere de nuevo tu contraseña. Escríbela para continuar.',
+  'panel.reauth.settings_msg' => 'Para guardar los ajustes hace falta de nuevo tu contraseña. Todavía no se ha guardado nada: confírmala y vuelve a hacer el cambio.',
   'panel.reauth.captcha' => 'Confirma que no eres un bot',
   'panel.reauth.captcha_failed' => 'La verificación del captcha ha fallado. Inténtalo de nuevo.',
   'panel.acct.devices' => 'Dispositivos recordados',

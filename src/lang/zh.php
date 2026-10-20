@@ -851,6 +851,7 @@ return array (
   'panel.reauth.back' => '返回网站',
   'panel.reauth.throttled' => '尝试次数过多。请在 :minutes 分钟后重试。',
   'panel.reauth.action_msg' => '此更改需要再次输入密码。请输入密码以继续。',
+  'panel.reauth.settings_msg' => '保存设置需要再次输入密码。目前尚未保存任何内容：请先确认密码，然后再修改一次。',
   'panel.reauth.captcha' => '请确认你不是机器人',
   'panel.reauth.captcha_failed' => '验证码校验失败，请重试。',
   'panel.acct.devices' => '已记住的设备',

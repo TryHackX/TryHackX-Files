@@ -923,6 +923,7 @@ return [
 	'panel.reauth.back' => 'Wróć na stronę',
 	'panel.reauth.throttled' => 'Za dużo prób. Spróbuj ponownie za :minutes min.',
 	'panel.reauth.action_msg' => 'Ta zmiana wymaga ponownego podania hasła. Wpisz je, aby kontynuować.',
+	'panel.reauth.settings_msg' => 'Zapisanie ustawień wymaga ponownego podania hasła. Nic jeszcze nie zostało zapisane: potwierdź hasło, a potem wprowadź zmianę jeszcze raz.',
 	'panel.reauth.captcha' => 'Potwierdź, że nie jesteś botem',
 	'panel.reauth.captcha_failed' => 'Weryfikacja captchy nie powiodła się. Spróbuj ponownie.',
 	'panel.acct.devices' => 'Zapamiętane urządzenia',

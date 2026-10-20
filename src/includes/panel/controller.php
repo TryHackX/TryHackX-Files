@@ -32,6 +32,20 @@ if (!$isAdmin) {
 	return;
 }
 
+// The settings forms reroute outgoing mail (and every password-reset link with it), switch the
+// captcha, persistent sign-in and the panel gate itself off, cut the audit trail short and name
+// the binary the upload server runs. They need a password typed in the last few minutes, like
+// the API's sensitive routes (api/bootstrap.php): the panel window only shows that this browser
+// was trusted once, and every page view keeps it open. Nothing is saved here — the gate asks
+// for the password and returns to the same view, where the change is made again.
+if (in_array($action, ['save_settings', 'save_cron'], true) && !hasRecentAuthentication()) {
+	http_response_code(403);
+	$reauthUsername = (string) ($currentUser['username'] ?? '');
+	$reauthNotice = __('panel.reauth.settings_msg');
+	require APP_ROOT . '/includes/panel_reauth_page.php';
+	exit;
+}
+
 require_once APP_ROOT . '/includes/LocalConfig.php';
 
 if ($action === 'save_settings') {

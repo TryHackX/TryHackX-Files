@@ -13,7 +13,8 @@
  * like a different product is a gate people hesitate to type their password into.
  *
  * Expects: $reauthError (string), $reauthUsername (string), $appUrl (string),
- * $reauthLocked (bool), $reauthCaptchaRequired (bool).
+ * $reauthLocked (bool), $reauthCaptchaRequired (bool). Optional $reauthNotice (string): why the
+ * password is asked for when it is not the panel window (a settings form that was not saved).
  */
 if (!defined('APP_ROOT')) {
 	exit;
@@ -21,6 +22,7 @@ if (!defined('APP_ROOT')) {
 $reauthTheme = ($_COOKIE['theme'] ?? 'dark') === 'light' ? 'light' : '';
 $reauthLocked = !empty($reauthLocked);
 $reauthCaptchaRequired = !empty($reauthCaptchaRequired);
+$reauthNotice = isset($reauthNotice) && is_string($reauthNotice) ? $reauthNotice : '';
 $reauthCaptchaConfig = $reauthCaptchaRequired
 	? json_encode([
 		'captcha_provider' => CaptchaService::provider(),
@@ -66,6 +68,11 @@ if ($reauthCaptchaConfig === false) {
 			font-weight: 600;
 		}
 
+		.reauth-notice {
+			color: var(--text);
+			margin-bottom: 10px;
+		}
+
 		.reauth-back {
 			display: block;
 			text-align: center;
@@ -95,6 +102,9 @@ if ($reauthCaptchaConfig === false) {
 	<main class="reauth-shell">
 		<div class="auth-box reauth-box">
 			<h3><?= _h('panel.reauth.title') ?></h3>
+			<?php if ($reauthNotice !== ''): ?>
+				<p class="reauth-notice"><?= htmlspecialchars($reauthNotice, ENT_QUOTES, 'UTF-8') ?></p>
+			<?php endif; ?>
 			<p><?= _h('panel.reauth.intro') ?>
 				<span class="reauth-who"><?= htmlspecialchars($reauthUsername, ENT_QUOTES, 'UTF-8') ?></span></p>
 
@@ -123,7 +133,7 @@ if ($reauthCaptchaConfig === false) {
 							<div id="reauthCaptcha"></div>
 						</div>
 					<?php endif; ?>
-					<button class="auth-submit" type="submit"><?= _h('panel.reauth.submit') ?></button>
+					<button class="auth-submit" type="submit"><?= _h($reauthNotice !== '' ? 'panel.modal.confirm' : 'panel.reauth.submit') ?></button>
 				</form>
 			<?php endif; ?>
 

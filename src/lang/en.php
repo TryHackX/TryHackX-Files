@@ -921,6 +921,7 @@ return [
 	'panel.reauth.back' => 'Back to the site',
 	'panel.reauth.throttled' => 'Too many attempts. Try again in :minutes min.',
 	'panel.reauth.action_msg' => 'This change needs your password again. Enter it to continue.',
+	'panel.reauth.settings_msg' => 'Saving settings needs your password again. Nothing has been saved yet: confirm your password, then make the change once more.',
 	'panel.reauth.captcha' => 'Confirm you are not a bot',
 	'panel.reauth.captcha_failed' => 'Captcha verification failed. Please try again.',
 	'panel.acct.devices' => 'Remembered devices',

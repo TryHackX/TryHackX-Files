@@ -1366,6 +1366,125 @@ final class HttpApiTest extends TestCase
 		$this->assertStringContainsString('id="usersBody"', $stillIn['body']);
 	}
 
+	/** Make this browser's last password check look $seconds older (edits its session file). */
+	private static function ageRecentAuthentication(int $seconds): void
+	{
+		$id = self::$cookies[session_name()] ?? (self::$cookies['PHPSESSID'] ?? '');
+		self::assertNotSame('', $id, 'the browser holds a session');
+		$file = PROJECT_ROOT . '/tests/php/.tmp-data-http/sessions/sess_' . $id;
+		self::assertFileExists($file);
+		$aged = preg_replace_callback(
+			'/(recent_auth_at(?:\||";)i:)(\d+);/',
+			static fn(array $m): string => $m[1] . ((int) $m[2] - $seconds) . ';',
+			(string) file_get_contents($file),
+			1,
+			$count
+		);
+		self::assertSame(1, $count, 'the session records a password check');
+		file_put_contents($file, (string) $aged);
+	}
+
+	/** A classic panel form POST with this browser's CSRF token. */
+	private static function postPanelForm(string $path, array $fields): array
+	{
+		return self::rawRequest(
+			'POST',
+			$path,
+			http_build_query($fields + ['_csrf' => self::$csrf]),
+			['Content-Type: application/x-www-form-urlencoded']
+		);
+	}
+
+	/**
+	 * The panel's own settings forms follow the API's rule for sensitive changes: a password
+	 * typed in the last few minutes, not merely an open panel window. Rerouting mail, switching
+	 * the panel gate off or naming the binary the upload server runs is refused, and nothing is
+	 * stored, until the password has been confirmed again.
+	 */
+	public function testPanelSettingsNeedAFreshPassword(): void
+	{
+		$keys = [
+			'email_method', 'email_from', 'email_from_name', 'email_resend_cooldown', 'smtp_host',
+			'smtp_port', 'smtp_user', 'smtp_encryption', 'email_php_mail_guard',
+			'panel_reauth_minutes', 'panel_reauth_scope', 'cron_enabled', 'cron_php_binary',
+		];
+		$original = [];
+		foreach ($keys as $key) {
+			$original[$key] = (string) Database::getSetting($key, '');
+		}
+		Database::setSetting('smtp_host', 'smtp.example.test');
+		Database::setSetting('panel_reauth_minutes', '30');
+		Database::setSetting('panel_reauth_scope', 'staff');
+		Database::setSetting('cron_php_binary', '');
+		self::serverSettingsChanged();
+		$mailForm = [
+			'action' => 'save_settings',
+			'setting_group' => 'email',
+			'email_method' => 'smtp',
+			'email_from' => 'noreply@example.test',
+			'email_from_name' => 'FileHostTest',
+			'email_resend_cooldown' => '30',
+			'smtp_port' => '587',
+			'smtp_user' => '',
+			'smtp_encryption' => 'tls',
+			'email_php_mail_guard' => 'fail',
+		];
+
+		try {
+			$this->assertTrue(self::signIn('httpadmin', 'HttpAdmin1!')['success'] ?? false);
+			// The panel window is open; the last password check is an hour old.
+			$this->assertStringContainsString(
+				'id="emailMethod"',
+				self::rawRequest('GET', '/panel.php?tab=settings&stab=email')['body']
+			);
+			self::ageRecentAuthentication(3600);
+
+			$mail = self::postPanelForm(
+				'/panel.php?tab=settings&stab=email',
+				$mailForm + ['smtp_host' => 'mail.attacker.example']
+			);
+			$this->assertSame(403, $mail['status']);
+			$this->assertStringContainsString('value="panel_reauth"', $mail['body']);
+			$this->assertStringContainsString('class="reauth-notice"', $mail['body']);
+			$gateOff = self::postPanelForm('/panel.php?tab=settings&stab=security', [
+				'action' => 'save_settings',
+				'setting_group' => 'security',
+				'panel_reauth_minutes' => '0',
+			]);
+			$this->assertSame(403, $gateOff['status']);
+			$binary = self::postPanelForm('/panel.php?tab=settings&stab=system', [
+				'action' => 'save_cron',
+				'cron_enabled' => '1',
+				'cron_php_binary' => '/tmp/not-php',
+			]);
+			$this->assertSame(403, $binary['status']);
+			Database::invalidateSettingsCache();
+			$this->assertSame('smtp.example.test', (string) Database::getSetting('smtp_host'));
+			$this->assertSame('30', (string) Database::getSetting('panel_reauth_minutes'));
+			$this->assertSame('', (string) Database::getSetting('cron_php_binary', ''));
+
+			// Confirming the password returns to the same view, and the change then goes through.
+			$back = self::postPanelForm('/panel.php?tab=settings&stab=email', [
+				'action' => 'panel_reauth',
+				'password' => 'HttpAdmin1!',
+			]);
+			$this->assertSame(200, $back['status']);
+			$this->assertStringContainsString('id="emailMethod"', $back['body']);
+			$saved = self::postPanelForm(
+				'/panel.php?tab=settings&stab=email',
+				$mailForm + ['smtp_host' => 'smtp2.example.test']
+			);
+			$this->assertSame(200, $saved['status']);
+			Database::invalidateSettingsCache();
+			$this->assertSame('smtp2.example.test', (string) Database::getSetting('smtp_host'));
+		} finally {
+			foreach ($original as $key => $value) {
+				Database::setSetting($key, $value);
+			}
+			self::serverSettingsChanged();
+		}
+	}
+
 	/** Key-authenticated API calls open no browser session. */
 	public function testTheKeyAuthenticatedApiSetsNoSessionCookie(): void
 	{
