@@ -314,10 +314,10 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 					<?= _h('download.delete_title') ?>
 				</h3>
 				<div class="delete-form">
-					<input type="text" id="deleteToken" maxlength="255" placeholder="<?= _h('download.delete_token_ph') ?>">
+					<input type="text" id="deleteToken" maxlength="255" placeholder="<?= _h('download.delete_token_ph') ?>" aria-label="<?= _h('download.delete_token_ph') ?>">
 					<button class="btn btn-danger" type="button" data-download-action="delete"><?= _h('common.delete') ?></button>
 				</div>
-				<div class="delete-result" id="deleteResult"></div>
+				<div class="delete-result" id="deleteResult" role="status"></div>
 			</div>
 
 			<?= AdRenderer::zone('download_bottom') ?>
@@ -396,9 +396,9 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			<div class="captcha-box">
 				<h3><?= _h('pwprompt.title') ?></h3>
 				<p><?= _h('pwprompt.subtitle') ?></p>
-				<div id="pwPromptError" class="pw-prompt-error"><?= _h('pwprompt.wrong') ?></div>
+				<div id="pwPromptError" class="pw-prompt-error" role="alert"><?= _h('pwprompt.wrong') ?></div>
 				<form id="pwPromptForm">
-					<input type="password" id="pwPromptInput" class="pw-prompt-input" maxlength="1024" placeholder="<?= _h('pwprompt.placeholder') ?>">
+					<input type="password" id="pwPromptInput" class="pw-prompt-input" maxlength="1024" placeholder="<?= _h('pwprompt.placeholder') ?>" aria-label="<?= _h('pwprompt.placeholder') ?>">
 					<div class="pw-prompt-actions">
 						<button type="button" class="btn" data-download-action="close-password"><?= _h('common.cancel') ?></button>
 						<button type="submit" class="btn btn-primary"><?= _h('pwprompt.submit') ?></button>
@@ -412,7 +412,7 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 			<h3><?= _h('captcha.title') ?></h3>
 			<p><?= _h('captcha.subtitle_short') ?></p>
 			<div class="captcha-widget" id="captchaWidget"></div>
-			<div class="captcha-error" id="captchaError"><?= _h('captcha.failed') ?></div>
+			<div class="captcha-error" id="captchaError" role="alert"><?= _h('captcha.failed') ?></div>
 			<div class="captcha-loading" id="captchaLoading"><?= _h('common.loading') ?></div>
 			<button class="btn captcha-cancel" type="button" data-download-action="close-captcha"><?= _h('common.cancel') ?></button>
 		</div>

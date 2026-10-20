@@ -189,6 +189,33 @@ test('bindLabels() ties label/field pairs together but leaves ambiguous ones alo
 	assert.equal(labelC.htmlFor, undefined, 'a label before a radio group is not guessed');
 });
 
+test('inline messages are shown and announced: errors as alerts, the rest as status', () => {
+	const box = control({ attrs: {}, setAttribute(name, value) { this.attrs[name] = String(value); } });
+	const window = loadPanel({ elements: { box } });
+	window.flashMessage('box', 'Nope', 'error', 0);
+	assert.equal(box.textContent, 'Nope');
+	assert.equal(box.className, 'auth-message show error');
+	assert.equal(box.attrs.role, 'alert');
+	window.flashMessage('box', 'Saved', 'success', 0);
+	assert.equal(box.className, 'auth-message show success');
+	assert.equal(box.attrs.role, 'status');
+});
+
+test('panel modules use the shared message helper (their own copies never showed anything)', () => {
+	for (const name of ['panel-account-tools.js', 'panel-ads.js', 'panel-groups.js', 'panel-languages.js', 'panel-moderation.js']) {
+		const script = fs.readFileSync(path.resolve(__dirname, '../../public/assets/js', name), 'utf8');
+		assert.doesNotMatch(script, /function flashMessage\(/, name);
+		assert.match(script, /const flashMessage = \(\.\.\.args\) => window\.flashMessage\(\.\.\.args\);/, name);
+	}
+});
+
+test('forms drawn after page load get their labels tied to the fields', () => {
+	for (const [name, holder] of [['panel-files.js', 'holder'], ['panel-premium.js', 'fieldHolder']]) {
+		const script = fs.readFileSync(path.resolve(__dirname, '../../public/assets/js', name), 'utf8');
+		assert.match(script, new RegExp(`window\\.FHPanelCore\\.bindLabels\\(${holder}\\)`), name);
+	}
+});
+
 test('theme toggling in the panel is the shared FHUi implementation', () => {
 	const window = loadPanel();
 	assert.equal(window.FHPanelActions.toggleTheme(), 'light');

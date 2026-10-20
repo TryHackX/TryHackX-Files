@@ -116,7 +116,7 @@
                     </ul>
                 </div>
                 <div class="form-group">
-					<input type="password" class="auth-input" id="regPassword2" name="password2"
+					<input type="password" class="auth-input" id="regPassword2" name="password2" aria-label="<?= _h('pwd.repeat') ?>"
 						placeholder="<?= _h('pwd.repeat') ?>" required maxlength="<?= InputLimits::accountPasswordMax() ?>" autocomplete="new-password">
                     <div class="field-status" id="passMatchStatus"></div>
                 </div>

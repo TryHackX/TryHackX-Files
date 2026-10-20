@@ -182,11 +182,14 @@
 		else docs.removeAttribute('href');
 
 		const fields = Object.entries(p.fields || {});
-		document.getElementById('pluginFields').innerHTML = fields.map(([key, label]) => `
+		const fieldHolder = document.getElementById('pluginFields');
+		fieldHolder.innerHTML = fields.map(([key, label]) => `
 			<div class="form-group">
 				<label>${esc(label)}</label>
 				<input type="text" class="plugin-field" data-field="${esc(key)}" value="${esc((p.values || {})[key] || '')}" autocomplete="off">
 			</div>`).join('');
+		// Rendered after the page-load pass that ties labels to their fields.
+		window.FHPanelCore.bindLabels(fieldHolder);
 		const testButton = document.getElementById('pluginTestBtn');
 		if (testButton) testButton.style.display = p.id === 'przelewy24' ? '' : 'none';
 

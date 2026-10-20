@@ -142,9 +142,9 @@ $theme = $_COOKIE['theme'] ?? 'dark';
 						<div class="coll-lock-icon"><i class="fa-solid fa-lock"></i></div>
 						<p><?= _h('collection.protected') ?></p>
 						<form id="collPwForm">
-							<input type="password" id="collPwInput" maxlength="1024" placeholder="<?= _h('collection.password_ph') ?>"
+							<input type="password" id="collPwInput" maxlength="1024" placeholder="<?= _h('collection.password_ph') ?>" aria-label="<?= _h('collection.password_ph') ?>"
 								autocomplete="current-password" required>
-							<div class="coll-pw-error" id="collPwError" hidden></div>
+							<div class="coll-pw-error" id="collPwError" role="alert" hidden></div>
 							<button type="submit" class="btn btn-primary" id="collPwBtn">
 								<i class="fa-solid fa-unlock"></i> <?= _h('collection.unlock') ?>
 							</button>

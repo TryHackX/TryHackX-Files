@@ -20,18 +20,9 @@
 	}
 	const apiUrl = panel.apiUrl || '';
 
-	function flashMessage(id, text, type, timeout = 3000) {
-		const element = document.getElementById(id);
-		if (!element) return;
-		element.textContent = String(text || '');
-		element.className = 'auth-message ' + (type || '');
-		if (timeout > 0) {
-			setTimeout(() => {
-				element.textContent = '';
-				element.className = 'auth-message';
-			}, timeout);
-		}
-	}
+	// The panel's shared helper. The local copy set the colour class without `show`, and an
+	// .auth-message stays display:none until shown, so none of this module's messages appeared.
+	const flashMessage = (...args) => window.flashMessage(...args);
 
 	function formatMoney(minor, currency) {
 		const amount = (Number(minor) || 0) / 100;

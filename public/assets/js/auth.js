@@ -41,6 +41,9 @@
         label.style.fontSize = '0.9em';
         const countdown = authTextElement('span', formatDuration(remaining), 'mono');
         countdown.id = 'resendCountdown';
+        // The message box is a live region; a clock ticking inside it must not be read out
+        // every second.
+        countdown.setAttribute('aria-live', 'off');
         label.appendChild(countdown);
         container.appendChild(label);
     }
@@ -669,6 +672,8 @@
     function showAuthMessage(text, type) {
         const msg = document.getElementById('authMessage');
         if (!msg) return;
+        // Read out by screen readers: an error interrupts, anything else waits its turn.
+        msg.setAttribute('role', type === 'error' ? 'alert' : 'status');
         msg.textContent = String(text);
         msg.className = 'auth-message show ' + type;
         msg.style.display = 'block';

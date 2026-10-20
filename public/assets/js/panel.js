@@ -385,12 +385,14 @@
 		});
 	}
 
-	// Small inline message helper for messages rendered inside modals.
+	// Small inline message helper for messages rendered inside modals. Every panel module uses
+	// this one; screen readers hear an error at once and anything else when they are idle.
 	function flashMessage(id, text, type, timeout = 3000) {
 		const el = document.getElementById(id);
 		if (!el) return;
-		el.textContent = text;
-		el.className = 'auth-message show ' + type;
+		el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+		el.textContent = String(text ?? '');
+		el.className = 'auth-message show ' + (type || '');
 		if (el._timer) clearTimeout(el._timer);
 		if (timeout) {
 			el._timer = setTimeout(() => {

@@ -1708,11 +1708,14 @@
 
 	/** Password prompts for the protected files about to be collected. */
 	function renderLockedFileInputs(list) {
-		document.getElementById('clLockedList').innerHTML = list.map(f => `
+		const holder = document.getElementById('clLockedList');
+		holder.innerHTML = list.map(f => `
 			<div class="form-group">
 				<label title="${esc(f.name)}">${esc(f.name)}</label>
 				<input type="password" class="cl-pw" data-id="${esc(f.id)}" placeholder="${esc(t('panel.cc.locked_ph'))}" autocomplete="off">
 			</div>`).join('');
+		// Rendered after the page-load pass that ties labels to their fields.
+		window.FHPanelCore.bindLabels(holder);
 	}
 
 	/** One in flight at a time: the API does not de-duplicate, so a double click made two. */

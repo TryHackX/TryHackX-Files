@@ -196,7 +196,7 @@ $homeNotice = [
 				<h3><?= _h('captcha.title') ?></h3>
 				<p><?= _h('captcha.subtitle') ?></p>
 				<div class="captcha-widget" id="captchaWidget"></div>
-				<div class="captcha-error" id="captchaError"><?= _h('captcha.failed') ?></div>
+				<div class="captcha-error" id="captchaError" role="alert"><?= _h('captcha.failed') ?></div>
 				<div class="captcha-loading" id="captchaLoading"><?= _h('common.loading') ?></div>
 			</div>
 		</div>
@@ -245,7 +245,7 @@ $homeNotice = [
 				<p><?= _h('pwset.file_label') ?> <strong id="pwSetFileName"></strong></p>
 				<form id="pwSetForm">
 					<input type="password" id="pwSetInput" class="pw-set-input" maxlength="1024" placeholder="<?= _h('pwset.placeholder') ?>"
-						autocomplete="new-password" minlength="8">
+						aria-label="<?= _h('pwset.placeholder') ?>" autocomplete="new-password" minlength="8">
 					<div class="pwd-meter"><div class="pwd-meter-fill" id="pwSetBar"></div></div>
 					<ul class="pwd-reqs pw-set-reqs">
 						<li id="pwSetReqLen"><?= _h('pwd.req_len') ?></li>
@@ -254,14 +254,14 @@ $homeNotice = [
 						<li id="pwSetReqSpec"><?= _h('pwd.req_special') ?></li>
 					</ul>
 					<input type="password" id="pwSetInput2" class="pw-set-input" maxlength="1024" placeholder="<?= _h('pwd.repeat') ?>"
-						autocomplete="new-password">
+						aria-label="<?= _h('pwd.repeat') ?>" autocomplete="new-password">
 					<div id="pwSetMatch" class="field-status"></div>
 					<!-- Shown only when more than one file was uploaded (pt 9). -->
 					<label class="coll-check pw-apply-all" id="pwSetApplyAllRow" style="display:none;">
 						<input type="checkbox" id="pwSetApplyAll">
 						<span><?= _h('pwset.apply_all') ?></span>
 					</label>
-					<div id="pwSetError" class="pw-set-error" style="display:none;"></div>
+					<div id="pwSetError" class="pw-set-error" role="alert" style="display:none;"></div>
 					<div class="pw-set-actions">
 						<button type="button" class="btn" id="pwSetCancelBtn"><?= _h('common.cancel') ?></button>
 						<button type="button" class="btn btn-clear" id="pwSetClearBtn"
@@ -327,9 +327,9 @@ $homeNotice = [
 						<li id="collReqSpec"><?= _h('pwd.req_special') ?></li>
 					</ul>
 					<input type="password" id="collPassword2" class="pw-set-input" maxlength="1024" placeholder="<?= _h('pwd.repeat') ?>"
-						autocomplete="new-password">
+						aria-label="<?= _h('pwd.repeat') ?>" autocomplete="new-password">
 					<div id="collMatch" class="field-status"></div>
-					<div id="collError" class="pw-set-error" style="display:none;"></div>
+					<div id="collError" class="pw-set-error" role="alert" style="display:none;"></div>
 					<div class="pw-set-actions">
 						<button type="button" class="btn" id="collCancelBtn"><?= _h('common.cancel') ?></button>
 						<button type="submit" class="btn btn-primary"><?= _h('panel.cc.create') ?></button>
