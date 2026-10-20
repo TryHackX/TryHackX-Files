@@ -209,8 +209,9 @@ sudo -u "$SERVICE_USER" php scripts/file-quarantine.php purge FILE_ID --force
 
 As root, a restore would leave `uploads/FILE_ID` owned by root with private modes, so the upload
 service could not serve or delete the file; the script refuses root for that reason.
-Restore never overwrites a colliding ID or mismatched bytes. Full account deletion intentionally
-bypasses quarantine so a deletion request does not leave a recoverable copy.
+Restore never overwrites a colliding ID or mismatched bytes. Deleting one's own account bypasses
+the quarantine so the request leaves no recoverable copy; an account deleted by an administrator
+is quarantined like any other administrative delete.
 
 ## 8. Post-upgrade smoke test
 

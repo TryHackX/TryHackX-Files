@@ -30,7 +30,9 @@ define('FILE_QUARANTINE_PATH', '/mnt/recovery/filehost-quarantine');
 ```
 
 It may not overlap `UPLOADS_DIR` or `public/` after symlink resolution. Include it in backup and
-capacity monitoring. Full account deletion intentionally bypasses quarantine.
+capacity monitoring. Deleting one's own account bypasses the quarantine so the request leaves no
+recoverable copy; an account deleted by an administrator is quarantined like any other
+administrative delete.
 
 ## Relocating uploads
 
