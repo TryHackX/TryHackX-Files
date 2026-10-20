@@ -22,6 +22,7 @@ import hashlib
 import hmac
 import json
 import base64
+import errno
 import io
 import signal
 import subprocess
@@ -614,6 +615,41 @@ class BoundedPool:
         return getattr(self._pool, name)
 
 
+class StorageNotWritable(HTTPException):
+    """The upload storage probe failed: 503 for every caller, with the cause kept for /ready."""
+
+    def __init__(self, problem: dict):
+        super().__init__(status_code=503, detail="Upload storage is not writable")
+        self.problem = problem
+
+
+_STORAGE_HINTS = {
+    "EROFS": (
+        "The upload service may write only the paths its systemd unit allows (ReadWritePaths=). "
+        "Re-render the unit with the installer (FILEHOST_UNITS_ONLY=1 bash scripts/install-debian.sh) "
+        "so it opens this path, then restart filehost-upload."
+    ),
+    "EACCES": "The upload service's account cannot write here: check the owner and mode of the directory.",
+    "EPERM": "The upload service's account cannot write here: check the owner and mode of the directory.",
+    "ENOENT": "A directory on this path does not exist.",
+    "ENOTDIR": "Part of this path is a file, not a directory.",
+    "ENOSPC": "The disk is full.",
+    "EDQUOT": "The disk quota of the upload service's account is used up.",
+}
+
+
+def _storage_problem(exc: Exception, path: Path) -> dict:
+    """Which path failed the readiness probe, with what error, and what usually fixes it."""
+    code = getattr(exc, "errno", None)
+    name = errno.errorcode.get(code, "") if isinstance(code, int) else ""
+    return {
+        "path": str(getattr(exc, "filename", None) or path),
+        "error": name or type(exc).__name__,
+        "reason": str(getattr(exc, "strerror", None) or exc),
+        "hint": _STORAGE_HINTS.get(name, ""),
+    }
+
+
 async def require_storage_ready(force: bool = False):
     """Fail closed unless DB schema and same-filesystem upload staging are writable.
 
@@ -665,10 +701,12 @@ async def require_storage_ready(force: bool = False):
         raise HTTPException(status_code=503, detail="Database schema is not ready")
 
     probe = None
+    target = STAGING_DIR
     try:
         STAGING_DIR.mkdir(parents=True, exist_ok=True)
+        target = THUMBS_DIR
         THUMBS_DIR.mkdir(parents=True, exist_ok=True)
-        probe = STAGING_DIR / f".ready-{os.getpid()}-{secrets.token_hex(8)}"
+        probe = target = STAGING_DIR / f".ready-{os.getpid()}-{secrets.token_hex(8)}"
         descriptor = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         os.close(descriptor)
         probe.unlink()
@@ -678,8 +716,13 @@ async def require_storage_ready(force: bool = False):
                 probe.unlink(missing_ok=True)
             except Exception:
                 pass
-        print(f"Readiness storage check failed: {type(exc).__name__}: {exc}")
-        raise HTTPException(status_code=503, detail="Upload storage is not writable")
+        problem = _storage_problem(exc, target)
+        print(
+            f"Readiness storage check failed: {problem['error']} ({problem['reason']}) "
+            f"at {problem['path']}"
+        )
+        # Public routes answer the generic 503; only /ready (never proxied) shows the cause.
+        raise StorageNotWritable(problem)
 
     readiness_cache["pool"] = pool
     readiness_cache["checked_at"] = time.monotonic()
@@ -3123,8 +3166,21 @@ async def _readiness_state() -> dict:
 
 @app.get("/ready")
 async def ready_check():
-    """Operator readiness probe (loopback only, never proxied): always probes afresh."""
-    return {**await _readiness_state(), "uploads_dir": str(UPLOADS_DIR)}
+    """Operator readiness probe (loopback only, never proxied): always probes afresh.
+
+    A failure says what failed. For storage that is the path, the error (EROFS, EACCES, …)
+    and the usual fix: under the systemd sandbox a path PHP can write may still be read-only
+    for this service, which the panel's own check cannot see.
+    """
+    try:
+        state = await _readiness_state()
+    except HTTPException as exc:
+        body = {"status": "unavailable", "version": SERVER_VERSION, "detail": str(exc.detail)}
+        problem = getattr(exc, "problem", None)
+        if problem:
+            body["storage"] = problem
+        return JSONResponse(status_code=exc.status_code, content=body)
+    return {**state, "uploads_dir": str(UPLOADS_DIR)}
 
 
 @app.get("/health")

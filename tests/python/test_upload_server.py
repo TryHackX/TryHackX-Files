@@ -3292,6 +3292,83 @@ class TestReadinessProbeCache:
         assert not list((tmp_path / "staging").iterdir())
 
 
+class TestReadyNamesWhyStorageIsNotWritable:
+    """Under the systemd sandbox a path PHP can write may still be read-only for the sidecar."""
+
+    @staticmethod
+    def _probe(monkeypatch, tmp_path, call):
+        cursor = _ScriptedCursor(
+            all_answers=[("'schema_ready'", [("schema_version", "64"), ("schema_ready", "1")])]
+        )
+        pool = _OneConnectionPool(cursor)
+
+        async def same_pool():
+            return pool
+
+        monkeypatch.setattr(us, "get_db_pool", same_pool)
+        monkeypatch.setattr(us, "db_config_cache", {"prefix": "fh_"})
+        monkeypatch.setattr(us, "STAGING_DIR", tmp_path / "uploads" / ".staging")
+        monkeypatch.setattr(us, "THUMBS_DIR", tmp_path / "data" / "thumbs")
+        monkeypatch.setitem(us.readiness_cache, "pool", None)
+        return asyncio.run(call())
+
+    @staticmethod
+    def _read_only_probe(monkeypatch):
+        import errno
+
+        real_open = os.open
+
+        def read_only(path, *args, **kwargs):
+            if ".ready-" in str(path):
+                raise OSError(errno.EROFS, "Read-only file system", str(path))
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(us.os, "open", read_only)
+
+    def test_a_read_only_sandbox_is_named_with_its_path_and_the_fix(self, monkeypatch, tmp_path):
+        self._read_only_probe(monkeypatch)
+
+        response = self._probe(monkeypatch, tmp_path, us.ready_check)
+
+        assert response.status_code == 503
+        body = json.loads(response.body)
+        assert body["status"] == "unavailable" and body["detail"] == "Upload storage is not writable"
+        assert body["storage"]["error"] == "EROFS"
+        assert body["storage"]["reason"] == "Read-only file system"
+        assert ".staging" in body["storage"]["path"]
+        assert "ReadWritePaths" in body["storage"]["hint"]
+
+    def test_a_staging_directory_that_cannot_be_created_is_named(self, monkeypatch, tmp_path):
+        (tmp_path / "uploads").write_text("a file where the uploads directory should be")
+
+        response = self._probe(monkeypatch, tmp_path, us.ready_check)
+
+        body = json.loads(response.body)
+        assert response.status_code == 503
+        assert body["storage"]["error"] and "uploads" in body["storage"]["path"]
+
+    def test_public_routes_and_health_keep_the_generic_answer(self, monkeypatch, tmp_path):
+        self._read_only_probe(monkeypatch)
+
+        async def public():
+            try:
+                await us.require_storage_ready(force=True)
+            except us.HTTPException as exc:
+                return exc
+            raise AssertionError("an unwritable staging directory passed the probe")
+
+        refused = self._probe(monkeypatch, tmp_path, public)
+        assert refused.status_code == 503 and refused.detail == "Upload storage is not writable"
+
+        async def no_settings():
+            return None
+
+        monkeypatch.setattr(us, "update_settings", no_settings)
+        health = self._probe(monkeypatch, tmp_path, us.health_check)
+        assert str(tmp_path) not in health.body.decode()
+        assert json.loads(health.body)["detail"] == "Upload storage is not writable"
+
+
 class TestLocalOnlyEndpoints:
     def test_reload_refuses_anything_that_came_through_the_proxy(self):
         request = _http_request(
