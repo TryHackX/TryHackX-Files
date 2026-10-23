@@ -154,7 +154,7 @@ final class RepositoryPolicyTest extends TestCase
 		return [
 			'a shorter floor' => ['requirements.txt', '/^fastapi>=\S+/m', 'fastapi>=0.143'],
 			'a range' => ['requirements.txt', '/^uvicorn>=\S+/m', 'uvicorn>=0.54,<1'],
-			'a compatible release, other case and spacing' => ['requirements.txt', '/^Pillow>=\S+/m', 'pillow ~= 12.3'],
+			'a compatible release, other case and spacing' => ['requirements.txt', '/^Pillow>=\S+/m', 'pillow ~= 13.0'],
 			'a trailing comment' => ['requirements-dev.txt', '/^(pytest>=\S+)/m', '$1  # test runner'],
 			'a quoted action reference' => ['.github/workflows/ci.yml', '/uses: (actions\/checkout@[0-9a-f]{40})/', 'uses: "$1"'],
 		];

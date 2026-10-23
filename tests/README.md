@@ -84,7 +84,7 @@ where it exists, `colorama` only on Windows). A plain `pip-compile` run on one m
 that, which is how production once ended up without `uvloop`.
 
 ```bash
-python -m pip install uv==0.13.1
+python -m pip install uv==0.13.4
 uv pip compile requirements.txt --universal --python-version 3.11 --generate-hashes --upgrade \
   -o requirements-lock.txt
 uv pip compile requirements-dev.txt requirements.txt --universal --python-version 3.11 \
