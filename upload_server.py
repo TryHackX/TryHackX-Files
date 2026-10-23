@@ -65,7 +65,7 @@ APP_DIR = Path(__file__).parent.absolute()
 # config.local.php moved out of the web root into config/ (St1). The server stays in the
 # project root, so the config is one dir over.
 CONFIG_FILE = APP_DIR / "config" / "config.local.php"
-SERVER_VERSION = "2.81.1"
+SERVER_VERSION = "2.81.2"
 
 
 def _decode_php_single_quoted(value: str) -> str:

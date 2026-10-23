@@ -7,6 +7,17 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.2] - 2026-10-24
+
+### Changed
+
+- FastAPI 0.156.3, Starlette 1.9.0 and Pillow 13.0.0 for the upload server; test tool uv 0.13.4.
+
+### Upgrade notes
+
+- No schema change. Install the new hash-locked requirements into the virtual environment and
+  restart `filehost-upload` and `filehost-mail-worker`.
+
 ## [2.81.1] - 2026-10-21
 
 ### Fixed
