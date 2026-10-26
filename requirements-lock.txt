@@ -252,9 +252,9 @@ cryptography==50.0.2 \
     --hash=sha256:fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb \
     --hash=sha256:fdd28f912fccfec1846a94e2e1e8f9b0012f557f0c46fe4f3eb0d7a87afcf90b
     # via -r requirements.txt
-fastapi==0.156.3 \
-    --hash=sha256:a5b55ed3001c575bbd1b81de8a4d278bb8e876441ecb33e1d4d65839e204ed06 \
-    --hash=sha256:d70cc7c6b34c75f26c9312bf84cc696dac19b8858cb460d29f7b1a21d9594ad9
+fastapi==0.161.1 \
+    --hash=sha256:4076b88434452e20289379068e976c4a04c65ffc8e6be31510106e150a422f0f \
+    --hash=sha256:a1363080cf9aeedecd99f4e1a23669d7e77542227f6536f4d7bbd59f07ecaa94
     # via -r requirements.txt
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
@@ -482,9 +482,9 @@ pillow==13.0.0 \
     --hash=sha256:ff3fe9eb621fbb9db4c4be33ab946f6bac5f98ab50ca8d3260503653656c961b \
     --hash=sha256:ffea6b2986a797c84b6d1d27d4f43e0b83c73fc16281a930891cd237cf0d08fe
     # via -r requirements.txt
-pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
-    --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80 \
-    --hash=sha256:d875f09c3507d00e1aba0eecc6dcadc1352f30fff09dc6bff2f1c2935e97c2bc
+pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
+    --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
+    --hash=sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6
     # via cffi
 pydantic==2.14.1 \
     --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454 \

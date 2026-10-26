@@ -1,6 +1,6 @@
 # Dev/test-only dependencies (not needed to run the app). Install into the venv:
 #   venv/Scripts/python -m pip install --require-hashes -r requirements-dev-lock.txt
 pytest>=9.1
-ruff==0.17.1
+ruff==0.17.2
 # Compiles the two lock files; see tests/README.md.
-uv==0.13.4
+uv==0.13.5
