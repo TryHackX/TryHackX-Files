@@ -7,6 +7,18 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.3] - 2026-10-28
+
+### Changed
+
+- FastAPI 0.161.1 and pycparser 3.12 for the upload server; test tools Ruff 0.17.2 and uv 0.13.5;
+  the CI action setup-python 7.1.0 and the development MySQL 8.4 image.
+
+### Upgrade notes
+
+- No schema change. Install the new hash-locked requirements into the virtual environment and
+  restart `filehost-upload` and `filehost-mail-worker`.
+
 ## [2.81.2] - 2026-10-24
 
 ### Changed

@@ -1,6 +1,6 @@
 # Upgrading an existing TryHackX Files installation
 
-This guide upgrades a running installation to **2.81.2**, database schema **64**. A code-only
+This guide upgrades a running installation to **2.81.3**, database schema **64**. A code-only
 rollback is not assumed to be compatible with a newer schema.
 
 > Create and restore-test a backup first. Migration locks, journaling and readiness checks reduce
@@ -142,6 +142,11 @@ After a failed step, web requests wait five minutes before running it again and 
 meanwhile, so a broken upgrade is not re-run by every visitor. Once the cause is fixed, retry at
 once as the service account — `sudo -u "$SERVICE_USER" php scripts/migrate.php` — instead of
 waiting (exit 0: schema current and ready; 2: the migration failed again, see the journal).
+
+2.81.3 is a **code-only upgrade — the schema stays at 64.** Install the release's hash-locked
+requirements into the virtual environment (FastAPI 0.161.1, pycparser 3.12) and restart
+`filehost-upload` and `filehost-mail-worker`; the systemd unit templates are unchanged.
+From an earlier release, follow the notes below too.
 
 2.81.2 is a **code-only upgrade — the schema stays at 64.** Install the release's hash-locked
 requirements into the virtual environment (FastAPI 0.156.3, Starlette 1.9.0, Pillow 13.0.0) and
