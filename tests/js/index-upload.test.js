@@ -49,7 +49,7 @@ class FakeXhr {
 }
 FakeXhr.instances = [];
 
-function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, seedToken = null, captchaStub = null } = {}) {
+function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, seedToken = null, seedExpiresInMs = 3600000, captchaStub = null } = {}) {
 	FakeXhr.instances = [];
 	const document = createMiniDocument();
 	const config = {
@@ -71,7 +71,7 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, 
 	const storageBacking = new Map();
 	if (seedToken) {
 		storageBacking.set('uploadToken', seedToken);
-		storageBacking.set('uploadTokenExpiry', String(Date.now() + 3600000));
+		storageBacking.set('uploadTokenExpiry', String(Date.now() + seedExpiresInMs));
 	}
 	const sessionStore = {
 		getItem: key => (storageBacking.has(key) ? storageBacking.get(key) : null),
@@ -635,6 +635,74 @@ test('cancelling the verification drops the files waiting for it, and the next p
 	await flush();
 	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'the next pick asks again');
 	assert.equal(FakeXhr.instances.length, 0);
+});
+
+test('a session that runs out during a group does not open the dialog until the running uploads end', async () => {
+	const captured = {};
+	const captchaStub = {
+		configure() {}, isReady: () => false, reset() {},
+		load: callback => callback(),
+		render: (_id, handlers) => { captured.handlers = handlers; return 1; }
+	};
+	const page = loadIndex({
+		captcha: true,
+		seedToken: 'SEEDED',
+		captchaStub,
+		api: { token_info: validSession(), verify_captcha: async () => ({ success: true, token: 'SOLVED' }) }
+	});
+	await flush();
+	page.pickFiles('a.txt', 'b.txt');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 2);
+
+	await FakeXhr.instances[0].finish(403, '{"detail":"Invalid or missing upload token. Please verify reCAPTCHA."}');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false, 'no dialog while b.txt is still uploading');
+	assert.deepEqual(rowState(page.rows()[0]), { main: 'up.verify_expired', sub: 'up.verify_resume', retry: false, error: true });
+
+	await FakeXhr.instances[1].finish(200, 'fileid2:deletetoken2');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'the dialog opens once nothing is uploading');
+
+	await captured.handlers.callback('captcha-response');
+	await flush();
+	assert.equal(FakeXhr.instances.length, 3, 'the refused file went again after the captcha');
+	assert.equal(FakeXhr.instances[2].headers['X-Upload-Token'], 'SOLVED');
+});
+
+test('a session found expired after an upload is let go quietly; the next pick asks for the verification', async () => {
+	let checks = 0;
+	const captchaStub = { configure() {}, isReady: () => false, reset() {}, load: callback => callback(), render: () => 1 };
+	const page = loadIndex({
+		captcha: true,
+		seedToken: 'SEEDED',
+		captchaStub,
+		api: { token_info: () => (++checks === 1 ? { success: true, valid: true, expires_at: 4102444800 } : { success: false, valid: false }) }
+	});
+	await flush();
+	page.pickFiles('a.txt');
+	await flush();
+	await FakeXhr.instances[0].finish(200, 'fileid1:deletetoken1');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false, 'no dialog on its own');
+	assert.equal(page.sessionStore.getItem('uploadToken'), null, 'the spent session is let go');
+
+	page.pickFiles('b.txt');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'picking a file asks for it');
+	assert.equal(FakeXhr.instances.length, 1);
+});
+
+test('a session about to end asks for the verification before a new group, not in the middle of it', async () => {
+	const captchaStub = { configure() {}, isReady: () => false, reset() {}, load: callback => callback(), render: () => 1 };
+	const page = loadIndex({ captcha: true, seedToken: 'SEEDED', seedExpiresInMs: 10 * 60 * 1000, captchaStub, api: { token_info: validSession() } });
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false, 'nothing on arrival');
+
+	page.pickFiles('a.txt', 'b.txt');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'ten minutes left: verify first');
+	assert.equal(FakeXhr.instances.length, 0, 'the group waits for a fresh session');
 });
 
 test('a failed delete keeps the row, says so, and lets the user try again', async () => {

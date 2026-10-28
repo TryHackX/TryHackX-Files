@@ -47,6 +47,7 @@
 	let captchaEnabled = false;
 	let captchaSiteKey = '';
 	let captchaTokenLifetimeMs = 120 * 60 * 1000;
+	const SESSION_RENEW_MS = 15 * 60 * 1000;
 	let captchaWidgetId = null;
 	let filesUploaded = 0;
 	let filesLimit = 0;
@@ -281,6 +282,7 @@
 			if (data.success && data.token) {
 				persistToken(data.token);
 				document.getElementById('captchaOverlay').classList.remove('show');
+				captchaDeferred = false;
 				await updateSessionInfo();
 				waitingForCaptcha.splice(0).forEach(entry => startUpload(entry.id, entry.file));
 			} else {
@@ -335,13 +337,15 @@
 				if (typeof data.files_limit === 'number') showFilesCap(data.files_limit);
 				sessionView = { expiresAt: data.expires_at, uploaded: filesUploaded, limit: filesLimit };
 				renderSessionInfo();
-				if (filesLimit > 0 && filesLimit - filesUploaded <= 0) showCaptchaRequired();
+				if (filesLimit > 0 && filesLimit - filesUploaded <= 0) clearToken();
 			} else if (data.valid === false) {
 				// Only the server's explicit "this token is not valid" ends the session. A
 				// rate-limit (429) or error body carries no `valid` flag: that is "unknown", and
 				// clearing the token on it threw a working upload session — and its captcha
 				// solve — away mid-batch.
-				showCaptchaRequired();
+				clearToken();
+				sessionView = null;
+				renderSessionInfo();
 			}
 		} catch (e) {
 			console.log('Token info error:', e);
@@ -396,6 +400,13 @@
 		document.querySelectorAll('#limitFiles').forEach(el => { el.hidden = maxFiles === 0; });
 	}
 
+	function uploadsRunning() {
+		for (const entry of uploadQueue.values()) {
+			if (entry.status === 'uploading') return true;
+		}
+		return false;
+	}
+
 	/** Files picked on this page that have not finished (or failed) yet. */
 	function activeUploads() {
 		let n = 0;
@@ -446,6 +457,8 @@
 	}
 
 	function handleFiles(files) {
+		if (captchaEnabled && isTokenValid() && uploadTokenExpiry - Date.now() < Math.min(SESSION_RENEW_MS, captchaTokenLifetimeMs / 4)) clearToken();
+		let queued = 0;
 		Array.from(files).forEach(file => {
 			const id = 'f-' + Math.random().toString(36).substr(2, 9);
 			const ext = file.name.split('.').pop().toLowerCase();
@@ -478,8 +491,10 @@
 			}
 			uploadQueue.set(id, { file, status: 'pending' });
 			addFileItem(id, file.name, file.size, 'pending', msg('up.pending'), '');
+			queued += 1;
 			uploadFile(id, file);
 		});
+		if (queued && captchaEnabled && !isTokenValid()) showCaptchaRequired();
 	}
 
 	function renderFileActions(actions, id, includeRetry) {
@@ -705,8 +720,25 @@
 
 	// Uploads that had to wait for the captcha: resumed when it is solved.
 	const waitingForCaptcha = [];
+	let captchaDeferred = false;
+
+	function askForCaptcha() {
+		if (uploadsRunning()) {
+			captchaDeferred = true;
+			return;
+		}
+		captchaDeferred = false;
+		showCaptchaRequired();
+	}
+
+	function settleDeferredCaptcha() {
+		if (!captchaDeferred || uploadsRunning()) return;
+		captchaDeferred = false;
+		if (waitingForCaptcha.length) showCaptchaRequired();
+	}
 
 	document.getElementById('captchaCancel')?.addEventListener('click', () => {
+		captchaDeferred = false;
 		document.getElementById('captchaOverlay').classList.remove('show');
 		waitingForCaptcha.splice(0).forEach(entry => {
 			const item = document.getElementById(entry.id);
@@ -729,7 +761,7 @@
 		if (captchaEnabled) {
 			if (!isTokenValid() || (filesLimit > 0 && filesUploaded >= filesLimit)) {
 				if (!waitingForCaptcha.some(entry => entry.id === id)) waitingForCaptcha.push({ id, file });
-				showCaptchaRequired();
+				askForCaptcha();
 				return;
 			}
 		} else if (!isTokenValid() && !(await ensureTrackingToken())) {
@@ -808,7 +840,7 @@
 			if (entry) entry.status = 'waiting';
 			updateFileItem(id, 'error', msg(reason === 403 ? 'up.verify_expired' : 'up.session_limit'), msg('up.verify_resume'), 0);
 			if (!waitingForCaptcha.some(waiting => waiting.id === id)) waitingForCaptcha.push({ id, file });
-			showCaptchaRequired();
+			askForCaptcha();
 			return;
 		}
 		if (!renewedOnce.has(id)) {
@@ -893,6 +925,7 @@
 				queueEntry.status = 'error';
 				updateFileItem(id, failure.retry ? 'error-network' : 'error', failure.main, failure.sub, 0);
 			}
+			settleDeferredCaptcha();
 		};
 
 		xhr.onerror = () => {
@@ -903,6 +936,7 @@
 				updateFileItem(id, 'error-network', msg('up.net_error'), msg('up.click_retry'), 0);
 			}
 			queueEntry.status = 'error';
+			settleDeferredCaptcha();
 		};
 		xhr.onabort = () => {
 			stopPolling();
@@ -914,6 +948,7 @@
 				queueEntry.cancelledByAdmin ? msg('up.cancelled_admin_sub') : '',
 				0
 			);
+			settleDeferredCaptcha();
 		};
 
 		xhr.open('POST', uploadUrl, true);
