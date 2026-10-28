@@ -7,6 +7,20 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.5] - 2026-10-28
+
+### Changed
+
+- A group of uploads is no longer interrupted by the verification. With less than 15 minutes of the
+  upload session left (a quarter of a shorter one), picking files asks for the CAPTCHA first, so a new
+  group starts on a fresh session. A session that runs out meanwhile no longer opens the dialog by
+  itself: files already uploading finish, a file the server refused waits, and the dialog opens once
+  nothing is uploading any more — or at once when new files are picked.
+
+### Upgrade notes
+
+- No schema change and no new requirements. Restart `filehost-upload` so `/ready` reports the version.
+
 ## [2.81.4] - 2026-10-28
 
 ### Changed
