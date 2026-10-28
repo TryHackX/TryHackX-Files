@@ -61,7 +61,7 @@ function loadIndex({ loggedIn = true, captcha = false, api = {}, maxFiles = 15, 
 	const dropZone = document.add('div', 'dropZone');
 	const fileInput = document.add('input', 'fileInput');
 	document.add('span', 'browseBtn');
-	for (const id of ['fileList', 'sessionInfo', 'captchaOverlay', 'captchaLoading', 'captchaWidget', 'captchaError', 'results', 'resultList', 'copyAll', 'limitSize', 'limitFiles', 'limitCount']) {
+	for (const id of ['fileList', 'sessionInfo', 'captchaOverlay', 'captchaLoading', 'captchaWidget', 'captchaError', 'captchaCancel', 'results', 'resultList', 'copyAll', 'limitSize', 'limitFiles', 'limitCount']) {
 		document.add('div', id);
 	}
 
@@ -587,6 +587,54 @@ test('with a captcha a refused session waits for the verification and then resum
 	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false);
 	assert.equal(FakeXhr.instances.length, 2, 'the file went again after the captcha');
 	assert.equal(FakeXhr.instances[1].headers['X-Upload-Token'], 'SOLVED');
+});
+
+test('with a captcha the page opens without the verification: picking files asks for it, and they go once it is solved', async () => {
+	const captured = { loads: 0 };
+	const captchaStub = {
+		configure() {}, isReady: () => false, reset() {},
+		load: callback => { captured.loads += 1; callback(); },
+		render: (_id, handlers) => { captured.handlers = handlers; return 1; }
+	};
+	const page = loadIndex({
+		captcha: true,
+		captchaStub,
+		api: { token_info: validSession(), verify_captcha: async () => ({ success: true, token: 'SOLVED' }) }
+	});
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false, 'no dialog on arrival');
+	assert.equal(captured.loads, 0, 'the captcha script is not fetched before it is needed');
+
+	page.pickFiles('a.txt', 'b.txt');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'picking files asks for the verification');
+	assert.equal(page.rows().length, 2, 'the picked files are listed, not thrown away');
+	assert.equal(FakeXhr.instances.length, 0, 'nothing goes out before the verification');
+
+	await captured.handlers.callback('captcha-response');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false);
+	assert.equal(FakeXhr.instances.length, 2, 'both files went once it was solved');
+	assert.equal(FakeXhr.instances[0].headers['X-Upload-Token'], 'SOLVED');
+});
+
+test('cancelling the verification drops the files waiting for it, and the next pick asks again', async () => {
+	const captchaStub = { configure() {}, isReady: () => false, reset() {}, load: callback => callback(), render: () => 1 };
+	const page = loadIndex({ captcha: true, captchaStub, api: { token_info: validSession() } });
+	await flush();
+	page.pickFiles('c.txt');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true);
+
+	page.document.getElementById('captchaCancel').dispatchEvent({ type: 'click' });
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), false, 'the dialog closes');
+	assert.equal(FakeXhr.instances.length, 0, 'the waiting file is not sent');
+
+	page.pickFiles('d.txt');
+	await flush();
+	assert.equal(page.document.getElementById('captchaOverlay').classList.contains('show'), true, 'the next pick asks again');
+	assert.equal(FakeXhr.instances.length, 0);
 });
 
 test('a failed delete keeps the row, says so, and lets the user try again', async () => {

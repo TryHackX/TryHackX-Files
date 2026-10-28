@@ -222,28 +222,8 @@
 			}
 
 			if (captchaEnabled && captchaSiteKey) {
-				if (isTokenValid()) {
-					await updateSessionInfo();
-					return;
-				}
-				clearToken();
-				loadRecaptchaScript();
-				document.getElementById('captchaOverlay').classList.add('show');
-
-				setTimeout(() => {
-					const loading = document.getElementById('captchaLoading');
-					if (loading && loading.style.display !== 'none') {
-						const reload = makeNode('button', 'btn-link', t('up.reload'));
-						reload.type = 'button';
-						reload.addEventListener('click', () => window.location.reload());
-						loading.replaceChildren(
-							document.createTextNode(t('up.slow_loading') + ' '),
-							reload,
-							document.createTextNode(' ' + t('up.or_check_conn'))
-						);
-						loading.style.color = 'var(--danger)';
-					}
-				}, 10000);
+				if (isTokenValid()) await updateSessionInfo();
+				else clearToken();
 			} else {
 				// Captcha disabled: obtain a tracking token automatically.
 				await ensureTrackingToken();
@@ -256,6 +236,27 @@
 
 	function loadRecaptchaScript() {
 		FHCaptcha.load(onCaptchaLoad);
+	}
+
+	let slowCaptchaWatch = false;
+	function watchSlowCaptcha() {
+		if (slowCaptchaWatch) return;
+		slowCaptchaWatch = true;
+		setTimeout(() => {
+			slowCaptchaWatch = false;
+			const loading = document.getElementById('captchaLoading');
+			if (loading && loading.style.display !== 'none') {
+				const reload = makeNode('button', 'btn-link', t('up.reload'));
+				reload.type = 'button';
+				reload.addEventListener('click', () => window.location.reload());
+				loading.replaceChildren(
+					document.createTextNode(t('up.slow_loading') + ' '),
+					reload,
+					document.createTextNode(' ' + t('up.or_check_conn'))
+				);
+				loading.style.color = 'var(--danger)';
+			}
+		}, 10000);
 	}
 
 	const captchaHandlers = {
@@ -365,6 +366,7 @@
 			} else {
 				loadRecaptchaScript();
 				if (loading) loading.style.display = 'block';
+				watchSlowCaptcha();
 			}
 		}
 		document.getElementById('captchaOverlay').classList.add('show');
@@ -444,10 +446,6 @@
 	}
 
 	function handleFiles(files) {
-		if (captchaEnabled && !isTokenValid()) {
-			showCaptchaRequired();
-			return;
-		}
 		Array.from(files).forEach(file => {
 			const id = 'f-' + Math.random().toString(36).substr(2, 9);
 			const ext = file.name.split('.').pop().toLowerCase();
@@ -707,6 +705,15 @@
 
 	// Uploads that had to wait for the captcha: resumed when it is solved.
 	const waitingForCaptcha = [];
+
+	document.getElementById('captchaCancel')?.addEventListener('click', () => {
+		document.getElementById('captchaOverlay').classList.remove('show');
+		waitingForCaptcha.splice(0).forEach(entry => {
+			const item = document.getElementById(entry.id);
+			if (item) dropRow(entry.id, item);
+			else uploadQueue.delete(entry.id);
+		});
+	});
 
 	/**
 	 * Start (or retry) one upload — but only once the upload session is settled. Files picked

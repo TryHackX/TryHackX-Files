@@ -199,6 +199,9 @@ $homeNotice = [
 				<div class="captcha-widget" id="captchaWidget"></div>
 				<div class="captcha-error" id="captchaError" role="alert"><?= _h('captcha.failed') ?></div>
 				<div class="captcha-loading" id="captchaLoading"><?= _h('common.loading') ?></div>
+				<div class="captcha-actions">
+					<button class="btn" id="captchaCancel" type="button"><?= _h('common.cancel') ?></button>
+				</div>
 			</div>
 		</div>
 

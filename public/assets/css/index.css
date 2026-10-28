@@ -963,14 +963,16 @@
 
 /* Actions under the QR overlay. The collection-created view offers the same set as a
    collection row in My Files (open / copy / edit); the per-file view hides Edit. */
-.qr-actions {
+.qr-actions,
+.captcha-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	justify-content: center;
 	margin-top: 18px;
 }
-.qr-actions .btn {
+.qr-actions .btn,
+.captcha-actions .btn {
 	padding: 9px 16px;
 	font-size: 0.85rem;
 }
