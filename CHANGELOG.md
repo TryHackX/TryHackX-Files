@@ -7,6 +7,18 @@ Notable TryHackX Files changes are recorded here. The format follows
 Detailed pre-2.69 development notes were condensed when all public documentation was standardized
 in English for the first GitHub release.
 
+## [2.81.4] - 2026-10-28
+
+### Changed
+
+- The upload page no longer opens behind the verification dialog. The CAPTCHA is asked for when the
+  first files are picked or dropped: they are listed at once and go by themselves as soon as it is
+  solved, and the dialog's new Cancel drops them. The CAPTCHA script is fetched only then.
+
+### Upgrade notes
+
+- No schema change and no new requirements. Restart `filehost-upload` so `/ready` reports the version.
+
 ## [2.81.3] - 2026-10-28
 
 ### Changed
