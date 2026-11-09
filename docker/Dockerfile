@@ -8,7 +8,7 @@
 
 # PHP 8.5 on Debian 13 matches production (PHP 8.5, Python 3.13). The digest makes the build
 # reproducible; Dependabot's docker ecosystem refreshes tag and digest together.
-FROM php:8.5-apache-trixie@sha256:974e3a920309308e1690ed607e6cc3061d6906f90cc8d30fe519daa48bccf101
+FROM php:8.5-apache-trixie@sha256:08af36df144462d84c7f16190557eec06cb9f656882685610b712a15eec54d46
 
 # PYTHONUNBUFFERED: the upload server's print() warnings must reach `docker compose logs` at once.
 ENV DEBIAN_FRONTEND=noninteractive \
